@@ -1,0 +1,110 @@
+import { Telegraf } from 'telegraf';
+import { botState } from '../core/state.js';
+import { queries } from '../data/db.js';
+import { logger } from '../core/logger.js';
+import { config } from '../config.js';
+import type { TradingEngine } from '../trading/engine.js';
+
+export function startTelegramBot(engine: TradingEngine): void {
+  if (!config.TELEGRAM_BOT_TOKEN) {
+    logger.warn('TELEGRAM_BOT_TOKEN not set — Telegram bot disabled');
+    return;
+  }
+
+  const bot = new Telegraf(config.TELEGRAM_BOT_TOKEN);
+  const allowed = config.TELEGRAM_ALLOWED_CHAT_IDS ?? [];
+
+  const guard = (ctx: any, next: () => Promise<void>) => {
+    if (allowed.length > 0 && !allowed.includes(ctx.chat?.id)) {
+      logger.warn(`Blocked unauthorised Telegram chat: ${ctx.chat?.id}`);
+      return;
+    }
+    return next();
+  };
+
+  bot.use(guard);
+
+  bot.command('status', ctx => {
+    const price = botState.lastPrice?.toFixed(2) ?? 'unknown';
+    const balance = botState.lastBalance?.toFixed(6) ?? 'unknown';
+    const portfolioUsd = botState.lastPrice && botState.lastBalance
+      ? (botState.lastPrice * botState.lastBalance).toFixed(2)
+      : 'unknown';
+
+    ctx.reply(
+      `*Bot Status*\n` +
+      `Status: ${botState.status}\n` +
+      `ETH price: $${price}\n` +
+      `Balance: ${balance} ETH\n` +
+      `Portfolio: $${portfolioUsd}\n` +
+      `Dry run: ${config.DRY_RUN ? 'yes' : 'no'}`,
+      { parse_mode: 'Markdown' }
+    );
+  });
+
+  bot.command('pause', ctx => {
+    botState.setStatus('paused');
+    queries.insertEvent.run('pause', `Paused by Telegram user ${ctx.from?.username}`);
+    ctx.reply('Bot paused. No trades will execute until resumed.');
+  });
+
+  bot.command('resume', ctx => {
+    botState.setStatus('running');
+    queries.insertEvent.run('resume', `Resumed by Telegram user ${ctx.from?.username}`);
+    ctx.reply('Bot resumed. Autonomous trading active.');
+  });
+
+  bot.command('trades', ctx => {
+    const trades = queries.recentTrades.all(5) as any[];
+    if (trades.length === 0) return ctx.reply('No trades yet.');
+
+    const lines = trades.map(t =>
+      `${t.timestamp} ${t.action.toUpperCase()} ${t.amount_eth} ETH @ $${t.price_usd}${t.dry_run ? ' [DRY]' : ''}`
+    );
+    ctx.reply('*Recent trades:*\n' + lines.join('\n'), { parse_mode: 'Markdown' });
+  });
+
+  bot.command('buy', async ctx => {
+    ctx.reply('Executing manual BUY...');
+    await engine.manualTrade('buy');
+  });
+
+  bot.command('sell', async ctx => {
+    ctx.reply('Executing manual SELL...');
+    await engine.manualTrade('sell');
+  });
+
+  bot.command('help', ctx => {
+    ctx.reply(
+      '/status — portfolio + bot status\n' +
+      '/pause — pause autonomous trading\n' +
+      '/resume — resume autonomous trading\n' +
+      '/trades — last 5 trades\n' +
+      '/buy — manual buy\n' +
+      '/sell — manual sell'
+    );
+  });
+
+  // Push trade notifications
+  botState.onTrade(async notification => {
+    for (const chatId of allowed) {
+      const emoji = notification.action === 'buy' ? '🟢' : '🔴';
+      const dryTag = notification.dryRun ? ' [DRY RUN]' : '';
+      await bot.telegram.sendMessage(
+        chatId,
+        `${emoji} *${notification.action.toUpperCase()}${dryTag}*\n` +
+        `Amount: ${notification.amountEth.toFixed(6)} ETH\n` +
+        `Price: $${notification.priceUsd.toFixed(2)}\n` +
+        `Reason: ${notification.reason}` +
+        (notification.txHash ? `\nTx: \`${notification.txHash}\`` : ''),
+        { parse_mode: 'Markdown' }
+      );
+    }
+  });
+
+  bot.launch();
+  logger.info('Telegram bot started');
+
+  process.once('SIGINT', () => bot.stop('SIGINT'));
+  process.once('SIGTERM', () => bot.stop('SIGTERM'));
+}
