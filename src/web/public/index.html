@@ -1,13 +1,17 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Trade Bot</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpolyline points='2,24 9,16 15,20 21,10 28,6' fill='none' stroke='%23c8901e' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cline x1='2' y1='28' x2='30' y2='28' stroke='%23c8901e' stroke-width='1.5' stroke-linecap='round' opacity='0.45'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <!-- Apply stored theme before first paint to avoid flash -->
+  <script>document.documentElement.dataset.theme = localStorage.getItem('cb-theme') || 'dark';</script>
   <style>
+    /* ── Dark theme (default) ─────────────────────────────────────────────────── */
     :root {
       --bg:         #07080c;
       --surface:    #0c0e18;
@@ -26,6 +30,44 @@
       --text:       #c8cad8;
       --text-2:     #4a5068;
       --text-3:     #22263a;
+      --chart-grid: #181c2c;
+      --chart-tick: #4a5068;
+      --dot-color:  rgba(40,46,72,0.45);
+      --scanline:   rgba(0,0,0,0.06);
+    }
+
+    /* ── Light theme ─────────────────────────────────────────────────────────── */
+    [data-theme="light"] {
+      --bg:         #f4f1ea;
+      --surface:    #ece8df;
+      --surface-2:  #e3dfd4;
+      --border:     #cdc7b6;
+      --border-hi:  #b4ad9a;
+      --accent:     #b87218;
+      --accent-lo:  rgba(184,114,24,0.10);
+      --green:      #1a9456;
+      --green-lo:   rgba(26,148,86,0.08);
+      --red:        #bf2843;
+      --red-lo:     rgba(191,40,67,0.10);
+      --blue:       #1f6ac4;
+      --blue-lo:    rgba(31,106,196,0.10);
+      --amber:      #a86c14;
+      --text:       #1c1810;
+      --text-2:     #726550;
+      --text-3:     #b8b0a0;
+      --chart-grid: #cdc7b6;
+      --chart-tick: #726550;
+      --dot-color:  rgba(150,138,118,0.30);
+      --scanline:   rgba(0,0,0,0.012);
+    }
+
+    /* ── Transitions ─────────────────────────────────────────────────────────── */
+    body,
+    .card, .chart-card,
+    table, th, td,
+    header, .section-title::after,
+    button, .net-btn {
+      transition: background-color 0.18s ease, border-color 0.18s ease, color 0.18s ease;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -33,7 +75,7 @@
     body {
       font-family: 'Barlow Condensed', sans-serif;
       background-color: var(--bg);
-      background-image: radial-gradient(rgba(40,46,72,0.45) 1px, transparent 1px);
+      background-image: radial-gradient(var(--dot-color) 1px, transparent 1px);
       background-size: 22px 22px;
       color: var(--text);
       padding: 1.25rem;
@@ -49,8 +91,8 @@
         0deg,
         transparent,
         transparent 3px,
-        rgba(0,0,0,0.06) 3px,
-        rgba(0,0,0,0.06) 4px
+        var(--scanline) 3px,
+        var(--scanline) 4px
       );
       pointer-events: none;
       z-index: 9999;
@@ -106,7 +148,6 @@
       letter-spacing: 0.08em;
       text-transform: uppercase;
       cursor: pointer;
-      transition: all 0.12s;
     }
     .net-btn.active {
       background: var(--accent-lo);
@@ -121,6 +162,24 @@
     .net-btn:hover:not(.active) {
       border-color: var(--text-2);
       color: var(--text);
+    }
+
+    /* Theme toggle button */
+    .btn-theme {
+      padding: 0.22rem 0.8rem;
+      border: 1px solid var(--border-hi);
+      background: transparent;
+      color: var(--text-2);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .btn-theme:hover {
+      border-color: var(--accent);
+      color: var(--accent);
     }
 
     #lastUpdate {
@@ -143,7 +202,6 @@
       background: var(--surface);
       border: 1px solid var(--border);
       padding: 0.85rem 1rem 0.8rem;
-      transition: border-color 0.15s;
     }
     /* corner brackets appear on hover */
     .card::before, .card::after {
@@ -223,7 +281,6 @@
       border: 1px solid;
       background: transparent;
       cursor: pointer;
-      transition: background 0.12s, color 0.12s;
     }
     .btn-pause  { border-color: var(--amber); color: var(--amber); }
     .btn-resume { border-color: var(--green); color: var(--green); }
@@ -311,7 +368,6 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.78rem;
       border-top: 1px solid var(--border);
-      transition: background 0.1s;
     }
     tr:hover td { background: var(--surface-2); }
 
@@ -346,6 +402,7 @@
     <div class="title">Trade Bot<span class="title-sub">/ autonomous</span></div>
     <div class="header-right">
       <div class="network-selector" id="networkSelector"></div>
+      <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
       <div id="lastUpdate">—</div>
     </div>
   </header>
@@ -407,6 +464,38 @@
     let priceChart, portfolioChart;
     let availableNetworks = [], activeNetwork = '';
 
+    // ── Theme ─────────────────────────────────────────────────────────────────
+    function getChartColors() {
+      const s = getComputedStyle(document.documentElement);
+      return {
+        grid: s.getPropertyValue('--chart-grid').trim(),
+        ticks: s.getPropertyValue('--chart-tick').trim(),
+      };
+    }
+
+    function applyTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      document.getElementById('themeToggle').textContent = theme === 'dark' ? 'Light' : 'Dark';
+      localStorage.setItem('cb-theme', theme);
+      const c = getChartColors();
+      [priceChart, portfolioChart].forEach(chart => {
+        if (!chart) return;
+        chart.options.scales.y.ticks.color = c.ticks;
+        chart.options.scales.y.grid.color = c.grid;
+        chart.update('none');
+      });
+    }
+
+    function toggleTheme() {
+      applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
+    }
+
+    // Sync button label to current theme (set in <head> script)
+    document.addEventListener('DOMContentLoaded', () => {
+      const stored = localStorage.getItem('cb-theme') || 'dark';
+      document.getElementById('themeToggle').textContent = stored === 'dark' ? 'Light' : 'Dark';
+    });
+
     // ── Network selector ──────────────────────────────────────────────────────
     function renderNetworkSelector() {
       const el = document.getElementById('networkSelector');
@@ -434,7 +523,6 @@
     async function loadStatus() {
       const s = await fetch('/api/status').then(r => r.json());
 
-      // Sync network state
       if (s.availableNetworks?.length) {
         availableNetworks = s.availableNetworks;
         activeNetwork = s.activeNetwork;
@@ -457,25 +545,28 @@
     }
 
     // ── Charts ────────────────────────────────────────────────────────────────
-    const chartDefaults = {
-      responsive: true,
-      maintainAspectRatio: false,
-      scales: {
-        x: { display: false },
-        y: {
-          ticks: { color: '#4a5068', font: { size: 10, family: "'JetBrains Mono', monospace" } },
-          grid: { color: '#181c2c' },
-        }
-      },
-      plugins: { legend: { display: false } },
-      animation: false,
-    };
+    function makeChartOptions() {
+      const c = getChartColors();
+      return {
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+          x: { display: false },
+          y: {
+            ticks: { color: c.ticks, font: { size: 10, family: "'JetBrains Mono', monospace" } },
+            grid: { color: c.grid },
+          }
+        },
+        plugins: { legend: { display: false } },
+        animation: false,
+      };
+    }
 
     function makeChart(id, color, bg) {
       return new Chart(document.getElementById(id), {
         type: 'line',
         data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: bg }] },
-        options: chartDefaults,
+        options: makeChartOptions(),
       });
     }
 
@@ -505,14 +596,16 @@
         tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No trades recorded</td></tr>';
         return;
       }
+      const isMainnet = activeNetwork?.includes('mainnet');
+      const scanBase = isMainnet ? 'https://basescan.org' : 'https://sepolia.basescan.org';
       tbody.innerHTML = trades.map(t => `
         <tr>
-          <td style="white-space:nowrap;color:#4a5068">${new Date(t.timestamp).toLocaleString()}</td>
+          <td style="white-space:nowrap;color:var(--text-2)">${new Date(t.timestamp).toLocaleString()}</td>
           <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.4;font-weight:400;font-size:0.7rem;font-family:inherit">[dry]</span>' : ''}</td>
           <td>${parseFloat(t.amount_eth).toFixed(6)} ETH</td>
           <td>$${parseFloat(t.price_usd).toFixed(2)}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4a5068;font-family:'Barlow Condensed',sans-serif;font-size:0.82rem;letter-spacing:0.03em">${t.reason ?? ''}</td>
-          <td style="font-size:0.65rem;opacity:.5">${t.tx_hash ? `<a href="https://basescan.org/tx/${t.tx_hash}" target="_blank" style="color:#c8901e;text-decoration:none">${t.tx_hash.slice(0,10)}…</a>` : '—'}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-family:'Barlow Condensed',sans-serif;font-size:0.82rem;letter-spacing:0.03em">${t.reason ?? ''}</td>
+          <td style="font-size:0.65rem;opacity:.5">${t.tx_hash ? `<a href="${scanBase}/tx/${t.tx_hash}" target="_blank" style="color:var(--accent);text-decoration:none">${t.tx_hash.slice(0,10)}\u2026</a>` : '—'}</td>
         </tr>
       `).join('');
     }
