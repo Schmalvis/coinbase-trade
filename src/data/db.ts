@@ -39,6 +39,12 @@ db.exec(`
     event     TEXT NOT NULL,
     detail    TEXT
   );
+
+  CREATE TABLE IF NOT EXISTS settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 export const queries: Record<string, Statement> = {
@@ -63,4 +69,13 @@ export const queries: Record<string, Statement> = {
   insertEvent: db.prepare(`
     INSERT INTO bot_events (event, detail) VALUES (?, ?)
   `),
+};
+
+export const settingQueries = {
+  getSetting:    db.prepare('SELECT value FROM settings WHERE key = ?') as Statement<[string], { value: string }>,
+  upsertSetting: db.prepare(`
+    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `) as Statement<[string, string]>,
+  getAllSettings: db.prepare('SELECT key, value FROM settings') as Statement<[], { key: string; value: string }>,
 };
