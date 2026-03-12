@@ -324,6 +324,188 @@
     .btn-faucet:hover { border-color: var(--text); color: var(--text); }
     .btn-faucet:disabled { opacity: 0.4; cursor: not-allowed; }
 
+    /* ── Modals ──────────────────────────────────────────────────────────────── */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border-hi);
+      padding: 1.5rem;
+      min-width: 320px;
+      max-width: 480px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      position: relative;
+    }
+    .modal-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1.25rem;
+    }
+    .modal-close {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: transparent;
+      border: none;
+      color: var(--text-2);
+      cursor: pointer;
+      font-size: 1rem;
+      padding: 0;
+      letter-spacing: 0;
+    }
+    .modal-close:hover { color: var(--text); }
+
+    /* Tabs */
+    .modal-tabs {
+      display: flex;
+      gap: 0;
+      margin-bottom: 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-tab {
+      padding: 0.35rem 1rem;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-2);
+      cursor: pointer;
+      margin-bottom: -1px;
+    }
+    .modal-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    /* Form fields */
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+    .field label {
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-2);
+    }
+    .field input[type="number"], .field input[type="text"] {
+      background: var(--surface-2);
+      border: 1px solid var(--border-hi);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.82rem;
+      padding: 0.35rem 0.6rem;
+      width: 100%;
+    }
+    .field input:focus { outline: none; border-color: var(--accent); }
+    .field .field-error {
+      font-size: 0.6rem;
+      color: var(--red);
+      letter-spacing: 0.04em;
+    }
+
+    /* Strategy pill selector */
+    .pill-group { display: flex; gap: 0.35rem; }
+    .pill {
+      padding: 0.3rem 1rem;
+      border: 1px solid var(--border-hi);
+      background: transparent;
+      color: var(--text-2);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .pill.active {
+      background: var(--accent-lo);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* Dry run toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.5rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .toggle-label {
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--text);
+    }
+    .toggle-switch {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      cursor: pointer;
+    }
+    .toggle-switch input { opacity: 0; width: 0; height: 0; }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--border-hi);
+      transition: background 0.15s;
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--amber); }
+    .toggle-thumb {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      top: 3px;
+      left: 3px;
+      background: var(--bg);
+      transition: transform 0.15s;
+    }
+    .toggle-switch input:checked ~ .toggle-thumb { transform: translateX(16px); }
+
+    /* Modal footer */
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.5rem;
+      margin-top: 1.25rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .btn-save {
+      border-color: var(--accent);
+      color: var(--accent);
+      padding: 0.42rem 1.5rem;
+    }
+    .btn-save:hover { background: var(--accent-lo); }
+    .btn-cancel { border-color: var(--border-hi); color: var(--text-2); }
+    .btn-cancel:hover { border-color: var(--text-2); color: var(--text); }
+
     /* ── Charts ──────────────────────────────────────────────────────────────── */
     .charts {
       display: grid;
@@ -434,6 +616,7 @@
     <div class="title">Trade Bot<span class="title-sub">/ autonomous</span></div>
     <div class="header-right">
       <div class="network-selector" id="networkSelector"></div>
+      <button class="btn-theme" id="settingsBtn" onclick="openSettings()">Settings</button>
       <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
       <div id="lastUpdate">—</div>
     </div>
@@ -737,8 +920,242 @@
         activeNetwork?.includes('mainnet') ? 'none' : 'inline-block';
     }
 
+    // ── Settings modal ────────────────────────────────────────────────────────
+    let settingsCache = {};
+    let selectedStrategy = 'threshold';
+
+    function openSettings() {
+      fetch('/api/settings').then(r => r.json()).then(s => {
+        settingsCache = s;
+        selectedStrategy = s.STRATEGY || 'threshold';
+
+        // Populate fields
+        document.getElementById('cfgDropPct').value    = s.PRICE_DROP_THRESHOLD_PCT;
+        document.getElementById('cfgRisePct').value    = s.PRICE_RISE_TARGET_PCT;
+        document.getElementById('cfgSmaShort').value   = s.SMA_SHORT_WINDOW;
+        document.getElementById('cfgSmaLong').value    = s.SMA_LONG_WINDOW;
+        document.getElementById('cfgDryRun').checked   = !!s.DRY_RUN;
+        document.getElementById('cfgMaxEth').value     = s.MAX_TRADE_SIZE_ETH;
+        document.getElementById('cfgMaxUsdc').value    = s.MAX_TRADE_SIZE_USDC;
+        document.getElementById('cfgCooldown').value   = s.TRADE_COOLDOWN_SECONDS;
+        document.getElementById('cfgPollInterval').value  = s.POLL_INTERVAL_SECONDS;
+        document.getElementById('cfgTradeInterval').value = s.TRADE_INTERVAL_SECONDS;
+
+        selectStrategy(selectedStrategy);
+        switchTab('strategy');
+        clearSettingsErrors();
+        document.getElementById('settingsModal').style.display = 'flex';
+      });
+    }
+
+    function selectStrategy(s) {
+      selectedStrategy = s;
+      document.getElementById('pillThreshold').classList.toggle('active', s === 'threshold');
+      document.getElementById('pillSma').classList.toggle('active', s === 'sma');
+      document.getElementById('thresholdParams').style.display = s === 'threshold' ? '' : 'none';
+      document.getElementById('smaParams').style.display       = s === 'sma'       ? '' : 'none';
+    }
+
+    function switchTab(tab) {
+      document.getElementById('tabStrategy').style.display = tab === 'strategy' ? '' : 'none';
+      document.getElementById('tabTrading').style.display  = tab === 'trading'  ? '' : 'none';
+      document.getElementById('tabStrategyBtn').classList.toggle('active', tab === 'strategy');
+      document.getElementById('tabTradingBtn').classList.toggle('active',  tab === 'trading');
+    }
+
+    function clearSettingsErrors() {
+      ['errDropPct','errRisePct','errSmaShort','errSmaLong','errMaxEth','errMaxUsdc','errCooldown','errPollInterval','errTradeInterval']
+        .forEach(id => { document.getElementById(id).textContent = ''; });
+    }
+
+    async function saveSettings() {
+      clearSettingsErrors();
+      const btn = document.getElementById('saveSettingsBtn');
+      btn.disabled = true;
+      btn.textContent = 'Saving…';
+
+      const changes = {
+        STRATEGY:              selectedStrategy,
+        PRICE_DROP_THRESHOLD_PCT: parseFloat(document.getElementById('cfgDropPct').value),
+        PRICE_RISE_TARGET_PCT:    parseFloat(document.getElementById('cfgRisePct').value),
+        SMA_SHORT_WINDOW:         parseInt(document.getElementById('cfgSmaShort').value),
+        SMA_LONG_WINDOW:          parseInt(document.getElementById('cfgSmaLong').value),
+        DRY_RUN:               document.getElementById('cfgDryRun').checked,
+        MAX_TRADE_SIZE_ETH:    parseFloat(document.getElementById('cfgMaxEth').value),
+        MAX_TRADE_SIZE_USDC:   parseFloat(document.getElementById('cfgMaxUsdc').value),
+        TRADE_COOLDOWN_SECONDS: parseInt(document.getElementById('cfgCooldown').value),
+        POLL_INTERVAL_SECONDS:  parseInt(document.getElementById('cfgPollInterval').value),
+        TRADE_INTERVAL_SECONDS: parseInt(document.getElementById('cfgTradeInterval').value),
+      };
+
+      try {
+        const r = await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ changes }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          closeModal('settingsModal');
+          await loadStatus();
+        } else {
+          showSettingsError(data.field, data.error);
+        }
+      } catch (e) {
+        alert('Save failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+      }
+    }
+
+    function showSettingsError(field, msg) {
+      const fieldToErr = {
+        PRICE_DROP_THRESHOLD_PCT: 'errDropPct',
+        PRICE_RISE_TARGET_PCT:    'errRisePct',
+        SMA_SHORT_WINDOW:         'errSmaShort',
+        SMA_LONG_WINDOW:          'errSmaLong',
+        MAX_TRADE_SIZE_ETH:       'errMaxEth',
+        MAX_TRADE_SIZE_USDC:      'errMaxUsdc',
+        TRADE_COOLDOWN_SECONDS:   'errCooldown',
+        POLL_INTERVAL_SECONDS:    'errPollInterval',
+        TRADE_INTERVAL_SECONDS:   'errTradeInterval',
+      };
+      const errId = fieldToErr[field];
+      if (errId) document.getElementById(errId).textContent = msg;
+      else alert(msg);
+    }
+
+    // ── Settings modal close with dirty-check ────────────────────────────────
+    function isSettingsDirty() {
+      if (!settingsCache || !Object.keys(settingsCache).length) return false;
+      return selectedStrategy                                  !== settingsCache.STRATEGY
+        || parseFloat(document.getElementById('cfgDropPct').value)    !== settingsCache.PRICE_DROP_THRESHOLD_PCT
+        || parseFloat(document.getElementById('cfgRisePct').value)    !== settingsCache.PRICE_RISE_TARGET_PCT
+        || parseInt(document.getElementById('cfgSmaShort').value)     !== settingsCache.SMA_SHORT_WINDOW
+        || parseInt(document.getElementById('cfgSmaLong').value)      !== settingsCache.SMA_LONG_WINDOW
+        || document.getElementById('cfgDryRun').checked               !== !!settingsCache.DRY_RUN
+        || parseFloat(document.getElementById('cfgMaxEth').value)     !== settingsCache.MAX_TRADE_SIZE_ETH
+        || parseFloat(document.getElementById('cfgMaxUsdc').value)    !== settingsCache.MAX_TRADE_SIZE_USDC
+        || parseInt(document.getElementById('cfgCooldown').value)     !== settingsCache.TRADE_COOLDOWN_SECONDS
+        || parseInt(document.getElementById('cfgPollInterval').value) !== settingsCache.POLL_INTERVAL_SECONDS
+        || parseInt(document.getElementById('cfgTradeInterval').value)!== settingsCache.TRADE_INTERVAL_SECONDS;
+    }
+    function closeSettingsModal() {
+      if (isSettingsDirty() && !confirm('Discard unsaved changes?')) return;
+      closeModal('settingsModal');
+    }
+    function closeSettingsOnBackdrop(event) {
+      if (event.target === document.getElementById('settingsModal')) closeSettingsModal();
+    }
+
+    // ── Modal utilities ───────────────────────────────────────────────────────
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+    function closeOnBackdrop(event, id) {
+      if (event.target === document.getElementById(id)) closeModal(id);
+    }
+
     refresh();
     setInterval(refresh, 10000);
   </script>
+<!-- Settings Modal -->
+<div class="modal-backdrop" id="settingsModal" style="display:none" onclick="closeSettingsOnBackdrop(event)">
+  <div class="modal">
+    <div class="modal-title">Settings</div>
+    <button class="modal-close" onclick="closeSettingsModal()">✕</button>
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" id="tabStrategyBtn" onclick="switchTab('strategy')">Strategy</button>
+      <button class="modal-tab" id="tabTradingBtn" onclick="switchTab('trading')">Trading</button>
+    </div>
+
+    <!-- Strategy tab -->
+    <div id="tabStrategy">
+      <div class="field-group">
+        <div class="field">
+          <label>Strategy</label>
+          <div class="pill-group">
+            <button class="pill" id="pillThreshold" onclick="selectStrategy('threshold')">Threshold</button>
+            <button class="pill" id="pillSma" onclick="selectStrategy('sma')">SMA</button>
+          </div>
+        </div>
+        <div id="thresholdParams">
+          <div class="field-group">
+            <div class="field">
+              <label>Buy trigger — price drop %</label>
+              <input type="number" id="cfgDropPct" min="0.1" max="50" step="0.1">
+              <span class="field-error" id="errDropPct"></span>
+            </div>
+            <div class="field">
+              <label>Sell trigger — price rise %</label>
+              <input type="number" id="cfgRisePct" min="0.1" max="100" step="0.1">
+              <span class="field-error" id="errRisePct"></span>
+            </div>
+          </div>
+        </div>
+        <div id="smaParams" style="display:none">
+          <div class="field-group">
+            <div class="field">
+              <label>Short window (snapshots)</label>
+              <input type="number" id="cfgSmaShort" min="2" step="1">
+              <span class="field-error" id="errSmaShort"></span>
+            </div>
+            <div class="field">
+              <label>Long window (snapshots)</label>
+              <input type="number" id="cfgSmaLong" min="3" step="1">
+              <span class="field-error" id="errSmaLong"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trading tab -->
+    <div id="tabTrading" style="display:none">
+      <div class="field-group">
+        <div class="toggle-row">
+          <span class="toggle-label">Dry Run</span>
+          <label class="toggle-switch">
+            <input type="checkbox" id="cfgDryRun">
+            <span class="toggle-track"></span>
+            <span class="toggle-thumb"></span>
+          </label>
+        </div>
+        <div class="field">
+          <label>Max trade size — ETH</label>
+          <input type="number" id="cfgMaxEth" min="0.0001" step="0.0001">
+          <span class="field-error" id="errMaxEth"></span>
+        </div>
+        <div class="field">
+          <label>Max trade size — USDC</label>
+          <input type="number" id="cfgMaxUsdc" min="0.01" step="0.01">
+          <span class="field-error" id="errMaxUsdc"></span>
+        </div>
+        <div class="field">
+          <label>Cooldown (seconds)</label>
+          <input type="number" id="cfgCooldown" min="0" step="1">
+          <span class="field-error" id="errCooldown"></span>
+        </div>
+        <div class="field">
+          <label>Poll interval (seconds)</label>
+          <input type="number" id="cfgPollInterval" min="5" step="1">
+          <span class="field-error" id="errPollInterval"></span>
+        </div>
+        <div class="field">
+          <label>Trade interval (seconds)</label>
+          <input type="number" id="cfgTradeInterval" min="5" step="1">
+          <span class="field-error" id="errTradeInterval"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeSettingsModal()">Cancel</button>
+      <button class="btn-save" id="saveSettingsBtn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
