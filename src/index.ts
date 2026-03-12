@@ -12,10 +12,7 @@ import { config, availableNetworks } from './config.js';
 async function main() {
   logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${config.STRATEGY} | Dry run: ${config.DRY_RUN}`);
-  logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${availableNetworks[0]})`);
-
-  // Initialise network state before connecting MCP
-  botState.initNetworks(availableNetworks, availableNetworks[0]);
+  logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
 
   const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork);
   await mcp.connect();

@@ -1,3 +1,5 @@
+import { availableNetworks } from '../config.js';
+
 export type BotStatus = 'running' | 'paused' | 'stopped';
 
 export interface TradeNotification {
@@ -16,8 +18,7 @@ class BotState {
   private _lastBalance: number | null = null;
   private _lastUsdcBalance: number | null = null;
   private _lastTradeAt: Date | null = null;
-  private _activeNetwork: string = 'base-sepolia';
-  private _availableNetworks: string[] = ['base-sepolia'];
+  private _activeNetwork: string = availableNetworks[0];
 
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
   private statusListeners: ((s: BotStatus) => void)[] = [];
@@ -29,20 +30,16 @@ class BotState {
   get lastUsdcBalance() { return this._lastUsdcBalance; }
   get lastTradeAt() { return this._lastTradeAt; }
   get activeNetwork() { return this._activeNetwork; }
-  get availableNetworks() { return this._availableNetworks; }
+  get availableNetworks() { return availableNetworks; }
   get isPaused() { return this._status !== 'running'; }
 
-  initNetworks(available: string[], active: string) {
-    this._availableNetworks = available;
-    this._activeNetwork = active;
-  }
-
   setNetwork(network: string) {
-    if (!this._availableNetworks.includes(network)) {
-      throw new Error(`Network "${network}" not available. Options: ${this._availableNetworks.join(', ')}`);
+    if (!availableNetworks.includes(network)) {
+      throw new Error(`Network "${network}" not available. Options: ${availableNetworks.join(', ')}`);
     }
     this._activeNetwork = network;
-    // Clear stale balances so UI doesn't show data from the previous network
+    // Clear all stale data so UI and strategy don't use values from the previous network
+    this._lastPrice = null;
     this._lastBalance = null;
     this._lastUsdcBalance = null;
     this.networkListeners.forEach(l => l(network));

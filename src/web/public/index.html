@@ -3,69 +3,347 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Coinbase Trade Bot</title>
+  <title>Trade Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Barlow+Condensed:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; padding: 1.25rem; }
-
-    /* ── Header ── */
-    header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; }
-    .title { font-size: 1.1rem; font-weight: 700; color: #90cdf4; }
-    .header-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-    .network-selector { display: flex; gap: 0.4rem; }
-    .net-btn {
-      padding: 0.3rem 0.85rem; border-radius: 999px; border: 1px solid #4a5568;
-      background: transparent; color: #a0aec0; font-size: 0.78rem; cursor: pointer;
-      transition: all 0.15s;
+    :root {
+      --bg:         #07080c;
+      --surface:    #0c0e18;
+      --surface-2:  #10121e;
+      --border:     #181c2c;
+      --border-hi:  #222638;
+      --accent:     #c8901e;
+      --accent-lo:  rgba(200,144,30,0.10);
+      --green:      #29c880;
+      --green-lo:   rgba(41,200,128,0.08);
+      --red:        #d43c58;
+      --red-lo:     rgba(212,60,88,0.10);
+      --blue:       #4a9eff;
+      --blue-lo:    rgba(74,158,255,0.10);
+      --amber:      #d4882a;
+      --text:       #c8cad8;
+      --text-2:     #4a5068;
+      --text-3:     #22263a;
     }
-    .net-btn.active { background: #2b6cb0; border-color: #63b3ed; color: #fff; }
-    .net-btn:hover:not(.active) { border-color: #90cdf4; color: #e2e8f0; }
-    .net-btn.mainnet.active { background: #276749; border-color: #68d391; }
-    #lastUpdate { font-size: 0.72rem; color: #4a5568; }
 
-    /* ── Stat cards ── */
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
-    .card { background: #1a1f2e; border-radius: 8px; padding: 0.9rem 1rem; }
-    .card .label { font-size: 0.7rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
-    .card .value { font-size: 1.35rem; font-weight: 700; }
-    .card .sub { font-size: 0.72rem; color: #718096; margin-top: 0.15rem; }
-    .status-running { color: #68d391; }
-    .status-paused  { color: #f6ad55; }
-    .status-stopped { color: #fc8181; }
-    .dry-badge { display: inline-block; background: #744210; color: #fbd38d; font-size: 0.6rem; padding: 1px 5px; border-radius: 999px; margin-left: 0.4rem; vertical-align: middle; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    /* ── Controls ── */
-    .controls { display: flex; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; }
-    button { padding: 0.45rem 1.1rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: opacity 0.15s; }
-    button:hover { opacity: 0.85; }
-    .btn-pause  { background: #f6ad55; color: #1a1f2e; }
-    .btn-resume { background: #68d391; color: #1a1f2e; }
-    .btn-buy    { background: #2b6cb0; color: #fff; }
-    .btn-sell   { background: #9b2c2c; color: #fff; }
+    body {
+      font-family: 'Barlow Condensed', sans-serif;
+      background-color: var(--bg);
+      background-image: radial-gradient(rgba(40,46,72,0.45) 1px, transparent 1px);
+      background-size: 22px 22px;
+      color: var(--text);
+      padding: 1.25rem;
+      min-height: 100vh;
+    }
 
-    /* ── Charts ── */
-    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
-    @media (max-width: 640px) { .charts { grid-template-columns: 1fr; } }
-    .chart-card { background: #1a1f2e; border-radius: 8px; padding: 0.9rem; }
-    .chart-title { font-size: 0.72rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
-    .chart-wrap { height: 180px; position: relative; }
+    /* scanline overlay */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 3px,
+        rgba(0,0,0,0.06) 3px,
+        rgba(0,0,0,0.06) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
 
-    /* ── Trades table ── */
-    .section-title { font-size: 0.72rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    /* ── Header ─────────────────────────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+      padding-bottom: 0.85rem;
+      border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+    header::after {
+      content: '';
+      position: absolute;
+      bottom: -1px; left: 0;
+      width: 80px;
+      height: 1px;
+      background: var(--accent);
+    }
+
+    .title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      letter-spacing: 0.2em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .title-sub {
+      color: var(--text-2);
+      font-weight: 400;
+      margin-left: 0.6rem;
+      letter-spacing: 0.08em;
+      font-size: 0.85rem;
+    }
+
+    .header-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .network-selector { display: flex; gap: 0.35rem; }
+
+    .net-btn {
+      padding: 0.22rem 0.8rem;
+      border: 1px solid var(--border-hi);
+      background: transparent;
+      color: var(--text-2);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.12s;
+    }
+    .net-btn.active {
+      background: var(--accent-lo);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .net-btn.mainnet.active {
+      background: var(--green-lo);
+      border-color: var(--green);
+      color: var(--green);
+    }
+    .net-btn:hover:not(.active) {
+      border-color: var(--text-2);
+      color: var(--text);
+    }
+
+    #lastUpdate {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.62rem;
+      color: var(--text-3);
+      letter-spacing: 0.04em;
+    }
+
+    /* ── Stat cards ──────────────────────────────────────────────────────────── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.6rem;
+      margin-bottom: 0.7rem;
+    }
+
+    .card {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 0.85rem 1rem 0.8rem;
+      transition: border-color 0.15s;
+    }
+    /* corner brackets appear on hover */
+    .card::before, .card::after {
+      content: '';
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      border-color: var(--accent);
+      border-style: solid;
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .card::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; }
+    .card::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; }
+    .card:hover { border-color: var(--border-hi); }
+    .card:hover::before, .card:hover::after { opacity: 1; }
+
+    .card .label {
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 0.35rem;
+    }
+    .card .value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.22rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }
+    .card .sub {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.65rem;
+      color: var(--text-2);
+      margin-top: 0.25rem;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    /* status classes applied by JS */
+    .value.status-running { color: var(--green); }
+    .value.status-paused  { color: var(--amber); }
+    .value.status-stopped { color: var(--red); }
+
+    .dry-badge {
+      display: inline-block;
+      background: rgba(212,136,42,0.18);
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.55rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      padding: 1px 5px;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+      text-transform: uppercase;
+    }
+
+    /* ── Controls ────────────────────────────────────────────────────────────── */
+    .controls {
+      display: flex;
+      gap: 0.45rem;
+      margin-bottom: 0.7rem;
+      flex-wrap: wrap;
+    }
+
+    button {
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.75rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      padding: 0.42rem 1.2rem;
+      border: 1px solid;
+      background: transparent;
+      cursor: pointer;
+      transition: background 0.12s, color 0.12s;
+    }
+    .btn-pause  { border-color: var(--amber); color: var(--amber); }
+    .btn-resume { border-color: var(--green); color: var(--green); }
+    .btn-buy    { border-color: var(--blue);  color: var(--blue); }
+    .btn-sell   { border-color: var(--red);   color: var(--red); }
+
+    .btn-pause:hover  { background: rgba(212,136,42,0.14); }
+    .btn-resume:hover { background: var(--green-lo); }
+    .btn-buy:hover    { background: var(--blue-lo); }
+    .btn-sell:hover   { background: var(--red-lo); }
+
+    /* ── Charts ──────────────────────────────────────────────────────────────── */
+    .charts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.6rem;
+      margin-bottom: 0.7rem;
+    }
+    @media (max-width: 600px) { .charts { grid-template-columns: 1fr; } }
+
+    .chart-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      padding: 0.85rem;
+    }
+    .chart-title {
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 0.5rem;
+    }
+    .chart-wrap { height: 165px; position: relative; }
+
+    /* ── Section divider ─────────────────────────────────────────────────────── */
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--text-2);
+      margin-bottom: 0.5rem;
+    }
+    .section-title::before {
+      content: '///';
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent);
+      font-size: 0.6rem;
+      letter-spacing: 0.05em;
+    }
+    .section-title::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Trades table ────────────────────────────────────────────────────────── */
     .table-wrap { overflow-x: auto; }
-    table { width: 100%; border-collapse: collapse; background: #1a1f2e; border-radius: 8px; overflow: hidden; }
-    th { background: #2d3748; padding: 0.45rem 0.7rem; text-align: left; font-size: 0.7rem; color: #a0aec0; text-transform: uppercase; white-space: nowrap; }
-    td { padding: 0.45rem 0.7rem; font-size: 0.82rem; border-top: 1px solid #2d3748; }
-    .buy  { color: #68d391; font-weight: 600; }
-    .sell { color: #fc8181; font-weight: 600; }
-    .empty-row td { text-align: center; color: #4a5568; padding: 1.5rem; }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+    th {
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border-hi);
+      padding: 0.5rem 0.75rem;
+      text-align: left;
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      color: var(--text-2);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.5rem 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.78rem;
+      border-top: 1px solid var(--border);
+      transition: background 0.1s;
+    }
+    tr:hover td { background: var(--surface-2); }
+
+    .buy  {
+      color: var(--green);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .sell {
+      color: var(--red);
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.85rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+    .empty-row td {
+      text-align: center;
+      color: var(--text-3);
+      padding: 2rem;
+      font-family: 'Barlow Condensed', sans-serif;
+      font-size: 0.8rem;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
   </style>
 </head>
 <body>
 
   <header>
-    <div class="title">Coinbase Trade Bot</div>
+    <div class="title">Trade Bot<span class="title-sub">/ autonomous</span></div>
     <div class="header-right">
       <div class="network-selector" id="networkSelector"></div>
       <div id="lastUpdate">—</div>
@@ -100,17 +378,17 @@
   <div class="controls">
     <button class="btn-pause"  onclick="control('pause')">Pause</button>
     <button class="btn-resume" onclick="control('resume')">Resume</button>
-    <button class="btn-buy"    onclick="manualTrade('buy')">Manual Buy</button>
-    <button class="btn-sell"   onclick="manualTrade('sell')">Manual Sell</button>
+    <button class="btn-buy"    onclick="manualTrade('buy')">Buy</button>
+    <button class="btn-sell"   onclick="manualTrade('sell')">Sell</button>
   </div>
 
   <div class="charts">
     <div class="chart-card">
-      <div class="chart-title">ETH Price (24h)</div>
+      <div class="chart-title">ETH Price — 24h</div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
     </div>
     <div class="chart-card">
-      <div class="chart-title">Portfolio Value (24h)</div>
+      <div class="chart-title">Portfolio — 24h</div>
       <div class="chart-wrap"><canvas id="portfolioChart"></canvas></div>
     </div>
   </div>
@@ -166,7 +444,7 @@
       const statusEl = document.getElementById('status');
       statusEl.textContent = s.status;
       statusEl.className = 'value status-' + s.status;
-      if (s.dryRun) statusEl.innerHTML += '<span class="dry-badge">DRY</span>';
+      if (s.dryRun) statusEl.innerHTML += '<span class="dry-badge">Dry</span>';
 
       document.getElementById('price').textContent = s.lastPrice ? '$' + s.lastPrice.toFixed(2) : '—';
       document.getElementById('strategy').textContent = s.strategy ? 'Strategy: ' + s.strategy : '';
@@ -184,31 +462,39 @@
       maintainAspectRatio: false,
       scales: {
         x: { display: false },
-        y: { ticks: { color: '#718096', font: { size: 11 } }, grid: { color: '#2d3748' } }
+        y: {
+          ticks: { color: '#4a5068', font: { size: 10, family: "'JetBrains Mono', monospace" } },
+          grid: { color: '#181c2c' },
+        }
       },
       plugins: { legend: { display: false } },
       animation: false,
     };
 
+    function makeChart(id, color, bg) {
+      return new Chart(document.getElementById(id), {
+        type: 'line',
+        data: { labels: [], datasets: [{ data: [], borderColor: color, borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: bg }] },
+        options: chartDefaults,
+      });
+    }
+
     async function loadCharts() {
       const data = await fetch('/api/prices?limit=288').then(r => r.json());
-      const labels   = data.map(d => d.timestamp).reverse();
-      const prices   = data.map(d => d.eth_price).reverse();
+      const labels    = data.map(d => d.timestamp).reverse();
+      const prices    = data.map(d => d.eth_price).reverse();
       const portfolio = data.map(d => d.portfolio_usd).reverse();
 
-      if (priceChart) priceChart.destroy();
-      priceChart = new Chart(document.getElementById('priceChart'), {
-        type: 'line',
-        data: { labels, datasets: [{ data: prices, borderColor: '#90cdf4', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: 'rgba(144,205,244,0.06)' }] },
-        options: chartDefaults,
-      });
+      if (!priceChart)     priceChart     = makeChart('priceChart',     '#c8901e', 'rgba(200,144,30,0.07)');
+      if (!portfolioChart) portfolioChart = makeChart('portfolioChart', '#29c880', 'rgba(41,200,128,0.07)');
 
-      if (portfolioChart) portfolioChart.destroy();
-      portfolioChart = new Chart(document.getElementById('portfolioChart'), {
-        type: 'line',
-        data: { labels, datasets: [{ data: portfolio, borderColor: '#68d391', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: 'rgba(104,211,145,0.06)' }] },
-        options: chartDefaults,
-      });
+      priceChart.data.labels = labels;
+      priceChart.data.datasets[0].data = prices;
+      priceChart.update('none');
+
+      portfolioChart.data.labels = labels;
+      portfolioChart.data.datasets[0].data = portfolio;
+      portfolioChart.update('none');
     }
 
     // ── Trades ────────────────────────────────────────────────────────────────
@@ -216,17 +502,17 @@
       const trades = await fetch('/api/trades?limit=15').then(r => r.json());
       const tbody = document.getElementById('trades');
       if (!trades.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No trades yet</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No trades recorded</td></tr>';
         return;
       }
       tbody.innerHTML = trades.map(t => `
         <tr>
-          <td style="white-space:nowrap">${new Date(t.timestamp).toLocaleString()}</td>
-          <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.45;font-weight:400">[dry]</span>' : ''}</td>
+          <td style="white-space:nowrap;color:#4a5068">${new Date(t.timestamp).toLocaleString()}</td>
+          <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.4;font-weight:400;font-size:0.7rem;font-family:inherit">[dry]</span>' : ''}</td>
           <td>${parseFloat(t.amount_eth).toFixed(6)} ETH</td>
           <td>$${parseFloat(t.price_usd).toFixed(2)}</td>
-          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a0aec0">${t.reason ?? ''}</td>
-          <td style="font-size:0.7rem;opacity:.5">${t.tx_hash ? `<a href="https://basescan.org/tx/${t.tx_hash}" target="_blank" style="color:#90cdf4">${t.tx_hash.slice(0,10)}…</a>` : '—'}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#4a5068;font-family:'Barlow Condensed',sans-serif;font-size:0.82rem;letter-spacing:0.03em">${t.reason ?? ''}</td>
+          <td style="font-size:0.65rem;opacity:.5">${t.tx_hash ? `<a href="https://basescan.org/tx/${t.tx_hash}" target="_blank" style="color:#c8901e;text-decoration:none">${t.tx_hash.slice(0,10)}…</a>` : '—'}</td>
         </tr>
       `).join('');
     }

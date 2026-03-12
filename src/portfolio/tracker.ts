@@ -5,6 +5,7 @@ import { logger } from '../core/logger.js';
 import { config } from '../config.js';
 
 let ethPriceFeedId: string | null = null;
+let polling = false;
 
 export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() => void> {
   logger.info('Portfolio tracker started');
@@ -18,6 +19,8 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() =>
   }
 
   const poll = async () => {
+    if (polling) return;
+    polling = true;
     try {
       const walletPromise = tools.getWalletDetails();
       const pricePromise = ethPriceFeedId
@@ -48,6 +51,8 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() =>
       logger.info(`Portfolio: ${ethBalance.toFixed(6)} ETH + ${usdcBalance.toFixed(2)} USDC @ $${price.toFixed(2)} = $${portfolioUsd.toFixed(2)}`);
     } catch (err) {
       logger.error('Portfolio tracker poll failed', err);
+    } finally {
+      polling = false;
     }
   };
 
