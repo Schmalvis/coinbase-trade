@@ -3,7 +3,13 @@ import fs from 'fs';
 import path from 'path';
 
 const levels = { debug: 0, info: 1, warn: 2, error: 3 };
-const currentLevel = levels[config.LOG_LEVEL];
+
+// Mutable — can be updated at runtime via setLevel()
+let currentLevel = levels[config.LOG_LEVEL];
+
+export function setLevel(level: string): void {
+  currentLevel = levels[level as keyof typeof levels] ?? levels.info;
+}
 
 const logDir = path.join(config.DATA_DIR, 'logs');
 fs.mkdirSync(logDir, { recursive: true });
