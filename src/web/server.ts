@@ -6,10 +6,11 @@ import { queries } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
 import type { CoinbaseTools } from '../mcp/tools.js';
+import type { RuntimeConfig } from '../core/runtime-config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function startWebServer(tools: CoinbaseTools): void {
+export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfig): void {
   const app = express();
   app.use(express.json());
 

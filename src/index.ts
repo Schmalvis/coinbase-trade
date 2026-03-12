@@ -6,32 +6,39 @@ import { TradingEngine } from './trading/engine.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startWebServer } from './web/server.js';
 import { botState } from './core/state.js';
-import { logger } from './core/logger.js';
+import { logger, setLevel } from './core/logger.js';
 import { config, availableNetworks } from './config.js';
+import { RuntimeConfig } from './core/runtime-config.js';
+import { settingQueries } from './data/db.js';
 
 async function main() {
+  // Initialise RuntimeConfig — overlays env defaults with any saved DB settings
+  const runtimeConfig = new RuntimeConfig(config as any, settingQueries);
+
+  // Wire logger to live LOG_LEVEL changes
+  runtimeConfig.subscribe('LOG_LEVEL', v => setLevel(v as string));
+
   logger.info('Starting coinbase trade bot');
-  logger.info(`Strategy: ${config.STRATEGY} | Dry run: ${config.DRY_RUN}`);
+  logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
   logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
 
   const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork);
   await mcp.connect();
 
   const tools = new CoinbaseTools(mcp);
-  const pollNow = await startPortfolioTracker(tools);
+  const pollNow = await startPortfolioTracker(tools, runtimeConfig);
 
-  // On network switch: immediately re-poll so UI reflects new balances
   botState.onNetworkChange(network => {
     logger.info(`Network switched to ${network} — re-polling portfolio`);
     pollNow();
   });
 
-  const executor = new TradeExecutor(tools);
-  const engine = new TradingEngine(executor);
+  const executor = new TradeExecutor(tools, runtimeConfig);
+  const engine = new TradingEngine(executor, runtimeConfig);
 
   engine.start();
   startTelegramBot(engine);
-  startWebServer(tools);
+  startWebServer(tools, runtimeConfig);
 
   botState.setStatus('running');
   logger.info('Bot running. Dashboard: http://localhost:' + config.WEB_PORT);
