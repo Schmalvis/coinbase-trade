@@ -4,7 +4,7 @@ services:
     container_name: coinbase-trade
 
     ports:
-      - "${WEB_PORT:-8080}:${WEB_PORT:-8080}"
+      - "${WEB_PORT:-3003}:${WEB_PORT:-3003}"
 
     environment:
       # MCP server
@@ -32,7 +32,7 @@ services:
       TRADE_COOLDOWN_SECONDS: ${TRADE_COOLDOWN_SECONDS:-300}
 
       # Misc
-      WEB_PORT: ${WEB_PORT:-8080}
+      WEB_PORT: ${WEB_PORT:-3003}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DRY_RUN: ${DRY_RUN:-true}
       DATA_DIR: /app/data
