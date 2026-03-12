@@ -31,7 +31,7 @@ async function main() {
 
   engine.start();
   startTelegramBot(engine);
-  startWebServer();
+  startWebServer(tools);
 
   botState.setStatus('running');
   logger.info('Bot running. Dashboard: http://localhost:' + config.WEB_PORT);

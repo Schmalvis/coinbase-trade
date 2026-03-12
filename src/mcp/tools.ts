@@ -105,4 +105,9 @@ export class CoinbaseTools {
     }
     return 0;
   }
+
+  async requestFaucetFunds(assetId = 'eth'): Promise<string> {
+    const result = await this.mcp.callTool<string>('CdpApiActionProvider_request_faucet_funds', { assetId });
+    return typeof result === 'string' ? result : JSON.stringify(result);
+  }
 }

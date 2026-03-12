@@ -291,6 +291,9 @@
     .btn-resume:hover { background: var(--green-lo); }
     .btn-buy:hover    { background: var(--blue-lo); }
     .btn-sell:hover   { background: var(--red-lo); }
+    .btn-faucet { border-color: var(--text-2); color: var(--text-2); }
+    .btn-faucet:hover { border-color: var(--text); color: var(--text); }
+    .btn-faucet:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* ── Charts ──────────────────────────────────────────────────────────────── */
     .charts {
@@ -430,6 +433,11 @@
       <div class="value" id="portfolio">—</div>
       <div class="sub" id="lastTrade">—</div>
     </div>
+    <div class="card">
+      <div class="label">Wallet</div>
+      <div class="value" id="walletAddress" style="font-size:0.72rem;word-break:break-all;letter-spacing:0.01em">—</div>
+      <div class="sub" id="walletNetwork">—</div>
+    </div>
   </div>
 
   <div class="controls">
@@ -437,6 +445,7 @@
     <button class="btn-resume" onclick="control('resume')">Resume</button>
     <button class="btn-buy"    onclick="manualTrade('buy')">Buy</button>
     <button class="btn-sell"   onclick="manualTrade('sell')">Sell</button>
+    <button class="btn-faucet" id="faucetBtn" onclick="requestFaucet()" style="display:none">Faucet</button>
   </div>
 
   <div class="charts">
@@ -610,6 +619,21 @@
       `).join('');
     }
 
+    // ── Wallet ────────────────────────────────────────────────────────────────
+    async function loadWallet() {
+      try {
+        const w = await fetch('/api/wallet').then(r => r.json());
+        if (w.address) {
+          const addrEl = document.getElementById('walletAddress');
+          const scanBase = activeNetwork?.includes('mainnet') ? 'https://basescan.org' : 'https://sepolia.basescan.org';
+          addrEl.innerHTML = `<a href="${scanBase}/address/${w.address}" target="_blank"
+            style="color:var(--text);text-decoration:none;font-size:0.72rem"
+            title="${w.address}">${w.address.slice(0,6)}…${w.address.slice(-4)}</a>`;
+          document.getElementById('walletNetwork').textContent = w.network ?? '';
+        }
+      } catch (_) {}
+    }
+
     // ── Controls ──────────────────────────────────────────────────────────────
     async function control(action) {
       await fetch('/api/control/' + action, { method: 'POST' });
@@ -621,9 +645,34 @@
       await fetch('/api/control/' + action, { method: 'POST' });
     }
 
+    async function requestFaucet() {
+      const btn = document.getElementById('faucetBtn');
+      btn.disabled = true;
+      btn.textContent = 'Requesting…';
+      try {
+        const r = await fetch('/api/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const data = await r.json();
+        if (data.ok) {
+          btn.textContent = 'Sent!';
+          setTimeout(() => { btn.textContent = 'Faucet'; btn.disabled = false; }, 5000);
+        } else {
+          alert('Faucet error: ' + (data.error ?? 'unknown'));
+          btn.textContent = 'Faucet';
+          btn.disabled = false;
+        }
+      } catch (e) {
+        alert('Faucet request failed');
+        btn.textContent = 'Faucet';
+        btn.disabled = false;
+      }
+    }
+
     // ── Refresh ───────────────────────────────────────────────────────────────
     async function refresh() {
-      await Promise.all([loadStatus(), loadCharts(), loadTrades()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet()]);
+      // Show faucet button only on testnet
+      document.getElementById('faucetBtn').style.display =
+        activeNetwork?.includes('mainnet') ? 'none' : 'inline-block';
     }
 
     refresh();

@@ -5,10 +5,11 @@ import { botState } from '../core/state.js';
 import { queries } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
+import type { CoinbaseTools } from '../mcp/tools.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function startWebServer(): void {
+export function startWebServer(tools: CoinbaseTools): void {
   const app = express();
   app.use(express.json());
 
@@ -37,6 +38,15 @@ export function startWebServer(): void {
     });
   });
 
+  app.get('/api/wallet', async (_req, res) => {
+    try {
+      const details = await tools.getWalletDetails();
+      res.json(details);
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.get('/api/prices', (req, res) => {
     const limit = parseInt(req.query.limit as string ?? '288', 10);
     res.json(queries.recentSnapshots.all(limit));
@@ -57,6 +67,23 @@ export function startWebServer(): void {
       res.json({ ok: true, status: 'running' });
     } else {
       res.status(400).json({ error: 'Unknown action' });
+    }
+  });
+
+  app.post('/api/faucet', async (req, res) => {
+    if (botState.activeNetwork.includes('mainnet')) {
+      return res.status(400).json({ error: 'Faucet not available on mainnet' });
+    }
+    const { assetId = 'eth' } = req.body as { assetId?: string };
+    try {
+      logger.info(`Faucet requested for ${assetId} on ${botState.activeNetwork}`);
+      const result = await tools.requestFaucetFunds(assetId);
+      logger.info(`Faucet result: ${result}`);
+      res.json({ ok: true, result });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.error(`Faucet error: ${msg}`);
+      res.status(500).json({ error: msg });
     }
   });
 
