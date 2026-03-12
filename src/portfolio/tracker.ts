@@ -2,15 +2,17 @@ import { CoinbaseTools, TOKEN_ADDRESSES } from '../mcp/tools.js';
 import { queries } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
-import { config } from '../config.js';
+import type { RuntimeConfig } from '../core/runtime-config.js';
 
 let ethPriceFeedId: string | null = null;
 let polling = false;
 
-export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() => void> {
+export async function startPortfolioTracker(
+  tools: CoinbaseTools,
+  runtimeConfig: RuntimeConfig,
+): Promise<() => void> {
   logger.info('Portfolio tracker started');
 
-  // Fetch price feed ID once at startup
   try {
     ethPriceFeedId = await tools.fetchPriceFeedId('ETH') as unknown as string;
     logger.info(`ETH price feed ID: ${ethPriceFeedId}`);
@@ -22,13 +24,11 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() =>
     if (polling) return;
     polling = true;
     try {
-      const walletPromise = tools.getWalletDetails();
-      const pricePromise = ethPriceFeedId
-        ? tools.fetchPrice(ethPriceFeedId)
-        : Promise.resolve(0);
-      const usdcPromise = tools.getErc20Balance(TOKEN_ADDRESSES.USDC);
-
-      const [wallet, ethPrice, usdcBalance] = await Promise.all([walletPromise, pricePromise, usdcPromise]);
+      const [wallet, ethPrice, usdcBalance] = await Promise.all([
+        tools.getWalletDetails(),
+        ethPriceFeedId ? tools.fetchPrice(ethPriceFeedId) : Promise.resolve(0),
+        tools.getErc20Balance(TOKEN_ADDRESSES.USDC),
+      ]);
 
       logger.debug('Wallet response', wallet);
       logger.debug('Price response', ethPrice);
@@ -38,12 +38,7 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() =>
       const price = parseFloat(String(ethPrice)) || 0;
       const portfolioUsd = ethBalance * price + usdcBalance;
 
-      queries.insertSnapshot.run({
-        eth_price: price,
-        eth_balance: ethBalance,
-        portfolio_usd: portfolioUsd,
-      });
-
+      queries.insertSnapshot.run({ eth_price: price, eth_balance: ethBalance, portfolio_usd: portfolioUsd });
       botState.updatePrice(price);
       botState.updateBalance(ethBalance);
       botState.updateUsdcBalance(usdcBalance);
@@ -56,12 +51,19 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() =>
     }
   };
 
-  // Immediate first poll
+  let intervalId: ReturnType<typeof setInterval> | null = null;
+
+  const startPolling = () => {
+    if (intervalId) clearInterval(intervalId);
+    const ms = (runtimeConfig.get('POLL_INTERVAL_SECONDS') as number) * 1000;
+    intervalId = setInterval(poll, ms);
+    logger.info(`Portfolio tracker polling every ${ms}ms`);
+  };
+
+  runtimeConfig.subscribe('POLL_INTERVAL_SECONDS', () => startPolling());
+
   await poll();
+  startPolling();
 
-  // Then on interval
-  setInterval(poll, config.POLL_INTERVAL_SECONDS * 1000);
-
-  // Return poll function so callers can trigger an immediate re-poll (e.g. on network switch)
   return poll;
 }
