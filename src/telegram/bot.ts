@@ -33,6 +33,7 @@ export function startTelegramBot(engine: TradingEngine): void {
     ctx.reply(
       `*Bot Status*\n` +
       `Status: ${botState.status}\n` +
+      `Network: ${botState.activeNetwork}\n` +
       `ETH price: $${price.toFixed(2)}\n` +
       `ETH balance: ${ethBalance.toFixed(6)}\n` +
       `USDC balance: ${usdcBalance.toFixed(2)}\n` +
@@ -74,9 +75,29 @@ export function startTelegramBot(engine: TradingEngine): void {
     await engine.manualTrade('sell');
   });
 
+  bot.command('network', ctx => {
+    const arg = ctx.message?.text?.split(' ')[1]?.trim();
+    if (!arg) {
+      ctx.reply(
+        `*Network*\nActive: \`${botState.activeNetwork}\`\nAvailable: ${botState.availableNetworks.map(n => `\`${n}\``).join(', ')}`,
+        { parse_mode: 'Markdown' }
+      );
+      return;
+    }
+    try {
+      botState.setNetwork(arg);
+      queries.insertEvent.run('network_switch', `Switched to ${arg} by Telegram user ${ctx.from?.username}`);
+      ctx.reply(`Switched to \`${arg}\` — re-polling balances...`, { parse_mode: 'Markdown' });
+    } catch (err: unknown) {
+      ctx.reply(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  });
+
   bot.command('help', ctx => {
     ctx.reply(
       '/status — portfolio + bot status\n' +
+      '/network — show active network\n' +
+      '/network <name> — switch network (e.g. /network base-mainnet)\n' +
       '/pause — pause autonomous trading\n' +
       '/resume — resume autonomous trading\n' +
       '/trades — last 5 trades\n' +

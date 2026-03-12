@@ -13,23 +13,33 @@ export function startWebServer(): void {
   app.use(express.json());
 
   app.get('/api/status', (_req, res) => {
+    const eth = botState.lastBalance ?? 0;
+    const usdc = botState.lastUsdcBalance ?? 0;
+    const price = botState.lastPrice ?? 0;
     res.json({
       status: botState.status,
-      lastPrice: botState.lastPrice,
-      lastBalance: botState.lastBalance,
-      portfolioUsd: botState.lastPrice && botState.lastBalance
-        ? botState.lastPrice * botState.lastBalance
-        : null,
+      lastPrice: price,
+      ethBalance: eth,
+      usdcBalance: usdc,
+      portfolioUsd: price * eth + usdc,
       lastTradeAt: botState.lastTradeAt,
       dryRun: config.DRY_RUN,
       strategy: config.STRATEGY,
+      activeNetwork: botState.activeNetwork,
+      availableNetworks: botState.availableNetworks,
+    });
+  });
+
+  app.get('/api/networks', (_req, res) => {
+    res.json({
+      active: botState.activeNetwork,
+      available: botState.availableNetworks,
     });
   });
 
   app.get('/api/prices', (req, res) => {
-    const limit = parseInt(req.query.limit as string ?? '288', 10); // 288 = 24h at 5min intervals
-    const rows = queries.recentSnapshots.all(limit);
-    res.json(rows);
+    const limit = parseInt(req.query.limit as string ?? '288', 10);
+    res.json(queries.recentSnapshots.all(limit));
   });
 
   app.get('/api/trades', (req, res) => {
@@ -47,6 +57,18 @@ export function startWebServer(): void {
       res.json({ ok: true, status: 'running' });
     } else {
       res.status(400).json({ error: 'Unknown action' });
+    }
+  });
+
+  app.post('/api/network', (req, res) => {
+    const { network } = req.body as { network?: string };
+    if (!network) return res.status(400).json({ error: 'network required' });
+    try {
+      botState.setNetwork(network);
+      logger.info(`Network switched to ${network} via web UI`);
+      res.json({ ok: true, activeNetwork: network });
+    } catch (err: unknown) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
 

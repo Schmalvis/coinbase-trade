@@ -6,7 +6,7 @@ import { config } from '../config.js';
 
 let ethPriceFeedId: string | null = null;
 
-export async function startPortfolioTracker(tools: CoinbaseTools): Promise<void> {
+export async function startPortfolioTracker(tools: CoinbaseTools): Promise<() => void> {
   logger.info('Portfolio tracker started');
 
   // Fetch price feed ID once at startup
@@ -56,4 +56,7 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<void>
 
   // Then on interval
   setInterval(poll, config.POLL_INTERVAL_SECONDS * 1000);
+
+  // Return poll function so callers can trigger an immediate re-poll (e.g. on network switch)
+  return poll;
 }

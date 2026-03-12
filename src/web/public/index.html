@@ -3,35 +3,74 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Coinbase Trade Bot — base-sepolia</title>
+  <title>Coinbase Trade Bot</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; padding: 1.5rem; }
-    h1 { font-size: 1.25rem; color: #90cdf4; margin-bottom: 1.5rem; }
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
-    .card { background: #1a1f2e; border-radius: 8px; padding: 1rem; }
-    .card .label { font-size: 0.75rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; }
-    .card .value { font-size: 1.5rem; font-weight: 700; margin-top: 0.25rem; }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0f1117; color: #e2e8f0; padding: 1.25rem; }
+
+    /* ── Header ── */
+    header { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem; }
+    .title { font-size: 1.1rem; font-weight: 700; color: #90cdf4; }
+    .header-right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+    .network-selector { display: flex; gap: 0.4rem; }
+    .net-btn {
+      padding: 0.3rem 0.85rem; border-radius: 999px; border: 1px solid #4a5568;
+      background: transparent; color: #a0aec0; font-size: 0.78rem; cursor: pointer;
+      transition: all 0.15s;
+    }
+    .net-btn.active { background: #2b6cb0; border-color: #63b3ed; color: #fff; }
+    .net-btn:hover:not(.active) { border-color: #90cdf4; color: #e2e8f0; }
+    .net-btn.mainnet.active { background: #276749; border-color: #68d391; }
+    #lastUpdate { font-size: 0.72rem; color: #4a5568; }
+
+    /* ── Stat cards ── */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+    .card { background: #1a1f2e; border-radius: 8px; padding: 0.9rem 1rem; }
+    .card .label { font-size: 0.7rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+    .card .value { font-size: 1.35rem; font-weight: 700; }
+    .card .sub { font-size: 0.72rem; color: #718096; margin-top: 0.15rem; }
     .status-running { color: #68d391; }
     .status-paused  { color: #f6ad55; }
     .status-stopped { color: #fc8181; }
-    .dry-badge { display: inline-block; background: #744210; color: #fbd38d; font-size: 0.65rem; padding: 1px 6px; border-radius: 999px; margin-left: 0.5rem; vertical-align: middle; }
-    .chart-wrap { background: #1a1f2e; border-radius: 8px; padding: 1rem; margin-bottom: 1.5rem; height: 250px; }
-    table { width: 100%; border-collapse: collapse; background: #1a1f2e; border-radius: 8px; overflow: hidden; }
-    th { background: #2d3748; padding: 0.5rem 0.75rem; text-align: left; font-size: 0.75rem; color: #a0aec0; text-transform: uppercase; }
-    td { padding: 0.5rem 0.75rem; font-size: 0.85rem; border-top: 1px solid #2d3748; }
-    .buy  { color: #68d391; }
-    .sell { color: #fc8181; }
-    .controls { display: flex; gap: 0.75rem; margin-bottom: 1.5rem; }
-    button { padding: 0.5rem 1.25rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.9rem; font-weight: 600; }
+    .dry-badge { display: inline-block; background: #744210; color: #fbd38d; font-size: 0.6rem; padding: 1px 5px; border-radius: 999px; margin-left: 0.4rem; vertical-align: middle; }
+
+    /* ── Controls ── */
+    .controls { display: flex; gap: 0.6rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    button { padding: 0.45rem 1.1rem; border-radius: 6px; border: none; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: opacity 0.15s; }
+    button:hover { opacity: 0.85; }
     .btn-pause  { background: #f6ad55; color: #1a1f2e; }
     .btn-resume { background: #68d391; color: #1a1f2e; }
-    .section-title { font-size: 0.85rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .btn-buy    { background: #2b6cb0; color: #fff; }
+    .btn-sell   { background: #9b2c2c; color: #fff; }
+
+    /* ── Charts ── */
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-bottom: 1rem; }
+    @media (max-width: 640px) { .charts { grid-template-columns: 1fr; } }
+    .chart-card { background: #1a1f2e; border-radius: 8px; padding: 0.9rem; }
+    .chart-title { font-size: 0.72rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .chart-wrap { height: 180px; position: relative; }
+
+    /* ── Trades table ── */
+    .section-title { font-size: 0.72rem; color: #718096; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; background: #1a1f2e; border-radius: 8px; overflow: hidden; }
+    th { background: #2d3748; padding: 0.45rem 0.7rem; text-align: left; font-size: 0.7rem; color: #a0aec0; text-transform: uppercase; white-space: nowrap; }
+    td { padding: 0.45rem 0.7rem; font-size: 0.82rem; border-top: 1px solid #2d3748; }
+    .buy  { color: #68d391; font-weight: 600; }
+    .sell { color: #fc8181; font-weight: 600; }
+    .empty-row td { text-align: center; color: #4a5568; padding: 1.5rem; }
   </style>
 </head>
 <body>
-  <h1>Coinbase Trade Bot <span style="color:#718096;font-weight:400;font-size:0.9rem">base-sepolia testnet</span></h1>
+
+  <header>
+    <div class="title">Coinbase Trade Bot</div>
+    <div class="header-right">
+      <div class="network-selector" id="networkSelector"></div>
+      <div id="lastUpdate">—</div>
+    </div>
+  </header>
 
   <div class="grid">
     <div class="card">
@@ -41,91 +80,175 @@
     <div class="card">
       <div class="label">ETH Price</div>
       <div class="value" id="price">—</div>
+      <div class="sub" id="strategy">—</div>
     </div>
     <div class="card">
-      <div class="label">Balance</div>
-      <div class="value" id="balance">—</div>
+      <div class="label">ETH Balance</div>
+      <div class="value" id="ethBalance">—</div>
+    </div>
+    <div class="card">
+      <div class="label">USDC Balance</div>
+      <div class="value" id="usdcBalance">—</div>
     </div>
     <div class="card">
       <div class="label">Portfolio</div>
       <div class="value" id="portfolio">—</div>
+      <div class="sub" id="lastTrade">—</div>
     </div>
   </div>
 
   <div class="controls">
     <button class="btn-pause"  onclick="control('pause')">Pause</button>
     <button class="btn-resume" onclick="control('resume')">Resume</button>
+    <button class="btn-buy"    onclick="manualTrade('buy')">Manual Buy</button>
+    <button class="btn-sell"   onclick="manualTrade('sell')">Manual Sell</button>
   </div>
 
-  <div class="chart-wrap">
-    <canvas id="priceChart"></canvas>
+  <div class="charts">
+    <div class="chart-card">
+      <div class="chart-title">ETH Price (24h)</div>
+      <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Portfolio Value (24h)</div>
+      <div class="chart-wrap"><canvas id="portfolioChart"></canvas></div>
+    </div>
   </div>
 
   <div class="section-title">Recent Trades</div>
-  <table>
-    <thead><tr><th>Time</th><th>Action</th><th>Amount</th><th>Price</th><th>Reason</th><th>Tx</th></tr></thead>
-    <tbody id="trades"></tbody>
-  </table>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Time</th><th>Action</th><th>Amount</th><th>Price</th><th>Reason</th><th>Tx</th></tr>
+      </thead>
+      <tbody id="trades"></tbody>
+    </table>
+  </div>
 
   <script>
-    let chart;
+    let priceChart, portfolioChart;
+    let availableNetworks = [], activeNetwork = '';
 
-    async function loadStatus() {
-      const s = await fetch('/api/status').then(r => r.json());
-      const el = document.getElementById('status');
-      el.textContent = s.status;
-      el.className = 'value status-' + s.status;
-      if (s.dryRun) el.innerHTML += '<span class="dry-badge">DRY RUN</span>';
-      document.getElementById('price').textContent = s.lastPrice ? '$' + s.lastPrice.toFixed(2) : '—';
-      document.getElementById('balance').textContent = s.lastBalance ? s.lastBalance.toFixed(6) + ' ETH' : '—';
-      document.getElementById('portfolio').textContent = s.portfolioUsd ? '$' + s.portfolioUsd.toFixed(2) : '—';
+    // ── Network selector ──────────────────────────────────────────────────────
+    function renderNetworkSelector() {
+      const el = document.getElementById('networkSelector');
+      el.innerHTML = availableNetworks.map(n => {
+        const isActive = n === activeNetwork;
+        const isMainnet = n.includes('mainnet');
+        return `<button class="net-btn ${isActive ? 'active' : ''} ${isMainnet ? 'mainnet' : ''}"
+                  onclick="switchNetwork('${n}')">${n}</button>`;
+      }).join('');
     }
 
-    async function loadChart() {
+    async function switchNetwork(network) {
+      if (network === activeNetwork) return;
+      await fetch('/api/network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ network }),
+      });
+      activeNetwork = network;
+      renderNetworkSelector();
+      await refresh();
+    }
+
+    // ── Status ────────────────────────────────────────────────────────────────
+    async function loadStatus() {
+      const s = await fetch('/api/status').then(r => r.json());
+
+      // Sync network state
+      if (s.availableNetworks?.length) {
+        availableNetworks = s.availableNetworks;
+        activeNetwork = s.activeNetwork;
+        renderNetworkSelector();
+      }
+
+      const statusEl = document.getElementById('status');
+      statusEl.textContent = s.status;
+      statusEl.className = 'value status-' + s.status;
+      if (s.dryRun) statusEl.innerHTML += '<span class="dry-badge">DRY</span>';
+
+      document.getElementById('price').textContent = s.lastPrice ? '$' + s.lastPrice.toFixed(2) : '—';
+      document.getElementById('strategy').textContent = s.strategy ? 'Strategy: ' + s.strategy : '';
+      document.getElementById('ethBalance').textContent = s.ethBalance != null ? s.ethBalance.toFixed(6) + ' ETH' : '—';
+      document.getElementById('usdcBalance').textContent = s.usdcBalance != null ? s.usdcBalance.toFixed(2) + ' USDC' : '—';
+      document.getElementById('portfolio').textContent = s.portfolioUsd != null ? '$' + s.portfolioUsd.toFixed(2) : '—';
+      document.getElementById('lastTrade').textContent = s.lastTradeAt
+        ? 'Last trade: ' + new Date(s.lastTradeAt).toLocaleTimeString() : 'No trades yet';
+      document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+    }
+
+    // ── Charts ────────────────────────────────────────────────────────────────
+    const chartDefaults = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: { ticks: { color: '#718096', font: { size: 11 } }, grid: { color: '#2d3748' } }
+      },
+      plugins: { legend: { display: false } },
+      animation: false,
+    };
+
+    async function loadCharts() {
       const data = await fetch('/api/prices?limit=288').then(r => r.json());
-      const labels = data.map(d => d.timestamp).reverse();
-      const prices = data.map(d => d.eth_price).reverse();
-      if (chart) { chart.destroy(); }
-      chart = new Chart(document.getElementById('priceChart'), {
+      const labels   = data.map(d => d.timestamp).reverse();
+      const prices   = data.map(d => d.eth_price).reverse();
+      const portfolio = data.map(d => d.portfolio_usd).reverse();
+
+      if (priceChart) priceChart.destroy();
+      priceChart = new Chart(document.getElementById('priceChart'), {
         type: 'line',
-        data: {
-          labels,
-          datasets: [{ label: 'ETH/USD', data: prices, borderColor: '#90cdf4', borderWidth: 1.5, pointRadius: 0, tension: 0.3 }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          scales: { x: { display: false }, y: { ticks: { color: '#718096' }, grid: { color: '#2d3748' } } },
-          plugins: { legend: { display: false } }
-        }
+        data: { labels, datasets: [{ data: prices, borderColor: '#90cdf4', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: 'rgba(144,205,244,0.06)' }] },
+        options: chartDefaults,
+      });
+
+      if (portfolioChart) portfolioChart.destroy();
+      portfolioChart = new Chart(document.getElementById('portfolioChart'), {
+        type: 'line',
+        data: { labels, datasets: [{ data: portfolio, borderColor: '#68d391', borderWidth: 1.5, pointRadius: 0, tension: 0.3, fill: true, backgroundColor: 'rgba(104,211,145,0.06)' }] },
+        options: chartDefaults,
       });
     }
 
+    // ── Trades ────────────────────────────────────────────────────────────────
     async function loadTrades() {
-      const trades = await fetch('/api/trades?limit=10').then(r => r.json());
+      const trades = await fetch('/api/trades?limit=15').then(r => r.json());
       const tbody = document.getElementById('trades');
+      if (!trades.length) {
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No trades yet</td></tr>';
+        return;
+      }
       tbody.innerHTML = trades.map(t => `
         <tr>
-          <td>${t.timestamp}</td>
-          <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.5">[dry]</span>' : ''}</td>
+          <td style="white-space:nowrap">${new Date(t.timestamp).toLocaleString()}</td>
+          <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.45;font-weight:400">[dry]</span>' : ''}</td>
           <td>${parseFloat(t.amount_eth).toFixed(6)} ETH</td>
           <td>$${parseFloat(t.price_usd).toFixed(2)}</td>
-          <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.reason ?? ''}</td>
-          <td style="font-size:0.7rem;opacity:.6">${t.tx_hash ? t.tx_hash.slice(0,10) + '...' : '—'}</td>
+          <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#a0aec0">${t.reason ?? ''}</td>
+          <td style="font-size:0.7rem;opacity:.5">${t.tx_hash ? `<a href="https://basescan.org/tx/${t.tx_hash}" target="_blank" style="color:#90cdf4">${t.tx_hash.slice(0,10)}…</a>` : '—'}</td>
         </tr>
       `).join('');
     }
 
+    // ── Controls ──────────────────────────────────────────────────────────────
     async function control(action) {
       await fetch('/api/control/' + action, { method: 'POST' });
       await loadStatus();
     }
 
+    async function manualTrade(action) {
+      if (!confirm(`Execute manual ${action.toUpperCase()}?`)) return;
+      await fetch('/api/control/' + action, { method: 'POST' });
+    }
+
+    // ── Refresh ───────────────────────────────────────────────────────────────
     async function refresh() {
-      await Promise.all([loadStatus(), loadChart(), loadTrades()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades()]);
     }
 
     refresh();
-    setInterval(refresh, 15000);
+    setInterval(refresh, 10000);
   </script>
 </body>
 </html>

@@ -37,3 +37,4 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data;
+export const availableNetworks = config.NETWORK_ID.split(',').map(n => n.trim()).filter(Boolean);

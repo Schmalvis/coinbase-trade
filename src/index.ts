@@ -7,20 +7,30 @@ import { startTelegramBot } from './telegram/bot.js';
 import { startWebServer } from './web/server.js';
 import { botState } from './core/state.js';
 import { logger } from './core/logger.js';
-import { config } from './config.js';
+import { config, availableNetworks } from './config.js';
 
 async function main() {
-  logger.info('Starting coinbase trade bot (base-sepolia testnet)');
+  logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${config.STRATEGY} | Dry run: ${config.DRY_RUN}`);
+  logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${availableNetworks[0]})`);
 
-  const mcp = new MCPClient(config.MCP_SERVER_URL, config.NETWORK_ID);
+  // Initialise network state before connecting MCP
+  botState.initNetworks(availableNetworks, availableNetworks[0]);
+
+  const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork);
   await mcp.connect();
 
   const tools = new CoinbaseTools(mcp);
+  const pollNow = await startPortfolioTracker(tools);
+
+  // On network switch: immediately re-poll so UI reflects new balances
+  botState.onNetworkChange(network => {
+    logger.info(`Network switched to ${network} — re-polling portfolio`);
+    pollNow();
+  });
+
   const executor = new TradeExecutor(tools);
   const engine = new TradingEngine(executor);
-
-  await startPortfolioTracker(tools);
 
   engine.start();
   startTelegramBot(engine);

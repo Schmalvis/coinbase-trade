@@ -7,7 +7,7 @@ export class MCPClient {
   private transport: StreamableHTTPClientTransport;
   private connected = false;
 
-  constructor(url: string, private readonly network: string) {
+  constructor(url: string, private readonly getNetwork: () => string) {
     this.transport = new StreamableHTTPClientTransport(new URL(url));
     this.client = new Client({ name: 'coinbase-trade-bot', version: '0.1.0' });
   }
@@ -15,14 +15,14 @@ export class MCPClient {
   async connect(): Promise<void> {
     await this.client.connect(this.transport);
     this.connected = true;
-    logger.info(`MCP client connected (network: ${this.network})`);
+    logger.info(`MCP client connected`);
   }
 
   async callTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
     if (!this.connected) throw new Error('MCP client not connected');
 
-    // Always inject network — required by multi-network MCP server
-    const argsWithNetwork = { network: this.network, ...args };
+    // Inject the current active network on every call — required by multi-network MCP server
+    const argsWithNetwork = { network: this.getNetwork(), ...args };
 
     const result = await this.client.callTool({ name, arguments: argsWithNetwork });
 
