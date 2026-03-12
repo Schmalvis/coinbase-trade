@@ -660,9 +660,10 @@
   <div class="controls">
     <button class="btn-pause"  onclick="control('pause')">Pause</button>
     <button class="btn-resume" onclick="control('resume')">Resume</button>
-    <button class="btn-buy"    onclick="manualTrade('buy')">Buy</button>
-    <button class="btn-sell"   onclick="manualTrade('sell')">Sell</button>
-    <button class="btn-faucet" id="faucetBtn" onclick="requestFaucet()" style="display:none">Faucet</button>
+    <button class="btn-buy" onclick="openTrade('ETH','USDC')">Buy</button>
+    <button class="btn-sell" onclick="openTrade('USDC','ETH')">Sell</button>
+    <button class="btn-faucet" id="faucetBtn" onclick="openFaucet()" style="display:none">Faucet</button>
+    <button class="btn-theme" onclick="openTrade(null,null)">Trade</button>
   </div>
 
   <div class="charts">
@@ -885,30 +886,153 @@
       await loadStatus();
     }
 
-    async function manualTrade(action) {
-      if (!confirm(`Execute manual ${action.toUpperCase()}?`)) return;
-      await fetch('/api/control/' + action, { method: 'POST' });
+    // ── Trade modal ───────────────────────────────────────────────────────────
+    let tradePair = { from: 'ETH', to: 'USDC' };
+    let tradeSide = 'from';
+    let tradeQuotedFromAmount = null;
+
+    function openTrade(from, to) {
+      setTradePair(from || 'ETH', to || 'USDC');
+      setTradeSide('from');
+      document.getElementById('tradeAmount').value = '';
+      document.getElementById('tradeQuoteBox').style.display = 'none';
+      document.getElementById('tradeResult').textContent = '';
+      document.getElementById('tradeAmountErr').textContent = '';
+      document.getElementById('confirmTradeBtn').disabled = true;
+      tradeQuotedFromAmount = null;
+      document.getElementById('tradeModal').style.display = 'flex';
     }
 
-    async function requestFaucet() {
-      const btn = document.getElementById('faucetBtn');
-      btn.disabled = true;
-      btn.textContent = 'Requesting…';
+    function setTradePair(from, to) {
+      tradePair = { from, to };
+      document.getElementById('tradeFromETH').classList.toggle('active',  from === 'ETH');
+      document.getElementById('tradeFromUSDC').classList.toggle('active', from === 'USDC');
+      document.getElementById('tradeQuoteBox').style.display = 'none';
+      document.getElementById('confirmTradeBtn').disabled = true;
+      tradeQuotedFromAmount = null;
+      updateTradeLabel();
+    }
+
+    function setTradeSide(side) {
+      tradeSide = side;
+      document.getElementById('sideSpend').classList.toggle('active',   side === 'from');
+      document.getElementById('sideReceive').classList.toggle('active', side === 'to');
+      updateTradeLabel();
+      document.getElementById('tradeQuoteBox').style.display = 'none';
+      document.getElementById('confirmTradeBtn').disabled = true;
+      tradeQuotedFromAmount = null;
+    }
+
+    function updateTradeLabel() {
+      const token = tradeSide === 'from' ? tradePair.from : tradePair.to;
+      document.getElementById('tradeAmountLabel').textContent =
+        `Amount to ${tradeSide === 'from' ? 'spend' : 'receive'} (${token})`;
+    }
+
+    async function getTradeQuote() {
+      const amount = document.getElementById('tradeAmount').value;
+      if (!amount || parseFloat(amount) <= 0) {
+        document.getElementById('tradeAmountErr').textContent = 'Enter a valid amount';
+        return;
+      }
+      document.getElementById('tradeAmountErr').textContent = '';
+      document.getElementById('tradeQuoteBox').style.display = 'none';
+
       try {
-        const r = await fetch('/api/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+        const url = `/api/quote?from=${tradePair.from}&to=${tradePair.to}&amount=${amount}&side=${tradeSide}`;
+        const q = await fetch(url).then(r => r.json());
+        if (q.error) {
+          document.getElementById('tradeAmountErr').textContent = q.error;
+          return;
+        }
+
+        tradeQuotedFromAmount = q.fromAmount;
+        const estimated = tradeSide === 'to' ? ' (estimated)' : '';
+        document.getElementById('tradeQuoteText').textContent =
+          `Spend ${parseFloat(q.fromAmount).toFixed(6)} ${tradePair.from} → Receive ${parseFloat(q.toAmount).toFixed(6)} ${tradePair.to}${estimated}`;
+
+        const impact = parseFloat(q.priceImpact);
+        const impactEl = document.getElementById('tradePriceImpact');
+        if (!isNaN(impact)) {
+          impactEl.textContent = `Price impact: ${impact.toFixed(3)}%`;
+          impactEl.style.color = impact > 3 ? 'var(--red)' : impact > 1 ? 'var(--amber)' : 'var(--text-2)';
+        } else {
+          impactEl.textContent = '';
+        }
+
+        document.getElementById('tradeQuoteBox').style.display = '';
+        document.getElementById('confirmTradeBtn').disabled = false;
+      } catch (e) {
+        document.getElementById('tradeAmountErr').textContent = 'Quote failed: ' + e.message;
+      }
+    }
+
+    async function confirmTrade() {
+      if (!tradeQuotedFromAmount) return;
+      const btn = document.getElementById('confirmTradeBtn');
+      btn.disabled = true;
+      btn.textContent = 'Executing…';
+      document.getElementById('tradeResult').textContent = '';
+
+      try {
+        const r = await fetch('/api/trade', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: tradePair.from, to: tradePair.to, fromAmount: tradeQuotedFromAmount }),
+        });
         const data = await r.json();
         if (data.ok) {
-          btn.textContent = 'Sent!';
-          setTimeout(() => { btn.textContent = 'Faucet'; btn.disabled = false; }, 5000);
+          const explorer = (typeof activeNetwork !== 'undefined' && activeNetwork?.includes('mainnet'))
+            ? 'https://basescan.org' : 'https://sepolia.basescan.org';
+          const tx = data.txHash
+            ? `<a href="${explorer}/tx/${data.txHash}" target="_blank" style="color:var(--accent)">${data.txHash.slice(0,12)}…</a>`
+            : '[dry run]';
+          document.getElementById('tradeResult').innerHTML = `<span style="color:var(--green)">✓ Trade executed — ${tx}</span>`;
+          setTimeout(() => closeModal('tradeModal'), 4000);
+          await loadStatus();
         } else {
-          alert('Faucet error: ' + (data.error ?? 'unknown'));
-          btn.textContent = 'Faucet';
+          document.getElementById('tradeResult').innerHTML = `<span style="color:var(--red)">✗ ${data.error}</span>`;
           btn.disabled = false;
         }
       } catch (e) {
-        alert('Faucet request failed');
-        btn.textContent = 'Faucet';
+        document.getElementById('tradeResult').innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`;
         btn.disabled = false;
+      } finally {
+        btn.textContent = 'Confirm';
+      }
+    }
+
+    // ── Faucet modal ──────────────────────────────────────────────────────────
+    function openFaucet() {
+      document.getElementById('faucetEthBtn').textContent  = 'Request ETH';
+      document.getElementById('faucetUsdcBtn').textContent = 'Request USDC';
+      document.getElementById('faucetEthBtn').disabled  = false;
+      document.getElementById('faucetUsdcBtn').disabled = false;
+      document.getElementById('faucetModal').style.display = 'flex';
+    }
+
+    async function requestFaucetAsset(assetId) {
+      const btnId = assetId === 'eth' ? 'faucetEthBtn' : 'faucetUsdcBtn';
+      const btn = document.getElementById(btnId);
+      btn.disabled = true;
+      btn.textContent = 'Requesting…';
+      try {
+        const r = await fetch('/api/faucet', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ assetId }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          btn.textContent = 'Sent!';
+          setTimeout(() => { btn.textContent = `Request ${assetId.toUpperCase()}`; btn.disabled = false; }, 5000);
+        } else {
+          btn.textContent = '✗ Failed';
+          setTimeout(() => { btn.textContent = `Request ${assetId.toUpperCase()}`; btn.disabled = false; }, 3000);
+        }
+      } catch (e) {
+        btn.textContent = '✗ Error';
+        setTimeout(() => { btn.textContent = `Request ${assetId.toUpperCase()}`; btn.disabled = false; }, 3000);
       }
     }
 
@@ -1154,6 +1278,63 @@
     <div class="modal-footer">
       <button class="btn-cancel" onclick="closeSettingsModal()">Cancel</button>
       <button class="btn-save" id="saveSettingsBtn" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+<!-- Trade Modal -->
+<div class="modal-backdrop" id="tradeModal" style="display:none" onclick="closeOnBackdrop(event,'tradeModal')">
+  <div class="modal" style="max-width:400px">
+    <div class="modal-title">Trade</div>
+    <button class="modal-close" onclick="closeModal('tradeModal')">✕</button>
+
+    <div class="field-group">
+      <div class="field">
+        <label>Direction</label>
+        <div class="pill-group">
+          <button class="pill" id="tradeFromETH" onclick="setTradePair('ETH','USDC')">ETH → USDC</button>
+          <button class="pill" id="tradeFromUSDC" onclick="setTradePair('USDC','ETH')">USDC → ETH</button>
+        </div>
+      </div>
+      <div class="field">
+        <div style="display:flex;gap:0.5rem;align-items:center">
+          <div style="flex:1">
+            <label id="tradeAmountLabel">Amount to spend</label>
+            <input type="number" id="tradeAmount" min="0" step="any" placeholder="0.00">
+          </div>
+          <div style="padding-top:1.1rem">
+            <div class="pill-group">
+              <button class="pill active" id="sideSpend" onclick="setTradeSide('from')">Spend</button>
+              <button class="pill" id="sideReceive" onclick="setTradeSide('to')">Receive</button>
+            </div>
+          </div>
+        </div>
+        <span class="field-error" id="tradeAmountErr"></span>
+      </div>
+
+      <button class="btn-buy" style="width:100%;justify-content:center" onclick="getTradeQuote()">Get Quote</button>
+
+      <div id="tradeQuoteBox" style="display:none;background:var(--surface-2);border:1px solid var(--border);padding:0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem">
+        <div id="tradeQuoteText"></div>
+        <div id="tradePriceImpact" style="margin-top:0.3rem;font-size:0.65rem"></div>
+      </div>
+    </div>
+
+    <div class="modal-footer">
+      <button class="btn-cancel" onclick="closeModal('tradeModal')">Cancel</button>
+      <button class="btn-save" id="confirmTradeBtn" onclick="confirmTrade()" disabled>Confirm</button>
+    </div>
+    <div id="tradeResult" style="margin-top:0.75rem;font-size:0.72rem;font-family:'JetBrains Mono',monospace"></div>
+  </div>
+</div>
+
+<!-- Faucet Modal -->
+<div class="modal-backdrop" id="faucetModal" style="display:none" onclick="closeOnBackdrop(event,'faucetModal')">
+  <div class="modal" style="max-width:320px">
+    <div class="modal-title">Testnet Faucet</div>
+    <button class="modal-close" onclick="closeModal('faucetModal')">✕</button>
+    <div class="field-group" style="margin-bottom:0">
+      <button class="btn-buy" id="faucetEthBtn" onclick="requestFaucetAsset('eth')" style="width:100%">Request ETH</button>
+      <button class="btn-buy" id="faucetUsdcBtn" onclick="requestFaucetAsset('usdc')" style="width:100%">Request USDC</button>
     </div>
   </div>
 </div>
