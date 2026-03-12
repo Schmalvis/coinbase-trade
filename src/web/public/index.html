@@ -189,6 +189,35 @@
       letter-spacing: 0.04em;
     }
 
+    /* ── Wallet address expand/copy ──────────────────────────────────────────── */
+    .wallet-wrap {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      cursor: pointer;
+    }
+    .wallet-addr {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.4;
+      word-break: break-all;
+      color: var(--text);
+      transition: color 0.1s;
+    }
+    .wallet-wrap:hover .wallet-addr { color: var(--accent); }
+    .wallet-copy {
+      flex-shrink: 0;
+      opacity: 0;
+      transition: opacity 0.15s;
+      color: var(--text-2);
+      font-size: 0.7rem;
+    }
+    .wallet-wrap:hover .wallet-copy,
+    .wallet-wrap.expanded .wallet-copy { opacity: 1; }
+    .wallet-copy.copied { color: var(--green); }
+
     /* ── Stat cards ──────────────────────────────────────────────────────────── */
     .grid {
       display: grid;
@@ -435,7 +464,12 @@
     </div>
     <div class="card">
       <div class="label">Wallet</div>
-      <div class="value" id="walletAddress" style="font-size:0.72rem;word-break:break-all;letter-spacing:0.01em">—</div>
+      <div class="value" style="line-height:1">
+        <div class="wallet-wrap" id="walletWrap" onclick="toggleWalletAddress()" title="Click to expand / copy">
+          <span class="wallet-addr" id="walletAddress">—</span>
+          <span class="wallet-copy" id="walletCopy">⎘</span>
+        </div>
+      </div>
       <div class="sub" id="walletNetwork">—</div>
     </div>
   </div>
@@ -620,18 +654,46 @@
     }
 
     // ── Wallet ────────────────────────────────────────────────────────────────
+    let fullWalletAddress = '';
+    let walletExpanded = false;
+
     async function loadWallet() {
       try {
         const w = await fetch('/api/wallet').then(r => r.json());
         if (w.address) {
-          const addrEl = document.getElementById('walletAddress');
-          const scanBase = activeNetwork?.includes('mainnet') ? 'https://basescan.org' : 'https://sepolia.basescan.org';
-          addrEl.innerHTML = `<a href="${scanBase}/address/${w.address}" target="_blank"
-            style="color:var(--text);text-decoration:none;font-size:0.72rem"
-            title="${w.address}">${w.address.slice(0,6)}…${w.address.slice(-4)}</a>`;
+          fullWalletAddress = w.address;
+          renderWalletAddress();
           document.getElementById('walletNetwork').textContent = w.network ?? '';
         }
       } catch (_) {}
+    }
+
+    function renderWalletAddress() {
+      const el = document.getElementById('walletAddress');
+      el.textContent = walletExpanded
+        ? fullWalletAddress
+        : fullWalletAddress.slice(0, 6) + '…' + fullWalletAddress.slice(-4);
+    }
+
+    function toggleWalletAddress() {
+      if (!fullWalletAddress) return;
+      walletExpanded = !walletExpanded;
+      document.getElementById('walletWrap').classList.toggle('expanded', walletExpanded);
+      renderWalletAddress();
+      copyWalletAddress();
+    }
+
+    function copyWalletAddress() {
+      if (!fullWalletAddress) return;
+      navigator.clipboard.writeText(fullWalletAddress).then(() => {
+        const copyEl = document.getElementById('walletCopy');
+        copyEl.textContent = '✓';
+        copyEl.classList.add('copied');
+        setTimeout(() => {
+          copyEl.textContent = '⎘';
+          copyEl.classList.remove('copied');
+        }, 2000);
+      });
     }
 
     // ── Controls ──────────────────────────────────────────────────────────────
