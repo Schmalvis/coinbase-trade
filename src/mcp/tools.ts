@@ -110,4 +110,30 @@ export class CoinbaseTools {
     const result = await this.mcp.callTool<string>('CdpApiActionProvider_request_faucet_funds', { assetId });
     return typeof result === 'string' ? result : JSON.stringify(result);
   }
+
+  /**
+   * Get a price quote for receiving a specific amount of the `to` token.
+   * Uses two-step estimation since the MCP tool only accepts fromAmount.
+   *
+   * 1. Get rate from a 1-unit reference quote
+   * 2. Estimate fromAmount = desiredToAmount / rate
+   * 3. Get real quote with estimated fromAmount
+   */
+  async getSwapQuoteForReceiveAmount(
+    from: TokenSymbol,
+    to: TokenSymbol,
+    desiredToAmount: string,
+  ): Promise<SwapPrice> {
+    // Step 1: Reference quote for rate
+    const refQuote = await this.getSwapPrice(from, to, '1');
+    const refFrom = parseFloat(refQuote.fromAmount);
+    const refTo   = parseFloat(refQuote.toAmount);
+    if (!refTo || isNaN(refTo) || refTo <= 0) throw new Error('Could not determine exchange rate from reference quote');
+
+    const rate = refTo / refFrom; // toAmount per 1 unit of fromToken
+    const estimatedFrom = (parseFloat(desiredToAmount) / rate).toFixed(8);
+
+    // Step 2: Real quote
+    return this.getSwapPrice(from, to, estimatedFrom);
+  }
 }
