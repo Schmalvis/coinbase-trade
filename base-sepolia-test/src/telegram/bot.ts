@@ -25,17 +25,17 @@ export function startTelegramBot(engine: TradingEngine): void {
   bot.use(guard);
 
   bot.command('status', ctx => {
-    const price = botState.lastPrice?.toFixed(2) ?? 'unknown';
-    const balance = botState.lastBalance?.toFixed(6) ?? 'unknown';
-    const portfolioUsd = botState.lastPrice && botState.lastBalance
-      ? (botState.lastPrice * botState.lastBalance).toFixed(2)
-      : 'unknown';
+    const price = botState.lastPrice ?? 0;
+    const ethBalance = botState.lastBalance ?? 0;
+    const usdcBalance = botState.lastUsdcBalance ?? 0;
+    const portfolioUsd = (price * ethBalance + usdcBalance).toFixed(2);
 
     ctx.reply(
       `*Bot Status*\n` +
       `Status: ${botState.status}\n` +
-      `ETH price: $${price}\n` +
-      `Balance: ${balance} ETH\n` +
+      `ETH price: $${price.toFixed(2)}\n` +
+      `ETH balance: ${ethBalance.toFixed(6)}\n` +
+      `USDC balance: ${usdcBalance.toFixed(2)}\n` +
       `Portfolio: $${portfolioUsd}\n` +
       `Dry run: ${config.DRY_RUN ? 'yes' : 'no'}`,
       { parse_mode: 'Markdown' }

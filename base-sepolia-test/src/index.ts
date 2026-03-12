@@ -13,7 +13,7 @@ async function main() {
   logger.info('Starting coinbase trade bot (base-sepolia testnet)');
   logger.info(`Strategy: ${config.STRATEGY} | Dry run: ${config.DRY_RUN}`);
 
-  const mcp = new MCPClient(config.MCP_SERVER_URL);
+  const mcp = new MCPClient(config.MCP_SERVER_URL, config.NETWORK_ID);
   await mcp.connect();
 
   const tools = new CoinbaseTools(mcp);

@@ -20,7 +20,8 @@ Autonomous trading bot for **base-sepolia testnet** using Coinbase AgentKit via 
 
 - **Wallet address:** `0xF81F9e110Fa9070cb6230bC8c75403d1992a5751` (base-sepolia)
 - **Network:** base-sepolia testnet (chain ID 84532)
-- **MCP server:** `http://192.168.68.139:3002/mcp` (Streamable HTTP, coinbase AgentKit)
+- **MCP server:** `http://192.168.68.139:3002/mcp` (Streamable HTTP, coinbase AgentKit — see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
+- **Network:** `base-sepolia` — set via `NETWORK_ID` env var, injected into every MCP tool call automatically by `mcp/client.ts`
 - **Data dir:** `/home/pi/.local/share/coinbase-trade/base-sepolia/` (local, NOT the SMB share — SQLite requires POSIX locking)
 - **Web dashboard:** `http://192.168.68.148:8080`
 - **Telegram:** configured, chat ID `8423651207`
@@ -84,9 +85,10 @@ cli.ts               # Click-style CLI (talks to running bot via HTTP)
 
 ## Known Issues / Notes
 
-- **MCP tool responses are quirky:** wallet details return as plain text (parsed with regex), price responses are double-JSON-encoded (handled in `mcp/client.ts`).
-- **Coinbase MCP tools won't appear as Claude deferred tools** until the NEXT session (server was added mid-session when this project started).
-- **Faucet:** call `CdpApiActionProvider_request_faucet_funds` via MCP to top up testnet ETH. Can be triggered with: `curl -s -X POST http://192.168.68.139:3002/mcp -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" -d '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"CdpApiActionProvider_request_faucet_funds","arguments":{}}}'`
+- **MCP tool responses:** wallet details and ERC20 balances return as plain text (parsed with regex in `mcp/tools.ts`); prices may be double-JSON-encoded (handled in `mcp/client.ts`). This is AgentKit behaviour — not a bug.
+- **Network injection:** `MCPClient` automatically appends `network: NETWORK_ID` to every tool call. Never pass `network` manually in `tools.ts` — it's handled at the client layer.
+- **Wallet is deterministic:** the new MCP server derives the wallet address from `CDP_WALLET_SECRET`. Same secret = same address on every boot.
+- **Faucet:** call `CdpApiActionProvider_request_faucet_funds` via MCP to top up testnet ETH.
 - **Strategy signals require history:** threshold needs 2+ snapshots, SMA needs `SMA_LONG_WINDOW` (default 20) snapshots before it fires.
 - **Swaps on base-sepolia:** `CdpEvmWalletActionProvider_swap` trades ETH↔USDC. Test `get_swap_price` first before enabling live trading.
 

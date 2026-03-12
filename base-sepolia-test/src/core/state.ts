@@ -14,6 +14,7 @@ class BotState {
   private _status: BotStatus = 'paused';
   private _lastPrice: number | null = null;
   private _lastBalance: number | null = null;
+  private _lastUsdcBalance: number | null = null;
   private _lastTradeAt: Date | null = null;
 
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
@@ -22,6 +23,7 @@ class BotState {
   get status() { return this._status; }
   get lastPrice() { return this._lastPrice; }
   get lastBalance() { return this._lastBalance; }
+  get lastUsdcBalance() { return this._lastUsdcBalance; }
   get lastTradeAt() { return this._lastTradeAt; }
   get isPaused() { return this._status !== 'running'; }
 
@@ -32,6 +34,7 @@ class BotState {
 
   updatePrice(price: number) { this._lastPrice = price; }
   updateBalance(balance: number) { this._lastBalance = balance; }
+  updateUsdcBalance(balance: number) { this._lastUsdcBalance = balance; }
   recordTrade(at: Date) { this._lastTradeAt = at; }
 
   onTrade(listener: (n: TradeNotification) => void) {

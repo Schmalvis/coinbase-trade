@@ -25,25 +25,31 @@ export class TradeExecutor {
       }
     }
 
-    const balance = botState.lastBalance ?? 0;
+    const ethBalance = botState.lastBalance ?? 0;
+    const usdcBalance = botState.lastUsdcBalance ?? 0;
     const price = botState.lastPrice ?? 0;
-    const amount = Math.min(config.MAX_TRADE_SIZE_ETH, balance * 0.1);
+
+    // Buy: spend USDC to get ETH. Sell: spend ETH to get USDC.
+    const isBuy = signal === 'buy';
+    const fromSymbol = isBuy ? 'USDC' : 'ETH';
+    const toSymbol   = isBuy ? 'ETH'  : 'USDC';
+    const available  = isBuy ? usdcBalance : ethBalance;
+    const maxSize    = isBuy ? config.MAX_TRADE_SIZE_USDC : config.MAX_TRADE_SIZE_ETH;
+    const amount     = Math.min(maxSize, available * 0.1);
 
     if (amount <= 0) {
-      logger.warn('Trade skipped — insufficient balance');
+      logger.warn(`Trade skipped — insufficient ${fromSymbol} balance (${available.toFixed(isBuy ? 2 : 6)})`);
       return false;
     }
 
-    logger.info(`${config.DRY_RUN ? '[DRY RUN] ' : ''}Executing ${signal.toUpperCase()} ${amount} ETH — ${reason}`);
+    logger.info(`${config.DRY_RUN ? '[DRY RUN] ' : ''}Executing ${signal.toUpperCase()} ${amount} ${fromSymbol} → ${toSymbol} — ${reason}`);
 
     let txHash: string | undefined;
     let status = 'executed';
 
     if (!config.DRY_RUN) {
       try {
-        const fromAsset = signal === 'sell' ? 'eth' : 'usdc';
-        const toAsset   = signal === 'sell' ? 'usdc' : 'eth';
-        const result = await this.tools.swap(fromAsset, toAsset, amount.toString());
+        const result = await this.tools.swap(fromSymbol, toSymbol, amount.toString());
         txHash = result.txHash;
       } catch (err) {
         logger.error('Swap failed', err);
@@ -53,7 +59,7 @@ export class TradeExecutor {
 
     queries.insertTrade.run({
       action: signal,
-      amount_eth: amount,
+      amount_eth: isBuy ? amount / (price || 1) : amount,
       price_usd: price,
       tx_hash: txHash ?? null,
       triggered_by: triggeredBy,
@@ -66,7 +72,7 @@ export class TradeExecutor {
     botState.recordTrade(now);
     botState.emitTrade({
       action: signal,
-      amountEth: amount,
+      amountEth: isBuy ? amount / (price || 1) : amount,
       priceUsd: price,
       txHash,
       dryRun: config.DRY_RUN,

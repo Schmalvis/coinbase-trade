@@ -1,4 +1,4 @@
-import { CoinbaseTools } from '../mcp/tools.js';
+import { CoinbaseTools, TOKEN_ADDRESSES } from '../mcp/tools.js';
 import { queries } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
@@ -23,8 +23,9 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<void>
       const pricePromise = ethPriceFeedId
         ? tools.fetchPrice(ethPriceFeedId)
         : Promise.resolve(0);
+      const usdcPromise = tools.getErc20Balance(TOKEN_ADDRESSES.USDC);
 
-      const [wallet, ethPrice] = await Promise.all([walletPromise, pricePromise]);
+      const [wallet, ethPrice, usdcBalance] = await Promise.all([walletPromise, pricePromise, usdcPromise]);
 
       logger.debug('Wallet response', wallet);
       logger.debug('Price response', ethPrice);
@@ -32,7 +33,7 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<void>
       const balanceStr = (wallet as any).balance ?? (wallet as any).nativeBalance ?? '0';
       const ethBalance = parseFloat(String(balanceStr)) || 0;
       const price = parseFloat(String(ethPrice)) || 0;
-      const portfolioUsd = ethBalance * price;
+      const portfolioUsd = ethBalance * price + usdcBalance;
 
       queries.insertSnapshot.run({
         eth_price: price,
@@ -42,8 +43,9 @@ export async function startPortfolioTracker(tools: CoinbaseTools): Promise<void>
 
       botState.updatePrice(price);
       botState.updateBalance(ethBalance);
+      botState.updateUsdcBalance(usdcBalance);
 
-      logger.info(`Portfolio: ${ethBalance.toFixed(6)} ETH @ $${price.toFixed(2)} = $${portfolioUsd.toFixed(2)}`);
+      logger.info(`Portfolio: ${ethBalance.toFixed(6)} ETH + ${usdcBalance.toFixed(2)} USDC @ $${price.toFixed(2)} = $${portfolioUsd.toFixed(2)}`);
     } catch (err) {
       logger.error('Portfolio tracker poll failed', err);
     }

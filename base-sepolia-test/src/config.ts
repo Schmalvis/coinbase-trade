@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 const schema = z.object({
   MCP_SERVER_URL: z.string().url().default('http://192.168.68.139:3002/mcp'),
+  NETWORK_ID: z.string().default('base-sepolia'),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
   TELEGRAM_ALLOWED_CHAT_IDS: z.string().transform(s =>
@@ -19,6 +20,7 @@ const schema = z.object({
   SMA_LONG_WINDOW: z.coerce.number().default(20),
 
   MAX_TRADE_SIZE_ETH: z.coerce.number().default(0.01),
+  MAX_TRADE_SIZE_USDC: z.coerce.number().default(10),
   TRADE_COOLDOWN_SECONDS: z.coerce.number().default(300),
 
   WEB_PORT: z.coerce.number().default(8080),
