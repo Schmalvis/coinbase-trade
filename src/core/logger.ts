@@ -1,14 +1,13 @@
 import { config } from '../config.js';
+import { runtimeConfig } from './runtime-config.js';
 import fs from 'fs';
 import path from 'path';
 
-const levels = { debug: 0, info: 1, warn: 2, error: 3 };
+const LEVEL_MAP: Record<string, number> = { debug: 0, info: 1, warn: 2, error: 3 };
 
-// Mutable — can be updated at runtime via setLevel()
-let currentLevel = levels[config.LOG_LEVEL];
-
-export function setLevel(level: string): void {
-  currentLevel = levels[level as keyof typeof levels] ?? levels.info;
+function currentLevel(): number {
+  const lvl = runtimeConfig.get('LOG_LEVEL') as string | undefined;
+  return LEVEL_MAP[lvl ?? config.LOG_LEVEL] ?? 1;
 }
 
 const logDir = path.join(config.DATA_DIR, 'logs');
@@ -22,8 +21,13 @@ function write(level: string, msg: string, meta?: unknown) {
 }
 
 export const logger = {
-  debug: (msg: string, meta?: unknown) => levels.debug >= currentLevel && write('debug', msg, meta),
-  info:  (msg: string, meta?: unknown) => levels.info  >= currentLevel && write('info',  msg, meta),
-  warn:  (msg: string, meta?: unknown) => levels.warn  >= currentLevel && write('warn',  msg, meta),
-  error: (msg: string, meta?: unknown) => levels.error >= currentLevel && write('error', msg, meta),
+  debug: (msg: string, meta?: unknown) => LEVEL_MAP['debug'] >= currentLevel() && write('debug', msg, meta),
+  info:  (msg: string, meta?: unknown) => LEVEL_MAP['info']  >= currentLevel() && write('info',  msg, meta),
+  warn:  (msg: string, meta?: unknown) => LEVEL_MAP['warn']  >= currentLevel() && write('warn',  msg, meta),
+  error: (msg: string, meta?: unknown) => LEVEL_MAP['error'] >= currentLevel() && write('error', msg, meta),
 };
+
+/** @deprecated LOG_LEVEL is now read from runtimeConfig on each call — this is a no-op */
+export function setLevel(_level: string): void {
+  // no-op: level is read dynamically from runtimeConfig
+}

@@ -6,17 +6,17 @@ import { TradingEngine } from './trading/engine.js';
 import { startTelegramBot } from './telegram/bot.js';
 import { startWebServer } from './web/server.js';
 import { botState } from './core/state.js';
-import { logger, setLevel } from './core/logger.js';
+import { logger } from './core/logger.js';
 import { config, availableNetworks } from './config.js';
-import { RuntimeConfig } from './core/runtime-config.js';
+import { RuntimeConfig, setRuntimeConfigSingleton } from './core/runtime-config.js';
 import { settingQueries } from './data/db.js';
 
 async function main() {
   // Initialise RuntimeConfig — overlays env defaults with any saved DB settings
   const runtimeConfig = new RuntimeConfig(config as any, settingQueries);
 
-  // Wire logger to live LOG_LEVEL changes
-  runtimeConfig.subscribe('LOG_LEVEL', v => setLevel(v as string));
+  // Wire singleton so logger reads LOG_LEVEL dynamically on each call
+  setRuntimeConfigSingleton(runtimeConfig);
 
   logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);

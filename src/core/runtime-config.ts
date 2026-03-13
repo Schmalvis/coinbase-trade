@@ -88,6 +88,20 @@ export type DbQueries = {
   getAllSettings: { all(): Array<{ key: string; value: string }> };
 };
 
+// Singleton instance — wired after DB and config are available
+// Lazy so logger can import this module without triggering DB init at require time
+let _singleton: RuntimeConfig | null = null;
+
+export function setRuntimeConfigSingleton(instance: RuntimeConfig): void {
+  _singleton = instance;
+}
+
+export const runtimeConfig = {
+  get(key: ConfigKey): ConfigValue {
+    return _singleton?.get(key);
+  },
+};
+
 export class RuntimeConfig {
   private values = new Map<ConfigKey, ConfigValue>();
   private listeners = new Map<ConfigKey, Array<(v: ConfigValue) => void>>();
