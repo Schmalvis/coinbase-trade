@@ -12,7 +12,10 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 2 (multi-asset) complete** — asset registry implemented for ETH, USDC, CBBTC, CBETH with per-asset balance tracking. Dashboard updated with asset selector for price chart, Holdings section showing all tracked assets, and dynamic trade pair buttons. LOG_LEVEL hot-reload fixed — Settings modal LOG_LEVEL changes now take effect immediately without restart.
 
+**Phase 3 (ERC20 discovery) complete** — AlchemyService scans the wallet for any ERC20 tokens and persists them as `discovered_assets` in SQLite. Discovered tokens appear in a dynamic asset table on the dashboard with ENABLE/DISMISS actions. Enabled tokens get their own independent strategy loop in TradingEngine. Asset Management modal allows per-asset strategy configuration. Set `ALCHEMY_API_KEY` to activate discovery.
+
 **Next steps:**
+- Set `ALCHEMY_API_KEY` to enable ERC20 auto-discovery (get a free key at dashboard.alchemy.com)
 - Test mainnet with a small real ETH transfer (see `docs/real-account-options.md`)
 - Switch `NETWORK_ID=base-mainnet` and restart when ready for live trading
 
@@ -72,7 +75,7 @@ src/
   data/
     db.ts            # SQLite via better-sqlite3 (WAL mode)
   portfolio/
-    tracker.ts       # Polls ETH + USDC balances and price on interval
+    tracker.ts       # Polls balances/prices; runs Alchemy ERC20 discovery if key set
   services/
     alchemy.ts       # AlchemyService: ERC20 token discovery via Alchemy JSON-RPC
   strategy/
@@ -81,7 +84,7 @@ src/
     sma.ts           # SMA crossover (short/long window)
   trading/
     executor.ts      # Risk checks + trade execution (respects DRY_RUN)
-    engine.ts        # Runs strategy on interval, calls executor
+    engine.ts        # Runs strategy on interval; per-asset loops for discovered tokens
   telegram/
     bot.ts           # Telegraf bot: /status /pause /resume /trades /buy /sell
   web/
@@ -105,6 +108,7 @@ docs/
 - **Wallet is deterministic:** the MCP server derives wallet addresses from `CDP_WALLET_SECRET`. Same secret = same address on every boot.
 - **Faucet:** call `CdpApiActionProvider_request_faucet_funds` via MCP to top up testnet ETH.
 - **Strategy signals require history:** threshold needs 2+ snapshots, SMA needs `SMA_LONG_WINDOW` (default 20) snapshots before it fires.
+- **Per-asset strategy params (known limitation):** discovered-asset loops use the same global `STRATEGY`, `PRICE_DROP_THRESHOLD_PCT`, `PRICE_RISE_TARGET_PCT`, `SMA_SHORT/LONG_WINDOW` config as the main ETH loop — the per-asset `drop_pct`/`rise_pct` stored in `discovered_assets` are saved to DB and shown in the UI but not yet wired into the strategy evaluation. Full per-asset param injection requires strategy constructors to accept explicit params (currently unchanged by design).
 
 ---
 
