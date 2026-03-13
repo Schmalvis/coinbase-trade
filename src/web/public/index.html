@@ -837,7 +837,8 @@
       grid.style.display = '';
       grid.innerHTML = extras.map(a => {
         const usdValue = (a.balance != null && a.price != null) ? (a.balance * a.price).toFixed(2) : null;
-        const balFmt = a.balance != null ? Number(a.balance).toFixed(a.decimals <= 8 ? a.decimals : 6) : '—';
+        const decimals = Math.max(0, a.decimals ?? 6);
+        const balFmt = a.balance != null ? Number(a.balance).toFixed(decimals <= 8 ? decimals : 6) : '—';
         return `
           <div class="card">
             <div class="label">${a.symbol}</div>
@@ -851,11 +852,15 @@
       const container = document.getElementById('tradePairBtns');
       if (!container) return;
       const tradeable = assetList.filter(a => a.tradeMethod === 'agentkit');
-      container.innerHTML = tradeable.map(a =>
-        `<button data-symbol="${a.symbol}"
-          class="pill ${tradePair.from === a.symbol ? 'active' : ''}"
-          onclick="setTradePairFrom('${a.symbol}')">${a.symbol}</button>`
-      ).join('');
+      container.innerHTML = '';
+      tradeable.forEach(a => {
+        const btn = document.createElement('button');
+        btn.className = 'pill' + (tradePair.from === a.symbol ? ' active' : '');
+        btn.textContent = a.symbol;
+        btn.dataset.symbol = a.symbol;
+        btn.onclick = () => setTradePairFrom(a.symbol);
+        container.appendChild(btn);
+      });
     }
 
     function setTradePairFrom(symbol) {
