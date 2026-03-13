@@ -73,6 +73,8 @@ src/
     db.ts            # SQLite via better-sqlite3 (WAL mode)
   portfolio/
     tracker.ts       # Polls ETH + USDC balances and price on interval
+  services/
+    alchemy.ts       # AlchemyService: ERC20 token discovery via Alchemy JSON-RPC
   strategy/
     base.ts          # Strategy interface
     threshold.ts     # Buy on price drop %, sell on price rise %
@@ -117,3 +119,4 @@ docs/
 | `STRATEGY` | `threshold` | `threshold` or `sma` |
 | `DRY_RUN` | `false` | Set `true` to simulate without executing |
 | `DATA_DIR` | `/home/pi/.local/share/coinbase-trade/base-sepolia` | Must be POSIX filesystem |
+| `ALCHEMY_API_KEY` | (unset) | Optional. Enables ERC20 token auto-discovery via Alchemy. Get a key at dashboard.alchemy.com |
