@@ -28,6 +28,7 @@ const schema = z.object({
   DRY_RUN: z.string().transform(s => s === 'true').default('true'),
 
   DATA_DIR: z.string().default('/home/pi/.local/share/coinbase-trade/base-sepolia'),
+  ALCHEMY_API_KEY: z.string().optional(),
 });
 
 const parsed = schema.safeParse(process.env);
