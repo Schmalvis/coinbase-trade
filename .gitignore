@@ -1,4 +1,5 @@
 .env
+portainer-stack.env
 node_modules/
 dist/
 data/*.db

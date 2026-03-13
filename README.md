@@ -56,8 +56,9 @@ cli.ts                   # CLI (talks to running bot via HTTP)
 ## Prerequisites
 
 - Node.js 22+
-- A running Coinbase AgentKit MCP server (see [agentkit](https://github.com/coinbase/agentkit))
+- A running **[coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server)** — this bot communicates exclusively with the Coinbase AgentKit through that MCP server. All wallet operations, price queries, and swaps go through it. Set `MCP_SERVER_URL` to its address.
 - A Telegram bot token (optional, for Telegram control)
+- An Alchemy API key (optional, for ERC20 token auto-discovery)
 
 ---
 
