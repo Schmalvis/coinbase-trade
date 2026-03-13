@@ -1,4 +1,5 @@
-import { queries } from '../data/db.js';
+import { queries, discoveredAssetQueries } from '../data/db.js';
+import type { DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import { ThresholdStrategy } from '../strategy/threshold.js';
@@ -6,6 +7,14 @@ import { SMAStrategy } from '../strategy/sma.js';
 import type { Strategy } from '../strategy/base.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+
+interface AssetStrategyParams {
+  strategyType: 'threshold' | 'sma';
+  dropPct: number;
+  risePct: number;
+  smaShort: number;
+  smaLong: number;
+}
 
 const STRATEGY_KEYS = [
   'STRATEGY', 'TRADE_INTERVAL_SECONDS',
@@ -16,6 +25,7 @@ const STRATEGY_KEYS = [
 export class TradingEngine {
   private strategy!: Strategy;
   private intervalId: ReturnType<typeof setInterval> | null = null;
+  private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
 
   constructor(
     private readonly executor: TradeExecutor,
@@ -24,6 +34,17 @@ export class TradingEngine {
     this.strategy = this.buildStrategy();
     runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => this.restart());
     logger.info(`Trading engine using strategy: ${this.strategy.name}`);
+
+    const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+    for (const row of activeAssets) {
+      this.startAssetLoop(row.address, row.symbol, {
+        strategyType: row.strategy as 'threshold' | 'sma',
+        dropPct: row.drop_pct,
+        risePct: row.rise_pct,
+        smaShort: row.sma_short,
+        smaLong: row.sma_long,
+      });
+    }
   }
 
   private buildStrategy(): Strategy {
@@ -70,5 +91,53 @@ export class TradingEngine {
 
   async manualTrade(action: 'buy' | 'sell'): Promise<void> {
     await this.executor.execute(action, 'Manual override via Telegram/CLI', 'manual');
+  }
+
+  startAssetLoop(address: string, symbol: string, params: AssetStrategyParams): void {
+    this.stopAssetLoop(symbol);
+    const ms = (this.runtimeConfig.get('TRADE_INTERVAL_SECONDS') as number) * 1000;
+    const id = setInterval(() => void this.tickAsset(symbol, address, params), ms);
+    this._assetLoops.set(symbol, id);
+    logger.info(`Asset loop started: ${symbol} every ${ms}ms`);
+  }
+
+  stopAssetLoop(symbol: string): void {
+    const id = this._assetLoops.get(symbol);
+    if (id !== undefined) {
+      clearInterval(id);
+      this._assetLoops.delete(symbol);
+      logger.info(`Asset loop stopped: ${symbol}`);
+    }
+  }
+
+  reloadAssetConfig(address: string, symbol: string, params: AssetStrategyParams): void {
+    this.stopAssetLoop(symbol);
+    this.startAssetLoop(address, symbol, params);
+  }
+
+  private async tickAsset(symbol: string, address: string, params: AssetStrategyParams): Promise<void> {
+    if (botState.isPaused) return;
+
+    const limit = params.smaLong + 5;
+    const raw = queries.recentAssetSnapshots.all(symbol, limit) as {
+      price_usd: number; balance: number; timestamp: string;
+    }[];
+    if (raw.length === 0) return;
+
+    const snapshots = raw.map(r => ({
+      eth_price:     r.price_usd,
+      eth_balance:   r.balance,
+      portfolio_usd: 0,
+      timestamp:     r.timestamp,
+    }));
+
+    const strategy = params.strategyType === 'sma'
+      ? new SMAStrategy()
+      : new ThresholdStrategy();
+
+    const result = strategy.evaluate(snapshots);
+
+    logger.debug(`[${symbol}] Strategy signal: ${result.signal} — ${result.reason}`);
+    await this.executor.executeForAsset(symbol, result.signal, 'auto');
   }
 }
