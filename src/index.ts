@@ -10,6 +10,7 @@ import { logger } from './core/logger.js';
 import { config, availableNetworks } from './config.js';
 import { RuntimeConfig, setRuntimeConfigSingleton } from './core/runtime-config.js';
 import { settingQueries } from './data/db.js';
+import { AlchemyService } from './services/alchemy.js';
 
 async function main() {
   // Initialise RuntimeConfig — overlays env defaults with any saved DB settings
@@ -17,6 +18,11 @@ async function main() {
 
   // Wire singleton so logger reads LOG_LEVEL dynamically on each call
   setRuntimeConfigSingleton(runtimeConfig);
+
+  // Conditionally instantiate AlchemyService if API key is available
+  const alchemyService = config.ALCHEMY_API_KEY
+    ? new AlchemyService(config.ALCHEMY_API_KEY)
+    : undefined;
 
   logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
@@ -26,7 +32,7 @@ async function main() {
   await mcp.connect();
 
   const tools = new CoinbaseTools(mcp);
-  const pollNow = await startPortfolioTracker(tools, runtimeConfig);
+  const pollNow = await startPortfolioTracker(tools, runtimeConfig, alchemyService);
 
   botState.onNetworkChange(network => {
     logger.info(`Network switched to ${network} — re-polling portfolio`);
