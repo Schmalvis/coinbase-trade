@@ -96,7 +96,7 @@ export class TradingEngine {
   startAssetLoop(address: string, symbol: string, params: AssetStrategyParams): void {
     this.stopAssetLoop(symbol);
     const ms = (this.runtimeConfig.get('TRADE_INTERVAL_SECONDS') as number) * 1000;
-    const id = setInterval(() => void this.tickAsset(symbol, address, params), ms);
+    const id = setInterval(() => void this.tickAsset(symbol, params), ms);
     this._assetLoops.set(symbol, id);
     logger.info(`Asset loop started: ${symbol} every ${ms}ms`);
   }
@@ -115,7 +115,7 @@ export class TradingEngine {
     this.startAssetLoop(address, symbol, params);
   }
 
-  private async tickAsset(symbol: string, address: string, params: AssetStrategyParams): Promise<void> {
+  private async tickAsset(symbol: string, params: AssetStrategyParams): Promise<void> {
     if (botState.isPaused) return;
 
     const limit = params.smaLong + 5;
@@ -126,7 +126,7 @@ export class TradingEngine {
 
     const snapshots = raw.map(r => ({
       eth_price:     r.price_usd,
-      eth_balance:   r.balance,
+      eth_balance:   0,
       portfolio_usd: 0,
       timestamp:     r.timestamp,
     }));

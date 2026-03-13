@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 // Mock db to avoid SQLite native module issues
 vi.mock('../src/data/db.js', () => ({
@@ -9,7 +9,7 @@ vi.mock('../src/data/db.js', () => ({
 }));
 
 describe('TradingEngine asset loops', () => {
-  beforeEach(() => vi.restoreAllMocks());
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
   it('stopAssetLoop is a no-op when symbol not in map', async () => {
     const mockExecutor = {} as any;
