@@ -608,6 +608,47 @@
       letter-spacing: 0.14em;
       text-transform: uppercase;
     }
+
+    /* ASSETS header button */
+    .assets-btn { position: relative; }
+    .badge {
+      position: absolute; top: -6px; right: -6px;
+      background: var(--red, #e74c3c); color: #fff;
+      border-radius: 50%; font-size: 11px; width: 18px; height: 18px;
+      display: none; align-items: center; justify-content: center;
+    }
+    .badge.visible { display: flex; }
+
+    /* Asset table */
+    #asset-table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    #asset-table th, #asset-table td {
+      padding: 8px 12px; text-align: left;
+      border-bottom: 1px solid var(--border, #333);
+    }
+    .change-positive { color: var(--green, #27ae60); }
+    .change-negative { color: var(--red, #e74c3c); }
+    .row-pending { background: rgba(255, 180, 0, 0.08); }
+
+    /* Asset management modal */
+    #asset-modal {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.6); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    #asset-modal.open { display: flex; }
+    .modal-box {
+      background: var(--surface, #1e1e2e); border-radius: 8px;
+      padding: 2rem; max-width: 640px; width: 90%;
+      max-height: 80vh; overflow-y: auto;
+    }
+    .asset-item { border: 1px solid var(--border, #333); border-radius: 6px; margin-bottom: 0.75rem; }
+    .asset-item.pending { border-style: dashed; border-color: var(--accent, #f39c12); }
+    .asset-item-header {
+      padding: 0.75rem 1rem; cursor: pointer;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .asset-item-body { display: none; padding: 1rem; border-top: 1px solid var(--border, #333); }
+    .asset-item-body.open { display: block; }
   </style>
 </head>
 <body>
@@ -616,13 +657,17 @@
     <div class="title">Trade Bot<span class="title-sub">/ autonomous</span></div>
     <div class="header-right">
       <div class="network-selector" id="networkSelector"></div>
+      <button class="btn-theme assets-btn" id="assets-btn" onclick="openAssetModal()">
+        ASSETS
+        <span id="assets-badge" class="badge">0</span>
+      </button>
       <button class="btn-theme" id="settingsBtn" onclick="openSettings()">Settings</button>
       <button class="btn-theme" id="themeToggle" onclick="toggleTheme()">—</button>
       <div id="lastUpdate">—</div>
     </div>
   </header>
 
-  <div class="grid">
+  <div id="summary-cards" class="grid">
     <div class="card">
       <div class="label">Status</div>
       <div class="value" id="status">—</div>
@@ -659,6 +704,17 @@
 
   <div class="section-title" id="holdingsTitle" style="display:none">Holdings</div>
   <div class="grid" id="holdingsGrid" style="display:none"></div>
+
+  <div class="card" style="margin-bottom:0.7rem">
+    <h3 style="font-size:0.6rem;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:var(--text-2)">Assets</h3>
+    <table id="asset-table">
+      <thead><tr>
+        <th>ASSET</th><th>PRICE</th><th>BALANCE</th><th>VALUE</th>
+        <th>24H</th><th>STRATEGY</th><th></th>
+      </tr></thead>
+      <tbody id="asset-table-body"></tbody>
+    </table>
+  </div>
 
   <div class="controls">
     <button class="btn-pause"  onclick="control('pause')">Pause</button>
@@ -778,6 +834,7 @@
         document.getElementById('lastTrade').textContent = s.lastTradeAt
           ? 'Last trade: ' + new Date(s.lastTradeAt).toLocaleTimeString() : 'No trades yet';
         document.getElementById('lastUpdate').textContent = 'Updated ' + new Date().toLocaleTimeString();
+        updateBadge(s);
       } catch (e) {
         console.error('loadStatus:', e);
       }
@@ -914,6 +971,8 @@
         renderAssetSelector();
         renderHoldings();
         renderTradePairButtons();
+        renderAssets();
+        renderAssetPills();
       } catch (e) {
         console.warn('loadAssets failed', e);
       }
@@ -1222,7 +1281,7 @@
 
     // ── Refresh ───────────────────────────────────────────────────────────────
     async function refresh() {
-      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet(), loadAssets()]);
       // Show faucet button only on testnet
       document.getElementById('faucetBtn').style.display =
         activeNetwork?.includes('mainnet') ? 'none' : 'inline-block';
@@ -1363,6 +1422,242 @@
     }
     function closeOnBackdrop(event, id) {
       if (event.target === document.getElementById(id)) closeModal(id);
+    }
+
+    // ── Asset table ───────────────────────────────────────────────────────────
+    function renderAssets() {
+      const tbody = document.getElementById('asset-table-body');
+      if (!tbody) return;
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+
+      for (const a of assetList) {
+        const row = document.createElement('tr');
+        if (a.status === 'pending') row.className = 'row-pending';
+
+        const value = (a.balance ?? 0) * (a.price ?? 0);
+        const ch = a.change24h;
+        const changeText = ch != null ? (ch >= 0 ? '+' : '') + ch.toFixed(2) + '%' : '—';
+        const changeClass = ch == null ? '' : ch >= 0 ? 'change-positive' : 'change-negative';
+
+        const cells = [
+          { text: a.symbol, cls: '' },
+          { text: a.price != null ? '$' + a.price.toFixed(4) : '—', cls: '' },
+          { text: a.balance != null ? a.balance.toFixed(6) : '—', cls: '' },
+          { text: '$' + value.toFixed(2), cls: '' },
+          { text: changeText, cls: changeClass },
+        ];
+        cells.forEach(({ text, cls }) => {
+          const td = document.createElement('td');
+          td.textContent = text;
+          if (cls) td.className = cls;
+          row.appendChild(td);
+        });
+
+        // STRATEGY column
+        const stratTd = document.createElement('td');
+        if (a.status === 'active') {
+          stratTd.textContent = '● ' + (a.strategyConfig?.type ?? '');
+          stratTd.style.color = 'var(--green, #27ae60)';
+        } else if (a.status === 'pending') {
+          stratTd.textContent = '⚠ new token';
+          stratTd.style.color = 'var(--accent, #f39c12)';
+        }
+        row.appendChild(stratTd);
+
+        // ACTIONS column
+        const actionTd = document.createElement('td');
+        if (a.status === 'pending') {
+          const enableBtn = document.createElement('button');
+          enableBtn.textContent = 'ENABLE';
+          enableBtn.onclick = () => enableAsset(a.address);
+          actionTd.appendChild(enableBtn);
+          actionTd.appendChild(document.createTextNode(' '));
+          const dismissBtn = document.createElement('button');
+          dismissBtn.textContent = 'DISMISS';
+          dismissBtn.onclick = () => dismissAsset(a.address);
+          actionTd.appendChild(dismissBtn);
+        }
+        row.appendChild(actionTd);
+
+        tbody.appendChild(row);
+      }
+    }
+
+    function updateBadge(status) {
+      const count = status.pendingTokenCount ?? 0;
+      const badge = document.getElementById('assets-badge');
+      if (!badge) return;
+      badge.textContent = String(count);
+      badge.classList.toggle('visible', count > 0);
+    }
+
+    async function openAssetModal(focusAddress) {
+      document.getElementById('asset-modal').classList.add('open');
+      await renderModalList(focusAddress);
+    }
+
+    function closeAssetModal() {
+      document.getElementById('asset-modal').classList.remove('open');
+    }
+
+    async function renderModalList(focusAddress) {
+      const list = document.getElementById('asset-modal-list');
+      while (list.firstChild) list.removeChild(list.firstChild);
+
+      if (!assetList.length) {
+        const p = document.createElement('p');
+        p.textContent = 'No assets. Set ALCHEMY_API_KEY to enable discovery.';
+        list.appendChild(p);
+        return;
+      }
+
+      for (const a of assetList) {
+        const item = document.createElement('div');
+        item.className = 'asset-item' + (a.status === 'pending' ? ' pending' : '');
+        item.id = 'modal-item-' + a.address;
+
+        const header = document.createElement('div');
+        header.className = 'asset-item-header';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = a.symbol + ' — ' + a.name;
+        header.appendChild(titleSpan);
+
+        const statusSpan = document.createElement('span');
+        statusSpan.textContent = a.status === 'pending' ? '⚠ pending' : '● active';
+        statusSpan.style.color = a.status === 'pending' ? 'var(--accent, #f39c12)' : 'var(--green, #27ae60)';
+        header.appendChild(statusSpan);
+        item.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'asset-item-body' + (focusAddress === a.address ? ' open' : '');
+        body.id = 'modal-body-' + a.address;
+
+        buildConfigForm(body, a);
+
+        if (a.status === 'pending') {
+          const enableBtn = document.createElement('button');
+          enableBtn.textContent = 'ENABLE';
+          enableBtn.onclick = () => enableAsset(a.address);
+          body.appendChild(enableBtn);
+          body.appendChild(document.createTextNode(' '));
+          const dismissBtn = document.createElement('button');
+          dismissBtn.textContent = 'DISMISS';
+          dismissBtn.onclick = () => dismissAsset(a.address);
+          body.appendChild(dismissBtn);
+          header.onclick = () => toggleModalItem(a.address);
+        } else {
+          const saveBtn = document.createElement('button');
+          saveBtn.textContent = 'SAVE';
+          saveBtn.onclick = () => saveAssetConfig(a.address);
+          body.appendChild(saveBtn);
+          body.appendChild(document.createTextNode(' '));
+          const disableBtn = document.createElement('button');
+          disableBtn.textContent = 'Disable strategy';
+          disableBtn.onclick = () => dismissAsset(a.address);
+          body.appendChild(disableBtn);
+          header.onclick = () => toggleModalItem(a.address);
+        }
+
+        item.appendChild(body);
+        list.appendChild(item);
+      }
+    }
+
+    function buildConfigForm(container, asset) {
+      const cfg = asset.strategyConfig ?? {};
+      const pills = document.createElement('div');
+      pills.className = 'pill-group';
+      ['threshold', 'sma'].forEach(type => {
+        const pill = document.createElement('button');
+        pill.className = 'pill' + (cfg.type === type ? ' active' : '');
+        pill.textContent = type.toUpperCase();
+        pill.dataset.strategy = type;
+        pill.onclick = (e) => {
+          e.preventDefault();
+          pills.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
+          pill.classList.add('active');
+        };
+        pill.id = 'pill-' + asset.address + '-' + type;
+        pills.appendChild(pill);
+      });
+      container.appendChild(pills);
+      container.dataset.address = asset.address;
+
+      const fields = [
+        { id: 'drop', label: 'Buy on drop %', val: cfg.dropPct ?? 3, step: '0.1', min: '0.1' },
+        { id: 'rise', label: 'Sell on rise %', val: cfg.risePct ?? 4, step: '0.1', min: '0.1' },
+        { id: 'smaShort', label: 'SMA short window', val: cfg.smaShort ?? 5, step: '1', min: '2' },
+        { id: 'smaLong', label: 'SMA long window', val: cfg.smaLong ?? 20, step: '1', min: '3' },
+      ];
+      fields.forEach(f => {
+        const row = document.createElement('div');
+        const lbl = document.createElement('label');
+        lbl.textContent = f.label + ' ';
+        const inp = document.createElement('input');
+        inp.type = 'number';
+        inp.id = 'cfg-' + asset.address + '-' + f.id;
+        inp.value = String(f.val);
+        inp.step = f.step;
+        inp.min = f.min;
+        inp.style.width = '70px';
+        lbl.appendChild(inp);
+        row.appendChild(lbl);
+        container.appendChild(row);
+      });
+    }
+
+    function toggleModalItem(address) {
+      const body = document.getElementById('modal-body-' + address);
+      if (body) body.classList.toggle('open');
+    }
+
+    function readConfigForm(address) {
+      const strategyType = document.querySelector('#modal-item-' + address + ' .pill.active')?.dataset?.strategy ?? 'threshold';
+      return {
+        strategyType,
+        dropPct:  parseFloat(document.getElementById('cfg-' + address + '-drop').value),
+        risePct:  parseFloat(document.getElementById('cfg-' + address + '-rise').value),
+        smaShort: parseInt(document.getElementById('cfg-' + address + '-smaShort').value),
+        smaLong:  parseInt(document.getElementById('cfg-' + address + '-smaLong').value),
+      };
+    }
+
+    async function enableAsset(address) {
+      const params = readConfigForm(address);
+      const res = await postJSON('/api/assets/' + address + '/enable', params);
+      if (res.ok) { await loadAssets(); closeAssetModal(); }
+      else alert('Error: ' + res.error);
+    }
+
+    async function dismissAsset(address) {
+      const res = await postJSON('/api/assets/' + address + '/dismiss', {});
+      if (res.ok) { await loadAssets(); closeAssetModal(); }
+      else alert('Error: ' + res.error);
+    }
+
+    async function saveAssetConfig(address) {
+      const params = readConfigForm(address);
+      const res = await fetch('/api/assets/' + address + '/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params),
+      }).then(r => r.json());
+      if (res.ok) { await loadAssets(); closeAssetModal(); }
+      else alert('Error: ' + res.error);
+    }
+
+    async function postJSON(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return res.json();
+    }
+
+    function renderAssetPills() {
+      renderAssetSelector();
     }
 
     loadAssets();
@@ -1550,6 +1845,16 @@
       <button class="btn-buy" id="faucetEthBtn" onclick="requestFaucetAsset('eth')" style="width:100%">Request ETH</button>
       <button class="btn-buy" id="faucetUsdcBtn" onclick="requestFaucetAsset('usdc')" style="width:100%">Request USDC</button>
     </div>
+  </div>
+</div>
+<!-- Asset Management Modal -->
+<div id="asset-modal">
+  <div class="modal-box">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
+      <h3 style="margin:0">Asset Management</h3>
+      <button onclick="closeAssetModal()">Close</button>
+    </div>
+    <div id="asset-modal-list"></div>
   </div>
 </div>
 </body>
