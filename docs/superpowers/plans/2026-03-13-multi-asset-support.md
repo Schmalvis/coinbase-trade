@@ -10,6 +10,35 @@
 
 ---
 
+## Setup for agentic workers
+
+**Repository:** `https://github.com/Schmalvis/coinbase-trade`
+**Base branch:** `main`
+**Working directory:** repo root (all paths in this plan are relative to it)
+
+**Create a feature branch before starting:**
+```bash
+git checkout -b feat/multi-asset-support
+```
+
+**Run checks:**
+```bash
+npm install          # install deps (node_modules not committed)
+npx tsc --noEmit     # must pass before and after your changes
+npm test             # vitest — 32 tests must pass before you start; keep them passing
+```
+
+**Key project facts (read CLAUDE.md for full context):**
+- TypeScript ESM — all imports need `.js` extensions even for `.ts` source files
+- `better-sqlite3` is synchronous — no `await` on DB calls
+- DB migration pattern: `try { db.exec("ALTER TABLE...") } catch {}` — never drop tables
+- MCP tool calls are network I/O — mock them in tests, never call live in unit tests
+- The dashboard is a single HTML file (`src/web/public/index.html`, ~1400 lines) — edit carefully; the existing modal and chart patterns are the reference
+- `botState` is a singleton imported from `src/core/state.ts` — do not instantiate it
+- All existing tests must continue to pass after every task
+
+---
+
 ## File Map
 
 | File | Action | Purpose |
