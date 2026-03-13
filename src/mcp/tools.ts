@@ -16,7 +16,7 @@ export const TOKEN_ADDRESSES = TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'] as {
   ETH: string; USDC: string;
 };
 
-export type TokenSymbol = keyof typeof TOKEN_ADDRESSES;
+export type TokenSymbol = string;
 
 export interface WalletDetails {
   address: string;
@@ -44,7 +44,7 @@ export interface TokenPrice {
 export class CoinbaseTools {
   constructor(private mcp: MCPClient) {}
 
-  private tokenAddress(symbol: TokenSymbol): string {
+  getTokenAddress(symbol: string): string {
     const net = this.mcp.network;
     return (TOKEN_ADDRESSES_BY_NETWORK[net] ?? TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'])[symbol];
   }
@@ -78,21 +78,21 @@ export class CoinbaseTools {
   }
 
   getErc20BalanceBySymbol(symbol: TokenSymbol): Promise<number> {
-    return this.getErc20Balance(this.tokenAddress(symbol));
+    return this.getErc20Balance(this.getTokenAddress(symbol));
   }
 
   async getSwapPrice(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapPrice> {
     return this.mcp.callTool('CdpEvmWalletActionProvider_get_swap_price', {
-      fromToken: this.tokenAddress(fromSymbol),
-      toToken: this.tokenAddress(toSymbol),
+      fromToken: this.getTokenAddress(fromSymbol),
+      toToken: this.getTokenAddress(toSymbol),
       fromAmount: amount,
     });
   }
 
   async swap(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapResult> {
     return this.mcp.callTool('CdpEvmWalletActionProvider_swap', {
-      fromToken: this.tokenAddress(fromSymbol),
-      toToken: this.tokenAddress(toSymbol),
+      fromToken: this.getTokenAddress(fromSymbol),
+      toToken: this.getTokenAddress(toSymbol),
       fromAmount: amount,
     });
   }
