@@ -5,3 +5,4 @@ data/*.db
 data/logs/
 *.log
 .worktrees/
+.superpowers/
