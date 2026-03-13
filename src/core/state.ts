@@ -20,6 +20,7 @@ class BotState {
   private _lastTradeAt: Date | null = null;
   private _activeNetwork: string = availableNetworks[0];
   private _assetBalances: Map<string, number> = new Map();
+  private _pendingTokenCount = 0;
 
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
   private statusListeners: ((s: BotStatus) => void)[] = [];
@@ -34,6 +35,7 @@ class BotState {
   get availableNetworks() { return availableNetworks; }
   get isPaused() { return this._status !== 'running'; }
   get assetBalances(): ReadonlyMap<string, number> { return this._assetBalances; }
+  get pendingTokenCount(): number { return this._pendingTokenCount; }
 
   setNetwork(network: string) {
     if (!availableNetworks.includes(network)) {
@@ -45,12 +47,17 @@ class BotState {
     this._lastBalance = null;
     this._lastUsdcBalance = null;
     this._assetBalances.clear();
+    this._pendingTokenCount = 0;
     this.networkListeners.forEach(l => l(network));
   }
 
   setStatus(s: BotStatus) {
     this._status = s;
     this.statusListeners.forEach(l => l(s));
+  }
+
+  setPendingTokenCount(n: number): void {
+    this._pendingTokenCount = n;
   }
 
   updatePrice(price: number) { this._lastPrice = price; }
