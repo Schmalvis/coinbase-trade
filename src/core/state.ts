@@ -19,6 +19,7 @@ class BotState {
   private _lastUsdcBalance: number | null = null;
   private _lastTradeAt: Date | null = null;
   private _activeNetwork: string = availableNetworks[0];
+  private _assetBalances: Map<string, number> = new Map();
 
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
   private statusListeners: ((s: BotStatus) => void)[] = [];
@@ -32,6 +33,7 @@ class BotState {
   get activeNetwork() { return this._activeNetwork; }
   get availableNetworks() { return availableNetworks; }
   get isPaused() { return this._status !== 'running'; }
+  get assetBalances(): ReadonlyMap<string, number> { return this._assetBalances; }
 
   setNetwork(network: string) {
     if (!availableNetworks.includes(network)) {
@@ -42,6 +44,7 @@ class BotState {
     this._lastPrice = null;
     this._lastBalance = null;
     this._lastUsdcBalance = null;
+    this._assetBalances.clear();
     this.networkListeners.forEach(l => l(network));
   }
 
@@ -51,8 +54,15 @@ class BotState {
   }
 
   updatePrice(price: number) { this._lastPrice = price; }
-  updateBalance(balance: number) { this._lastBalance = balance; }
-  updateUsdcBalance(balance: number) { this._lastUsdcBalance = balance; }
+
+  updateAssetBalance(symbol: string, balance: number) {
+    this._assetBalances.set(symbol, balance);
+    if (symbol === 'ETH')  this._lastBalance = balance;
+    if (symbol === 'USDC') this._lastUsdcBalance = balance;
+  }
+
+  updateBalance(balance: number) { this.updateAssetBalance('ETH', balance); }
+  updateUsdcBalance(balance: number) { this.updateAssetBalance('USDC', balance); }
   recordTrade(at: Date) { this._lastTradeAt = at; }
 
   onTrade(listener: (n: TradeNotification) => void) { this.tradeListeners.push(listener); }
