@@ -5,6 +5,7 @@ import { botState } from '../core/state.js';
 import { queries } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
+import { assetsForNetwork } from '../assets/registry.js';
 import type { CoinbaseTools } from '../mcp/tools.js';
 import type { RuntimeConfig, ConfigKey } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
@@ -31,6 +32,7 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
       strategy:         runtimeConfig.get('STRATEGY'),  // live value
       activeNetwork:    botState.activeNetwork,
       availableNetworks: botState.availableNetworks,
+      assetBalances:    Object.fromEntries(botState.assetBalances),
     });
   });
 
@@ -119,10 +121,37 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
     }
   });
 
+  // ── Assets ──────────────────────────────────────────────────────────────────
+  app.get('/api/assets', (_req, res) => {
+    const network = botState.activeNetwork;
+    const assets  = assetsForNetwork(network);
+    res.json(assets.map(a => ({
+      symbol:      a.symbol,
+      decimals:    a.decimals,
+      address:     a.addresses[network as keyof typeof a.addresses] ?? null,
+      priceSource: a.priceSource,
+      tradeMethod: a.tradeMethod,
+      isNative:    a.isNative ?? false,
+      balance:     botState.assetBalances.get(a.symbol) ?? null,
+      price:       (queries.recentAssetSnapshots.all(a.symbol, 1) as any[])[0]?.price_usd ?? null,
+    })));
+  });
+
   // ── Prices & Trades ─────────────────────────────────────────────────────────
   app.get('/api/prices', (req, res) => {
-    const limit = parseInt((req.query.limit as string) ?? '288', 10);
+    const limit  = parseInt((req.query.limit as string) ?? '288', 10);
+    const symbol = (req.query.asset as string | undefined)?.toUpperCase();
+    if (symbol) {
+      res.json(queries.recentAssetSnapshots.all(symbol, limit));
+      return;
+    }
+    // Default: legacy ETH price_snapshots (backward compat)
     res.json(queries.recentSnapshots.all(limit));
+  });
+
+  app.get('/api/portfolio', (req, res) => {
+    const limit = parseInt((req.query.limit as string) ?? '288', 10);
+    res.json(queries.recentPortfolioSnapshots.all(limit));
   });
 
   app.get('/api/trades', (req, res) => {
