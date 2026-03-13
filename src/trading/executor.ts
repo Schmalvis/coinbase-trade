@@ -89,9 +89,12 @@ export class TradeExecutor {
       return;
     }
 
-    const balance = botState.assetBalances.get(symbol) ?? 0;
+    // For BUY: we spend USDC, so check USDC balance
+    // For SELL: we spend the token, so check token balance
+    const tradeSymbol = signal === 'buy' ? 'USDC' : symbol;
+    const balance = botState.assetBalances.get(tradeSymbol) ?? 0;
     if (balance <= 0) {
-      logger.warn(`No ${symbol} balance for ${signal} trade`);
+      logger.warn(`No ${tradeSymbol} balance for ${signal} ${symbol} trade`);
       return;
     }
 

@@ -26,6 +26,7 @@ export class TradingEngine {
   private strategy!: Strategy;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
+  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy>();
 
   constructor(
     private readonly executor: TradeExecutor,
@@ -108,6 +109,7 @@ export class TradingEngine {
       this._assetLoops.delete(symbol);
       logger.info(`Asset loop stopped: ${symbol}`);
     }
+    this._assetStrategies.delete(symbol);
   }
 
   reloadAssetConfig(address: string, symbol: string, params: AssetStrategyParams): void {
@@ -131,9 +133,14 @@ export class TradingEngine {
       timestamp:     r.timestamp,
     }));
 
-    const strategy = params.strategyType === 'sma'
-      ? new SMAStrategy()
-      : new ThresholdStrategy();
+    // Get or create strategy instance for this symbol (preserves state across ticks)
+    let strategy = this._assetStrategies.get(symbol);
+    if (!strategy) {
+      strategy = params.strategyType === 'sma'
+        ? new SMAStrategy()
+        : new ThresholdStrategy();
+      this._assetStrategies.set(symbol, strategy);
+    }
 
     const result = strategy.evaluate(snapshots);
 
