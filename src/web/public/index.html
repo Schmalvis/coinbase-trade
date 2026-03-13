@@ -895,8 +895,21 @@
     let tradePair = { from: 'ETH', to: 'USDC' };
     let tradeSide = 'from';
     let tradeQuotedFromAmount = null;
+    let tradeMode = 'standard'; // 'standard' | 'custom'
+
+    function switchTradeTab(mode) {
+      tradeMode = mode;
+      document.getElementById('tradeTabStd').classList.toggle('active', mode === 'standard');
+      document.getElementById('tradeTabCustom').classList.toggle('active', mode === 'custom');
+      document.getElementById('tradeStandardPane').style.display = mode === 'standard' ? '' : 'none';
+      document.getElementById('tradeCustomPane').style.display  = mode === 'custom'   ? '' : 'none';
+      document.getElementById('confirmTradeBtn').disabled = true;
+      document.getElementById('tradeResult').textContent = '';
+      tradeQuotedFromAmount = null;
+    }
 
     function openTrade(from, to) {
+      switchTradeTab('standard');
       setTradePair(from || 'ETH', to || 'USDC');
       setTradeSide('from');
       document.getElementById('tradeAmount').value = '';
@@ -905,6 +918,11 @@
       document.getElementById('tradeAmountErr').textContent = '';
       document.getElementById('confirmTradeBtn').disabled = true;
       tradeQuotedFromAmount = null;
+      // Custom pane reset
+      document.getElementById('ensoTokenIn').value = '';
+      document.getElementById('ensoTokenOut').value = '';
+      document.getElementById('ensoAmount').value = '';
+      document.getElementById('ensoErr').textContent = '';
       document.getElementById('tradeModal').style.display = 'flex';
     }
 
@@ -973,6 +991,7 @@
     }
 
     async function confirmTrade() {
+      if (tradeMode === 'custom') { await confirmEnsoTrade(); return; }
       if (!tradeQuotedFromAmount) return;
       const btn = document.getElementById('confirmTradeBtn');
       btn.disabled = true;
@@ -993,6 +1012,56 @@
             ? `<a href="${explorer}/tx/${data.txHash}" target="_blank" style="color:var(--accent)">${data.txHash.slice(0,12)}…</a>`
             : '[dry run]';
           document.getElementById('tradeResult').innerHTML = `<span style="color:var(--green)">✓ Trade executed — ${tx}</span>`;
+          setTimeout(() => closeModal('tradeModal'), 4000);
+          await loadStatus();
+        } else {
+          document.getElementById('tradeResult').innerHTML = `<span style="color:var(--red)">✗ ${data.error}</span>`;
+          btn.disabled = false;
+        }
+      } catch (e) {
+        document.getElementById('tradeResult').innerHTML = `<span style="color:var(--red)">✗ ${e.message}</span>`;
+        btn.disabled = false;
+      } finally {
+        btn.textContent = 'Confirm';
+      }
+    }
+
+    function validateEnsoForm() {
+      const tokenIn  = document.getElementById('ensoTokenIn').value.trim();
+      const tokenOut = document.getElementById('ensoTokenOut').value.trim();
+      const amount   = document.getElementById('ensoAmount').value;
+      const addrRe   = /^0x[a-fA-F0-9]{40}$/;
+      if (!addrRe.test(tokenIn))  { document.getElementById('ensoErr').textContent = 'Invalid Token In address'; return false; }
+      if (!addrRe.test(tokenOut)) { document.getElementById('ensoErr').textContent = 'Invalid Token Out address'; return false; }
+      if (!amount || parseFloat(amount) <= 0) { document.getElementById('ensoErr').textContent = 'Enter a valid amount'; return false; }
+      document.getElementById('ensoErr').textContent = '';
+      document.getElementById('confirmTradeBtn').disabled = false;
+      return true;
+    }
+
+    async function confirmEnsoTrade() {
+      const tokenIn  = document.getElementById('ensoTokenIn').value.trim();
+      const tokenOut = document.getElementById('ensoTokenOut').value.trim();
+      const amountIn = document.getElementById('ensoAmount').value;
+      if (!validateEnsoForm()) return;
+
+      const btn = document.getElementById('confirmTradeBtn');
+      btn.disabled = true;
+      btn.textContent = 'Routing…';
+      document.getElementById('tradeResult').textContent = '';
+
+      try {
+        const r = await fetch('/api/trade/enso', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tokenIn, tokenOut, amountIn }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          const tx = data.txHash
+            ? `<a href="https://basescan.org/tx/${data.txHash}" target="_blank" style="color:var(--accent)">${data.txHash.slice(0,12)}…</a>`
+            : '[dry run]';
+          document.getElementById('tradeResult').innerHTML = `<span style="color:var(--green)">✓ Routed — ${tx}</span>`;
           setTimeout(() => closeModal('tradeModal'), 4000);
           await loadStatus();
         } else {
@@ -1288,39 +1357,71 @@
 </div>
 <!-- Trade Modal -->
 <div class="modal-backdrop" id="tradeModal" style="display:none" onclick="closeOnBackdrop(event,'tradeModal')">
-  <div class="modal" style="max-width:400px">
+  <div class="modal" style="max-width:420px">
     <div class="modal-title">Trade</div>
     <button class="modal-close" onclick="closeModal('tradeModal')">✕</button>
 
-    <div class="field-group">
-      <div class="field">
-        <label>Direction</label>
-        <div class="pill-group">
-          <button class="pill" id="tradeFromETH" onclick="setTradePair('ETH','USDC')">ETH → USDC</button>
-          <button class="pill" id="tradeFromUSDC" onclick="setTradePair('USDC','ETH')">USDC → ETH</button>
-        </div>
-      </div>
-      <div class="field">
-        <div style="display:flex;gap:0.5rem;align-items:center">
-          <div style="flex:1">
-            <label id="tradeAmountLabel">Amount to spend</label>
-            <input type="number" id="tradeAmount" min="0" step="any" placeholder="0.00">
+    <div class="modal-tabs">
+      <button class="modal-tab active" id="tradeTabStd"    onclick="switchTradeTab('standard')">Standard</button>
+      <button class="modal-tab"        id="tradeTabCustom" onclick="switchTradeTab('custom')">Custom Token</button>
+    </div>
+
+    <!-- Standard pane: ETH ↔ USDC via AgentKit -->
+    <div id="tradeStandardPane">
+      <div class="field-group">
+        <div class="field">
+          <label>Direction</label>
+          <div class="pill-group">
+            <button class="pill" id="tradeFromETH" onclick="setTradePair('ETH','USDC')">ETH → USDC</button>
+            <button class="pill" id="tradeFromUSDC" onclick="setTradePair('USDC','ETH')">USDC → ETH</button>
           </div>
-          <div style="padding-top:1.1rem">
-            <div class="pill-group">
-              <button class="pill active" id="sideSpend" onclick="setTradeSide('from')">Spend</button>
-              <button class="pill" id="sideReceive" onclick="setTradeSide('to')">Receive</button>
+        </div>
+        <div class="field">
+          <div style="display:flex;gap:0.5rem;align-items:center">
+            <div style="flex:1">
+              <label id="tradeAmountLabel">Amount to spend</label>
+              <input type="number" id="tradeAmount" min="0" step="any" placeholder="0.00">
+            </div>
+            <div style="padding-top:1.1rem">
+              <div class="pill-group">
+                <button class="pill active" id="sideSpend" onclick="setTradeSide('from')">Spend</button>
+                <button class="pill" id="sideReceive" onclick="setTradeSide('to')">Receive</button>
+              </div>
             </div>
           </div>
+          <span class="field-error" id="tradeAmountErr"></span>
         </div>
-        <span class="field-error" id="tradeAmountErr"></span>
+
+        <button class="btn-buy" style="width:100%;justify-content:center" onclick="getTradeQuote()">Get Quote</button>
+
+        <div id="tradeQuoteBox" style="display:none;background:var(--surface-2);border:1px solid var(--border);padding:0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem">
+          <div id="tradeQuoteText"></div>
+          <div id="tradePriceImpact" style="margin-top:0.3rem;font-size:0.65rem"></div>
+        </div>
       </div>
+    </div>
 
-      <button class="btn-buy" style="width:100%;justify-content:center" onclick="getTradeQuote()">Get Quote</button>
-
-      <div id="tradeQuoteBox" style="display:none;background:var(--surface-2);border:1px solid var(--border);padding:0.75rem;font-family:'JetBrains Mono',monospace;font-size:0.75rem">
-        <div id="tradeQuoteText"></div>
-        <div id="tradePriceImpact" style="margin-top:0.3rem;font-size:0.65rem"></div>
+    <!-- Custom Token pane: any ERC20 via Enso Finance (mainnet only) -->
+    <div id="tradeCustomPane" style="display:none">
+      <div class="field-group">
+        <div style="padding:0.5rem 0 0.25rem;font-size:0.7rem;color:var(--text-2);line-height:1.5">
+          Route any ERC20 swap via <strong style="color:var(--accent)">Enso Finance</strong>.<br>
+          Mainnet only — no preview quote available. Use contract addresses.<br>
+          ETH sentinel: <code style="font-size:0.65rem;color:var(--text)">0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee</code>
+        </div>
+        <div class="field">
+          <label>Token In (contract address)</label>
+          <input type="text" id="ensoTokenIn" placeholder="0x…" oninput="validateEnsoForm()" style="font-family:'JetBrains Mono',monospace;font-size:0.72rem">
+        </div>
+        <div class="field">
+          <label>Token Out (contract address)</label>
+          <input type="text" id="ensoTokenOut" placeholder="0x…" oninput="validateEnsoForm()" style="font-family:'JetBrains Mono',monospace;font-size:0.72rem">
+        </div>
+        <div class="field">
+          <label>Amount In (whole units)</label>
+          <input type="number" id="ensoAmount" min="0" step="any" placeholder="0.00" oninput="validateEnsoForm()">
+        </div>
+        <span class="field-error" id="ensoErr"></span>
       </div>
     </div>
 

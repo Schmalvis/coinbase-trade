@@ -100,6 +100,25 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
     }
   });
 
+  // ── Enso (custom token) trade ────────────────────────────────────────────────
+  app.post('/api/trade/enso', async (req, res) => {
+    const { tokenIn, tokenOut, amountIn } = req.body as { tokenIn?: string; tokenOut?: string; amountIn?: string };
+    if (!tokenIn || !tokenOut || !amountIn) {
+      return res.status(400).json({ error: 'tokenIn, tokenOut, amountIn are required' });
+    }
+    if (botState.activeNetwork !== 'base-mainnet') {
+      return res.status(400).json({ error: 'Enso routing is only available on base-mainnet' });
+    }
+    try {
+      const result = await executor.executeEnso(tokenIn, tokenOut, amountIn);
+      res.json({ ok: true, ...result });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Enso trade rejected: ${msg}`);
+      res.status(400).json({ error: msg });
+    }
+  });
+
   // ── Prices & Trades ─────────────────────────────────────────────────────────
   app.get('/api/prices', (req, res) => {
     const limit = parseInt((req.query.limit as string) ?? '288', 10);

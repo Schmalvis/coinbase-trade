@@ -72,6 +72,44 @@ export class TradeExecutor {
     return true;
   }
 
+  async executeEnso(
+    tokenIn: string,
+    tokenOut: string,
+    amountIn: string,
+  ): Promise<{ txHash?: string; dryRun: boolean }> {
+    const cooldown = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    const lastTrade = botState.lastTradeAt;
+    if (lastTrade) {
+      const elapsed = (Date.now() - lastTrade.getTime()) / 1000;
+      if (elapsed < cooldown) {
+        const remaining = Math.ceil(cooldown - elapsed);
+        throw new Error(`Cooldown active, ${remaining} seconds remaining`);
+      }
+    }
+
+    const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
+    const price = botState.lastPrice ?? 0;
+
+    let txHash: string | undefined;
+
+    if (!dryRun) {
+      const result = await this.tools.ensoRoute(tokenIn, tokenOut, amountIn);
+      txHash = result.txHash;
+    }
+
+    this.recordTrade({
+      signal: 'sell', // token→token is directionally a sell for accounting
+      amountEth: parseFloat(amountIn),
+      price,
+      txHash,
+      triggeredBy: 'manual-enso',
+      status: 'executed',
+      dryRun,
+      reason: `enso ${tokenIn.slice(0, 10)}→${tokenOut.slice(0, 10)}`,
+    });
+    return { txHash, dryRun };
+  }
+
   async executeManual(
     from: TokenSymbol,
     to: TokenSymbol,

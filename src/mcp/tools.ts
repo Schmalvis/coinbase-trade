@@ -155,4 +155,25 @@ export class CoinbaseTools {
     // Step 2: Real quote
     return this.getSwapPrice(from, to, estimatedFrom);
   }
+
+  /**
+   * Route a swap through Enso Finance — supports any ERC20 token with Base liquidity.
+   * mainnet only. tokenIn/tokenOut must be contract addresses (use ETH sentinel for native ETH).
+   */
+  async ensoRoute(
+    tokenIn: string,
+    tokenOut: string,
+    amountIn: string,
+    slippage = 50,
+  ): Promise<SwapResult> {
+    const result = await this.mcp.callTool<SwapResult | string>(
+      'EnsoActionProvider_route',
+      { tokenIn, tokenOut, amountIn, slippage, network: 'base-mainnet' },
+    );
+    if (typeof result === 'string') {
+      const hashMatch = result.match(/0x[a-fA-F0-9]{64}/);
+      return { txHash: hashMatch?.[0] ?? '', status: 'executed' };
+    }
+    return result;
+  }
 }
