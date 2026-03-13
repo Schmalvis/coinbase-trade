@@ -23,7 +23,7 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 - **MCP server:** `http://192.168.68.139:3002/mcp` (see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
 - **Network:** controlled by `NETWORK_ID` env var — injected into every MCP tool call by `mcp/client.ts`
 - **Data dir:** must be on a POSIX filesystem (not SMB/CIFS) — SQLite WAL mode requires proper file locking
-- **Web dashboard:** `http://192.168.68.148:8080`
+- **Web dashboard:** `http://192.168.68.139:3003`
 - **Telegram:** configured, chat ID `8423651207`
 
 ---
