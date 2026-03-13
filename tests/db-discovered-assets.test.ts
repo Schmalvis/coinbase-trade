@@ -3,18 +3,17 @@ import Database from 'better-sqlite3';
 
 const DDL = `
   CREATE TABLE IF NOT EXISTS discovered_assets (
-    address TEXT NOT NULL,
-    network TEXT NOT NULL,
-    symbol TEXT NOT NULL,
-    name TEXT NOT NULL,
-    decimals INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    strategy_type TEXT NOT NULL DEFAULT 'threshold',
-    quote_asset TEXT NOT NULL DEFAULT 'USDC',
-    drop_pct REAL NOT NULL DEFAULT 3.0,
-    rise_pct REAL NOT NULL DEFAULT 4.0,
-    sma_short INTEGER NOT NULL DEFAULT 5,
-    sma_long INTEGER NOT NULL DEFAULT 20,
+    address     TEXT NOT NULL,
+    network     TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    name        TEXT NOT NULL DEFAULT '',
+    decimals    INTEGER NOT NULL DEFAULT 18,
+    status      TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','dismissed')),
+    drop_pct    REAL NOT NULL DEFAULT 2.0,
+    rise_pct    REAL NOT NULL DEFAULT 3.0,
+    sma_short   INTEGER NOT NULL DEFAULT 5,
+    sma_long    INTEGER NOT NULL DEFAULT 20,
+    strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma')),
     discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (address, network)
   )
@@ -28,8 +27,11 @@ describe('discovered_assets DDL', () => {
     const row = db.prepare(`SELECT * FROM discovered_assets WHERE address = ?`).get('0xabc') as any;
     expect(row.symbol).toBe('PEPE');
     expect(row.status).toBe('pending');
-    expect(row.strategy_type).toBe('threshold');
-    expect(row.drop_pct).toBe(3.0);
+    expect(row.strategy).toBe('threshold');
+    expect(row.drop_pct).toBe(2.0);
+    expect(row.rise_pct).toBe(3.0);
+    expect(row.name).toBe('Pepe Token');
+    expect(row.decimals).toBe(18);
   });
 
   it('INSERT OR IGNORE does not overwrite existing row', () => {
