@@ -805,7 +805,7 @@
     function renderAssetSelector() {
       const el = document.getElementById('assetSelector');
       if (!el) return;
-      el.textContent = '';
+      el.innerHTML = '';
       assetList.forEach(a => {
         const btn = document.createElement('button');
         btn.className = 'pill' + (a.symbol === activeChartAsset ? ' active' : '');
@@ -823,23 +823,33 @@
     }
 
     async function loadPriceChart() {
-      const data   = await fetch('/api/prices?asset=' + activeChartAsset + '&limit=288').then(r => r.json());
-      const labels = data.slice().reverse().map(d => d.timestamp);
-      const prices = data.slice().reverse().map(d => d.price_usd);
-      if (!priceChart) priceChart = makeChart('priceChart', '#c8901e', 'rgba(200,144,30,0.07)');
-      priceChart.data.labels = labels;
-      priceChart.data.datasets[0].data = prices;
-      priceChart.update('none');
+      try {
+        const data   = await fetch('/api/prices?asset=' + activeChartAsset + '&limit=288').then(r => r.json());
+        const reversed = data.slice().reverse();
+        const labels = reversed.map(d => d.timestamp);
+        const prices = reversed.map(d => d.price_usd);
+        if (!priceChart) priceChart = makeChart('priceChart', '#c8901e', 'rgba(200,144,30,0.07)');
+        priceChart.data.labels = labels;
+        priceChart.data.datasets[0].data = prices;
+        priceChart.update('none');
+      } catch (e) {
+        console.error('loadPriceChart:', e);
+      }
     }
 
     async function loadPortfolioChart() {
-      const data   = await fetch('/api/portfolio?limit=288').then(r => r.json());
-      const labels = data.slice().reverse().map(d => d.timestamp);
-      const values = data.slice().reverse().map(d => d.portfolio_usd);
-      if (!portfolioChart) portfolioChart = makeChart('portfolioChart', '#29c880', 'rgba(41,200,128,0.07)');
-      portfolioChart.data.labels = labels;
-      portfolioChart.data.datasets[0].data = values;
-      portfolioChart.update('none');
+      try {
+        const data   = await fetch('/api/portfolio?limit=288').then(r => r.json());
+        const reversed = data.slice().reverse();
+        const labels = reversed.map(d => d.timestamp);
+        const values = reversed.map(d => d.portfolio_usd);
+        if (!portfolioChart) portfolioChart = makeChart('portfolioChart', '#29c880', 'rgba(41,200,128,0.07)');
+        portfolioChart.data.labels = labels;
+        portfolioChart.data.datasets[0].data = values;
+        portfolioChart.update('none');
+      } catch (e) {
+        console.error('loadPortfolioChart:', e);
+      }
     }
 
     async function loadCharts() {
@@ -1153,7 +1163,7 @@
 
     // ── Refresh ───────────────────────────────────────────────────────────────
     async function refresh() {
-      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet(), loadAssets()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet()]);
       // Show faucet button only on testnet
       document.getElementById('faucetBtn').style.display =
         activeNetwork?.includes('mainnet') ? 'none' : 'inline-block';
@@ -1296,6 +1306,7 @@
       if (event.target === document.getElementById(id)) closeModal(id);
     }
 
+    loadAssets();
     refresh();
     setInterval(refresh, 10000);
   </script>
