@@ -115,3 +115,67 @@ export const settingQueries = {
   `) as Statement<[string, string]>,
   getAllSettings: db.prepare('SELECT key, value FROM settings') as Statement<[], { key: string; value: string }>,
 };
+
+// discovered_assets DDL
+db.prepare(`
+  CREATE TABLE IF NOT EXISTS discovered_assets (
+    address       TEXT    NOT NULL,
+    network       TEXT    NOT NULL,
+    symbol        TEXT    NOT NULL,
+    name          TEXT    NOT NULL,
+    decimals      INTEGER NOT NULL,
+    status        TEXT    NOT NULL DEFAULT 'pending',
+    strategy_type TEXT    NOT NULL DEFAULT 'threshold',
+    quote_asset   TEXT    NOT NULL DEFAULT 'USDC',
+    drop_pct      REAL    NOT NULL DEFAULT 3.0,
+    rise_pct      REAL    NOT NULL DEFAULT 4.0,
+    sma_short     INTEGER NOT NULL DEFAULT 5,
+    sma_long      INTEGER NOT NULL DEFAULT 20,
+    discovered_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (address, network)
+  )
+`).run();
+
+export interface DiscoveredAssetRow {
+  address: string; network: string; symbol: string; name: string; decimals: number;
+  status: string; strategy_type: string; quote_asset: string;
+  drop_pct: number; rise_pct: number; sma_short: number; sma_long: number;
+  discovered_at: string;
+}
+
+export const discoveredAssetQueries = {
+  insertDiscoveredAsset: db.prepare(`
+    INSERT OR IGNORE INTO discovered_assets
+      (address, network, symbol, name, decimals)
+    VALUES (?, ?, ?, ?, ?)
+  `) as Statement<[string, string, string, string, number]>,
+
+  getPendingAssets: db.prepare(
+    `SELECT * FROM discovered_assets WHERE status = 'pending' AND network = ?`
+  ) as Statement<[string], DiscoveredAssetRow>,
+
+  getActiveDiscoveredAssets: db.prepare(
+    `SELECT * FROM discovered_assets WHERE status = 'active' AND network = ?`
+  ) as Statement<[string], DiscoveredAssetRow>,
+
+  updateAssetStatus: db.prepare(
+    `UPDATE discovered_assets SET status = ? WHERE address = ? AND network = ?`
+  ) as Statement<[string, string, string]>,
+
+  updateAssetStrategyConfig: db.prepare(`
+    UPDATE discovered_assets
+    SET strategy_type = @strategyType, drop_pct = @dropPct, rise_pct = @risePct,
+        sma_short = @smaShort, sma_long = @smaLong
+    WHERE address = @address AND network = @network
+  `) as Statement<{ strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number; address: string; network: string }>,
+
+  getDiscoveredAsset: db.prepare(
+    `SELECT * FROM discovered_assets WHERE address = ? AND network = ?`
+  ) as Statement<[string, string], DiscoveredAssetRow>,
+
+  assetPrice24hAgo: db.prepare(`
+    SELECT price_usd FROM asset_snapshots
+    WHERE symbol = ? AND timestamp <= datetime('now', '-24 hours')
+    ORDER BY timestamp DESC LIMIT 1
+  `) as Statement<[string], { price_usd: number }>,
+};
