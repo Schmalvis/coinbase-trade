@@ -189,6 +189,13 @@ describe('server asset management endpoints', () => {
     expect((res.body as any).error).toMatch(/not found/i);
   });
 
+  it('POST /api/assets/:address/enable - empty body returns 400 with missing fields', async () => {
+    const res = await req(capturedApp!, 'POST', '/api/assets/0xtoken/enable', {});
+
+    expect(res.status).toBe(400);
+    expect((res.body as any).error).toMatch(/Missing required fields/i);
+  });
+
   it('POST /api/assets/:address/enable - dropPct=0 returns 400', async () => {
     const res = await req(capturedApp!, 'POST', '/api/assets/0xtoken/enable', {
       strategyType: 'threshold', dropPct: 0, risePct: 3.0, smaShort: 5, smaLong: 20,

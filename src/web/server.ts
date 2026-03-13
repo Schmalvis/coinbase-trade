@@ -229,6 +229,11 @@ export function startWebServer(
     const network = botState.activeNetwork;
     const body = req.body as Record<string, unknown>;
 
+    // Check all required fields are present
+    const required = ['strategyType', 'dropPct', 'risePct', 'smaShort', 'smaLong'];
+    const missing = required.filter(k => !(k in body));
+    if (missing.length) return res.status(400).json({ error: `Missing required fields: ${missing.join(', ')}` });
+
     // Validate params FIRST, then 404 check
     const errors = validateAssetParams(body);
     if (errors.length) return res.status(400).json({ error: errors[0] });
