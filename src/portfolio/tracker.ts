@@ -1,9 +1,10 @@
 import { CoinbaseTools } from '../mcp/tools.js';
-import { queries } from '../data/db.js';
+import { queries, discoveredAssetQueries, type DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import { assetsForNetwork, type AssetDefinition } from '../assets/registry.js';
+import { AlchemyService } from '../services/alchemy.js';
 
 const pythFeedIds = new Map<string, string>(); // pythSymbol → feedId
 let polling = false;
@@ -11,6 +12,7 @@ let polling = false;
 export async function startPortfolioTracker(
   tools: CoinbaseTools,
   runtimeConfig: RuntimeConfig,
+  alchemyService?: AlchemyService,
 ): Promise<() => void> {
   logger.info('Portfolio tracker started');
 
@@ -80,6 +82,81 @@ export async function startPortfolioTracker(
 
       queries.insertPortfolioSnapshot.run({ portfolio_usd: portfolioUsd });
       logger.info(`Portfolio: $${portfolioUsd.toFixed(2)}`);
+
+      if (alchemyService) {
+        try {
+          const network = botState.activeNetwork;
+          const wallet = await tools.getWalletDetails();
+          const walletAddress = (wallet as any).address;
+          if (!walletAddress) throw new Error('wallet address unavailable');
+
+          // Fetch all ERC20 balances
+          const tokenBalances = await alchemyService.getTokenBalances(walletAddress, network);
+
+          // Build hex balance lookup: contractAddress (lowercase) → hex balance
+          const hexBalanceMap = new Map<string, string>();
+          for (const tb of tokenBalances) {
+            hexBalanceMap.set(tb.contractAddress.toLowerCase(), tb.tokenBalance);
+          }
+
+          // Skip tokens already in static registry
+          const registryAddresses = new Set(
+            assetsForNetwork(network).map(a => {
+              const addr = a.addresses[network as keyof typeof a.addresses];
+              return addr ? addr.toLowerCase() : null;
+            }).filter(Boolean)
+          );
+
+          // Insert new tokens (INSERT OR IGNORE — status='pending' by default)
+          for (const tb of tokenBalances) {
+            const addr = tb.contractAddress.toLowerCase();
+            if (registryAddresses.has(addr)) continue;
+
+            const existing = discoveredAssetQueries.getAssetByAddress.get(tb.contractAddress, network);
+            if (!existing) {
+              try {
+                const meta = await alchemyService.getTokenMetadata(tb.contractAddress, network);
+                discoveredAssetQueries.upsertDiscoveredAsset.run({
+                  address: tb.contractAddress,
+                  network,
+                  symbol: meta.symbol,
+                  name: meta.name,
+                  decimals: meta.decimals,
+                });
+                logger.debug(`Discovered new token: ${meta.symbol} (${tb.contractAddress})`);
+              } catch (err) {
+                logger.debug(`Skipping token ${tb.contractAddress}: metadata unavailable`);
+              }
+            }
+          }
+
+          // Update pendingTokenCount
+          const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+          const pendingCount = allDiscovered.filter(r => r.status === 'pending').length;
+          botState.setPendingTokenCount(pendingCount);
+
+          // Price all active+pending discovered assets via DefiLlama
+          const activePending = allDiscovered.filter(r => r.status !== 'dismissed');
+          for (const row of activePending) {
+            try {
+              const prices = await tools.getTokenPrices([`base:${row.address}`]);
+              const price = (prices[`base:${row.address}`] as any)?.usd ?? 0;
+              queries.insertAssetSnapshot.run({ symbol: row.symbol, price_usd: price, balance: 0 });
+
+              // Update balance from hex balance
+              const hexBal = hexBalanceMap.get(row.address.toLowerCase());
+              const humanBalance = hexBal
+                ? Number(BigInt(hexBal)) / Math.pow(10, row.decimals)
+                : 0;
+              botState.updateAssetBalance(row.symbol, humanBalance);
+            } catch (err) {
+              logger.error(`Failed to price/balance discovered asset ${row.symbol}`, err);
+            }
+          }
+        } catch (err) {
+          logger.warn('Alchemy discovery step failed, skipping', err);
+        }
+      }
     } catch (err) {
       logger.error('Portfolio tracker poll failed', err);
     } finally {
