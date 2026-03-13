@@ -51,6 +51,22 @@ db.exec(`
   );
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS asset_snapshots (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT    NOT NULL DEFAULT (datetime('now')),
+    symbol    TEXT    NOT NULL,
+    price_usd REAL    NOT NULL,
+    balance   REAL    NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp     TEXT    NOT NULL DEFAULT (datetime('now')),
+    portfolio_usd REAL    NOT NULL
+  );
+`);
+
 export const queries: Record<string, Statement> = {
   insertSnapshot: db.prepare(`
     INSERT INTO price_snapshots (eth_price, eth_balance, portfolio_usd)
@@ -73,6 +89,22 @@ export const queries: Record<string, Statement> = {
   insertEvent: db.prepare(`
     INSERT INTO bot_events (event, detail) VALUES (?, ?)
   `),
+
+  insertAssetSnapshot: db.prepare(
+    'INSERT INTO asset_snapshots (symbol, price_usd, balance) VALUES (@symbol, @price_usd, @balance)'
+  ),
+
+  recentAssetSnapshots: db.prepare(
+    'SELECT * FROM asset_snapshots WHERE symbol = ? ORDER BY id DESC LIMIT ?'
+  ),
+
+  insertPortfolioSnapshot: db.prepare(
+    'INSERT INTO portfolio_snapshots (portfolio_usd) VALUES (@portfolio_usd)'
+  ),
+
+  recentPortfolioSnapshots: db.prepare(
+    'SELECT * FROM portfolio_snapshots ORDER BY id DESC LIMIT ?'
+  ),
 };
 
 export const settingQueries = {
