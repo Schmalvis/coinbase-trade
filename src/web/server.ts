@@ -2,37 +2,66 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { botState } from '../core/state.js';
-import { queries } from '../data/db.js';
+import { queries, discoveredAssetQueries } from '../data/db.js';
+import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
 import { assetsForNetwork } from '../assets/registry.js';
 import type { CoinbaseTools } from '../mcp/tools.js';
 import type { RuntimeConfig, ConfigKey } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
+import type { TradingEngine } from '../trading/engine.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfig, executor: TradeExecutor): void {
+function validateAssetParams(p: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  if ('strategyType' in p && !['threshold', 'sma'].includes(p.strategyType as string)) {
+    errors.push('strategyType must be threshold or sma');
+  }
+  for (const k of ['dropPct', 'risePct']) {
+    if (k in p && (typeof p[k] !== 'number' || (p[k] as number) < 0.1)) {
+      errors.push(`${k} must be a number >= 0.1`);
+    }
+  }
+  if ('smaShort' in p && (typeof p.smaShort !== 'number' || !Number.isInteger(p.smaShort) || (p.smaShort as number) < 2)) {
+    errors.push('smaShort must be an integer >= 2');
+  }
+  if ('smaLong' in p && (typeof p.smaLong !== 'number' || !Number.isInteger(p.smaLong) || (p.smaLong as number) < 3)) {
+    errors.push('smaLong must be an integer >= 3');
+  }
+  return errors;
+}
+
+export function startWebServer(
+  tools: CoinbaseTools,
+  runtimeConfig: RuntimeConfig,
+  executor: TradeExecutor,
+  engine: TradingEngine,
+): void {
   const app = express();
   app.use(express.json());
 
   // ── Status ──────────────────────────────────────────────────────────────────
   app.get('/api/status', (_req, res) => {
-    const eth   = botState.lastBalance ?? 0;
-    const usdc  = botState.lastUsdcBalance ?? 0;
-    const price = botState.lastPrice ?? 0;
+    let portfolioUsd = 0;
+    for (const [sym, bal] of botState.assetBalances) {
+      const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
+      portfolioUsd += bal * (priceRow?.price_usd ?? 0);
+    }
     res.json({
-      status:           botState.status,
-      lastPrice:        price,
-      ethBalance:       eth,
-      usdcBalance:      usdc,
-      portfolioUsd:     price * eth + usdc,
-      lastTradeAt:      botState.lastTradeAt,
-      dryRun:           runtimeConfig.get('DRY_RUN'),   // live value
-      strategy:         runtimeConfig.get('STRATEGY'),  // live value
-      activeNetwork:    botState.activeNetwork,
+      status:            botState.status,
+      lastPrice:         botState.lastPrice ?? 0,
+      ethBalance:        botState.lastBalance ?? 0,
+      usdcBalance:       botState.lastUsdcBalance ?? 0,
+      portfolioUsd,
+      lastTradeAt:       botState.lastTradeAt,
+      dryRun:            runtimeConfig.get('DRY_RUN'),
+      strategy:          runtimeConfig.get('STRATEGY'),
+      activeNetwork:     botState.activeNetwork,
       availableNetworks: botState.availableNetworks,
-      assetBalances:    Object.fromEntries(botState.assetBalances),
+      assetBalances:     Object.fromEntries(botState.assetBalances),
+      pendingTokenCount: botState.pendingTokenCount,
     });
   });
 
@@ -64,7 +93,6 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
       res.json({ ok: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // Extract field name from message (format: "KEY: reason")
       const field = msg.split(':')[0].trim();
       res.status(400).json({ error: msg, field });
     }
@@ -124,17 +152,158 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
   // ── Assets ──────────────────────────────────────────────────────────────────
   app.get('/api/assets', (_req, res) => {
     const network = botState.activeNetwork;
-    const assets  = assetsForNetwork(network);
-    res.json(assets.map(a => ({
-      symbol:      a.symbol,
-      decimals:    a.decimals,
-      address:     a.addresses[network as keyof typeof a.addresses] ?? null,
-      priceSource: a.priceSource,
-      tradeMethod: a.tradeMethod,
-      isNative:    a.isNative ?? false,
-      balance:     botState.assetBalances.get(a.symbol) ?? null,
-      price:       (queries.recentAssetSnapshots.all(a.symbol, 1) as any[])[0]?.price_usd ?? null,
-    })));
+
+    const registryAssets = assetsForNetwork(network).map(a => {
+      const sym = a.symbol;
+      const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
+      const price = priceRow?.price_usd ?? null;
+      const old = (queries.recentAssetSnapshots.all(sym, 100) as any[])
+        .find((r: any) => new Date(r.timestamp + 'Z').getTime() <= Date.now() - 86400000);
+      const change24h = (price && old?.price_usd && old.price_usd !== 0)
+        ? ((price - old.price_usd) / old.price_usd) * 100
+        : null;
+      return {
+        symbol: sym,
+        name: (a as any).name ?? sym,
+        address: a.addresses[network as keyof typeof a.addresses] ?? null,
+        decimals: a.decimals,
+        balance: botState.assetBalances.get(sym) ?? null,
+        price,
+        change24h,
+        isNative: a.isNative ?? false,
+        tradeMethod: a.tradeMethod,
+        priceSource: a.priceSource,
+        status: 'active' as const,
+        source: 'registry' as const,
+        strategyConfig: {
+          type: runtimeConfig.get('STRATEGY') as string,
+          dropPct: runtimeConfig.get('PRICE_DROP_THRESHOLD_PCT') as number,
+          risePct: runtimeConfig.get('PRICE_RISE_TARGET_PCT') as number,
+          smaShort: runtimeConfig.get('SMA_SHORT_WINDOW') as number,
+          smaLong: runtimeConfig.get('SMA_LONG_WINDOW') as number,
+        },
+      };
+    });
+
+    const allDiscovered = (discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[])
+      .filter(d => d.status !== 'dismissed')
+      .map(d => {
+        const priceRow = (queries.recentAssetSnapshots.all(d.symbol, 1) as any[])[0];
+        const price = priceRow?.price_usd ?? null;
+        const old = (queries.recentAssetSnapshots.all(d.symbol, 100) as any[])
+          .find((r: any) => new Date(r.timestamp + 'Z').getTime() <= Date.now() - 86400000);
+        const change24h = (price && old?.price_usd && old.price_usd !== 0)
+          ? ((price - old.price_usd) / old.price_usd) * 100
+          : null;
+        return {
+          symbol: d.symbol,
+          name: d.name,
+          address: d.address,
+          decimals: d.decimals,
+          balance: botState.assetBalances.get(d.symbol) ?? null,
+          price,
+          change24h,
+          isNative: false,
+          tradeMethod: 'agentkit',
+          priceSource: 'defillama',
+          status: d.status,
+          source: 'discovered' as const,
+          strategyConfig: {
+            type: d.strategy,
+            dropPct: d.drop_pct,
+            risePct: d.rise_pct,
+            smaShort: d.sma_short,
+            smaLong: d.sma_long,
+          },
+        };
+      });
+
+    res.json([...registryAssets, ...allDiscovered]);
+  });
+
+  // ── Asset management endpoints ───────────────────────────────────────────────
+
+  // POST /api/assets/:address/enable
+  app.post('/api/assets/:address/enable', (req, res) => {
+    const { address } = req.params;
+    const network = botState.activeNetwork;
+    const body = req.body as Record<string, unknown>;
+
+    // Validate params FIRST, then 404 check
+    const errors = validateAssetParams(body);
+    if (errors.length) return res.status(400).json({ error: errors[0] });
+
+    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
+
+    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
+    discoveredAssetQueries.updateAssetStrategyConfig.run({
+      address, network,
+      strategy: params.strategyType,
+      drop_pct: params.dropPct,
+      rise_pct: params.risePct,
+      sma_short: params.smaShort,
+      sma_long: params.smaLong,
+    });
+    discoveredAssetQueries.updateAssetStatus.run({
+      status: 'active',
+      address,
+      network,
+    });
+    engine.startAssetLoop(address, row.symbol, {
+      strategyType: params.strategyType as 'threshold' | 'sma',
+      dropPct: params.dropPct,
+      risePct: params.risePct,
+      smaShort: params.smaShort,
+      smaLong: params.smaLong,
+    });
+    const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+    botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
+    return res.json({ ok: true });
+  });
+
+  // POST /api/assets/:address/dismiss
+  app.post('/api/assets/:address/dismiss', (req, res) => {
+    const { address } = req.params;
+    const network = botState.activeNetwork;
+    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
+    discoveredAssetQueries.dismissAsset.run(address, network);
+    engine.stopAssetLoop(row.symbol);
+    const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+    botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
+    return res.json({ ok: true });
+  });
+
+  // PUT /api/assets/:address/config
+  app.put('/api/assets/:address/config', (req, res) => {
+    const { address } = req.params;
+    const network = botState.activeNetwork;
+
+    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
+
+    const body = req.body as Record<string, unknown>;
+    const errors = validateAssetParams(body);
+    if (errors.length) return res.status(400).json({ error: errors[0] });
+
+    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
+    discoveredAssetQueries.updateAssetStrategyConfig.run({
+      address, network,
+      strategy: params.strategyType,
+      drop_pct: params.dropPct,
+      rise_pct: params.risePct,
+      sma_short: params.smaShort,
+      sma_long: params.smaLong,
+    });
+    engine.reloadAssetConfig(address, row.symbol, {
+      strategyType: params.strategyType as 'threshold' | 'sma',
+      dropPct: params.dropPct,
+      risePct: params.risePct,
+      smaShort: params.smaShort,
+      smaLong: params.smaLong,
+    });
+    return res.json({ ok: true });
   });
 
   // ── Prices & Trades ─────────────────────────────────────────────────────────
@@ -145,7 +314,6 @@ export function startWebServer(tools: CoinbaseTools, runtimeConfig: RuntimeConfi
       res.json(queries.recentAssetSnapshots.all(symbol, limit));
       return;
     }
-    // Default: legacy ETH price_snapshots (backward compat)
     res.json(queries.recentSnapshots.all(limit));
   });
 
