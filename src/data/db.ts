@@ -11,6 +11,9 @@ export const db: DB = new Database(dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// Migration: add network column to existing DBs that predate this field
+try { db.exec(`ALTER TABLE trades ADD COLUMN network TEXT NOT NULL DEFAULT 'unknown'`); } catch { /* already exists */ }
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS price_snapshots (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +33,8 @@ db.exec(`
     triggered_by TEXT NOT NULL DEFAULT 'strategy',
     status       TEXT NOT NULL DEFAULT 'pending',
     dry_run      INTEGER NOT NULL DEFAULT 1,
-    reason       TEXT
+    reason       TEXT,
+    network      TEXT NOT NULL DEFAULT 'unknown'
   );
 
   CREATE TABLE IF NOT EXISTS bot_events (
@@ -58,8 +62,8 @@ export const queries: Record<string, Statement> = {
   `),
 
   insertTrade: db.prepare(`
-    INSERT INTO trades (action, amount_eth, price_usd, tx_hash, triggered_by, status, dry_run, reason)
-    VALUES (@action, @amount_eth, @price_usd, @tx_hash, @triggered_by, @status, @dry_run, @reason)
+    INSERT INTO trades (action, amount_eth, price_usd, tx_hash, triggered_by, status, dry_run, reason, network)
+    VALUES (@action, @amount_eth, @price_usd, @tx_hash, @triggered_by, @status, @dry_run, @reason, @network)
   `),
 
   recentTrades: db.prepare(`

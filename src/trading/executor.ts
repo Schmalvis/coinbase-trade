@@ -116,6 +116,7 @@ export class TradeExecutor {
       status:       t.status,
       dry_run:      t.dryRun ? 1 : 0,
       reason:       t.reason,
+      network:      botState.activeNetwork,
     });
 
     const now = new Date();

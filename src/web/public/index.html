@@ -681,7 +681,7 @@
   <div class="table-wrap">
     <table>
       <thead>
-        <tr><th>Time</th><th>Action</th><th>Amount</th><th>Price</th><th>Reason</th><th>Tx</th></tr>
+        <tr><th>Time</th><th>Action</th><th>Amount</th><th>Price</th><th>Reason</th><th>Network</th><th>Tx</th></tr>
       </thead>
       <tbody id="trades"></tbody>
     </table>
@@ -820,21 +820,26 @@
       const trades = await fetch('/api/trades?limit=15').then(r => r.json());
       const tbody = document.getElementById('trades');
       if (!trades.length) {
-        tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No trades recorded</td></tr>';
+        tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No trades recorded</td></tr>';
         return;
       }
       const isMainnet = activeNetwork?.includes('mainnet');
       const scanBase = isMainnet ? 'https://basescan.org' : 'https://sepolia.basescan.org';
-      tbody.innerHTML = trades.map(t => `
-        <tr>
+      tbody.innerHTML = trades.map(t => {
+        const tradeNet = t.network ?? 'unknown';
+        const tradeScan = tradeNet.includes('mainnet') ? 'https://basescan.org' : 'https://sepolia.basescan.org';
+        const netLabel = tradeNet === 'base-mainnet' ? 'mainnet' : tradeNet === 'base-sepolia' ? 'sepolia' : tradeNet;
+        const netColor = tradeNet.includes('mainnet') ? 'var(--green)' : 'var(--text-2)';
+        return `<tr>
           <td style="white-space:nowrap;color:var(--text-2)">${new Date(t.timestamp).toLocaleString()}</td>
           <td class="${t.action}">${t.action.toUpperCase()}${t.dry_run ? ' <span style="opacity:.4;font-weight:400;font-size:0.7rem;font-family:inherit">[dry]</span>' : ''}</td>
           <td>${parseFloat(t.amount_eth).toFixed(6)} ETH</td>
           <td>$${parseFloat(t.price_usd).toFixed(2)}</td>
           <td style="max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-2);font-family:'Barlow Condensed',sans-serif;font-size:0.82rem;letter-spacing:0.03em">${t.reason ?? ''}</td>
-          <td style="font-size:0.65rem;opacity:.5">${t.tx_hash ? `<a href="${scanBase}/tx/${t.tx_hash}" target="_blank" style="color:var(--accent);text-decoration:none">${t.tx_hash.slice(0,10)}\u2026</a>` : '—'}</td>
-        </tr>
-      `).join('');
+          <td style="font-size:0.65rem;color:${netColor};font-family:'Barlow Condensed',sans-serif;letter-spacing:0.06em;text-transform:uppercase">${netLabel}</td>
+          <td style="font-size:0.65rem;opacity:.5">${t.tx_hash ? `<a href="${tradeScan}/tx/${t.tx_hash}" target="_blank" style="color:var(--accent);text-decoration:none">${t.tx_hash.slice(0,10)}\u2026</a>` : '—'}</td>
+        </tr>`;
+      }).join('');
     }
 
     // ── Wallet ────────────────────────────────────────────────────────────────
