@@ -668,7 +668,10 @@
 
   <div class="charts">
     <div class="chart-card">
-      <div class="chart-title">ETH Price — 24h</div>
+      <div class="chart-title" style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap">
+        <span>Price — 24h</span>
+        <span id="assetSelector" style="display:flex;gap:0.25rem;flex-wrap:wrap"></span>
+      </div>
       <div class="chart-wrap"><canvas id="priceChart"></canvas></div>
     </div>
     <div class="chart-card">
@@ -690,6 +693,8 @@
   <script>
     let priceChart, portfolioChart;
     let availableNetworks = [], activeNetwork = '';
+    let activeChartAsset = 'ETH';
+    let assetList = [];
 
     // ── Theme ─────────────────────────────────────────────────────────────────
     function getChartColors() {
@@ -797,22 +802,58 @@
       });
     }
 
-    async function loadCharts() {
-      const data = await fetch('/api/prices?limit=288').then(r => r.json());
-      const labels    = data.map(d => d.timestamp).reverse();
-      const prices    = data.map(d => d.eth_price).reverse();
-      const portfolio = data.map(d => d.portfolio_usd).reverse();
+    function renderAssetSelector() {
+      const el = document.getElementById('assetSelector');
+      if (!el) return;
+      el.textContent = '';
+      assetList.forEach(a => {
+        const btn = document.createElement('button');
+        btn.className = 'pill' + (a.symbol === activeChartAsset ? ' active' : '');
+        btn.style.cssText = 'font-size:0.65rem;padding:0.1rem 0.5rem';
+        btn.textContent = a.symbol;
+        btn.onclick = () => switchChartAsset(a.symbol);
+        el.appendChild(btn);
+      });
+    }
 
-      if (!priceChart)     priceChart     = makeChart('priceChart',     '#c8901e', 'rgba(200,144,30,0.07)');
-      if (!portfolioChart) portfolioChart = makeChart('portfolioChart', '#29c880', 'rgba(41,200,128,0.07)');
+    async function switchChartAsset(symbol) {
+      activeChartAsset = symbol;
+      renderAssetSelector();
+      await loadPriceChart();
+    }
 
+    async function loadPriceChart() {
+      const data   = await fetch('/api/prices?asset=' + activeChartAsset + '&limit=288').then(r => r.json());
+      const labels = data.slice().reverse().map(d => d.timestamp);
+      const prices = data.slice().reverse().map(d => d.price_usd);
+      if (!priceChart) priceChart = makeChart('priceChart', '#c8901e', 'rgba(200,144,30,0.07)');
       priceChart.data.labels = labels;
       priceChart.data.datasets[0].data = prices;
       priceChart.update('none');
+    }
 
+    async function loadPortfolioChart() {
+      const data   = await fetch('/api/portfolio?limit=288').then(r => r.json());
+      const labels = data.slice().reverse().map(d => d.timestamp);
+      const values = data.slice().reverse().map(d => d.portfolio_usd);
+      if (!portfolioChart) portfolioChart = makeChart('portfolioChart', '#29c880', 'rgba(41,200,128,0.07)');
       portfolioChart.data.labels = labels;
-      portfolioChart.data.datasets[0].data = portfolio;
+      portfolioChart.data.datasets[0].data = values;
       portfolioChart.update('none');
+    }
+
+    async function loadCharts() {
+      await Promise.all([loadPriceChart(), loadPortfolioChart()]);
+    }
+
+    async function loadAssets() {
+      try {
+        assetList = await fetch('/api/assets').then(r => r.json());
+        renderAssetSelector();
+        if (typeof renderHoldings === 'function') renderHoldings(); // Task 8 adds this
+      } catch (e) {
+        console.warn('loadAssets failed', e);
+      }
     }
 
     // ── Trades ────────────────────────────────────────────────────────────────
@@ -1112,7 +1153,7 @@
 
     // ── Refresh ───────────────────────────────────────────────────────────────
     async function refresh() {
-      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet(), loadAssets()]);
       // Show faucet button only on testnet
       document.getElementById('faucetBtn').style.display =
         activeNetwork?.includes('mainnet') ? 'none' : 'inline-block';
