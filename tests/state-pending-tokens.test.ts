@@ -15,7 +15,7 @@ describe('BotState pendingTokenCount', () => {
   it('setNetwork resets pendingTokenCount to 0', async () => {
     const { botState } = await import('../src/core/state.js');
     botState.setPendingTokenCount(5);
-    botState.setNetwork('base-mainnet');
+    botState.setNetwork('base-sepolia');
     expect(botState.pendingTokenCount).toBe(0);
   });
 });
