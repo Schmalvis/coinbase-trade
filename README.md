@@ -1,10 +1,10 @@
-# coinbase-trade / base-sepolia-test
+# coinbase-trade
 
-Autonomous trading bot for the **Base Sepolia testnet** using [Coinbase AgentKit](https://github.com/coinbase/agentkit) via MCP (Model Context Protocol).
+Autonomous trading bot for the **Base network** (Sepolia testnet or mainnet) using [Coinbase AgentKit](https://github.com/coinbase/agentkit) via MCP (Model Context Protocol).
 
 Tracks ETH price via Pyth oracle, runs configurable trading strategies, executes swaps via the Coinbase MCP server, and exposes a web dashboard + Telegram bot for monitoring and control.
 
-> **Testnet only.** This is wired to base-sepolia — no real funds at risk.
+> **Network is controlled by the `NETWORK_ID` environment variable.** Defaults to `base-sepolia` (testnet, no real funds). Set `NETWORK_ID=base-mainnet` to trade with real funds — do so only after thorough testing.
 
 ---
 
