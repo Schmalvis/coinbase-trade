@@ -1,4 +1,4 @@
-import { CoinbaseTools, TOKEN_ADDRESSES } from '../mcp/tools.js';
+import { CoinbaseTools } from '../mcp/tools.js';
 import { queries } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
@@ -27,7 +27,7 @@ export async function startPortfolioTracker(
       const [wallet, ethPrice, usdcBalance] = await Promise.all([
         tools.getWalletDetails(),
         ethPriceFeedId ? tools.fetchPrice(ethPriceFeedId) : Promise.resolve(0),
-        tools.getErc20Balance(TOKEN_ADDRESSES.USDC),
+        tools.getErc20BalanceBySymbol('USDC'),
       ]);
 
       logger.debug('Wallet response', wallet);

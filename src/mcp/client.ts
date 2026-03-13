@@ -12,6 +12,8 @@ export class MCPClient {
     this.client = new Client({ name: 'coinbase-trade-bot', version: '0.1.0' });
   }
 
+  get network(): string { return this.getNetwork(); }
+
   async connect(): Promise<void> {
     await this.client.connect(this.transport);
     this.connected = true;

@@ -1,10 +1,20 @@
 import type { MCPClient } from './client.js';
 
-// Contract addresses on base-sepolia
-export const TOKEN_ADDRESSES = {
-  ETH:  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
-  USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
-} as const;
+const TOKEN_ADDRESSES_BY_NETWORK: Record<string, Record<string, string>> = {
+  'base-sepolia': {
+    ETH:  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    USDC: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
+  },
+  'base-mainnet': {
+    ETH:  '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+    USDC: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  },
+};
+
+// Fallback for type usage — resolved at runtime via getTokenAddress()
+export const TOKEN_ADDRESSES = TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'] as {
+  ETH: string; USDC: string;
+};
 
 export type TokenSymbol = keyof typeof TOKEN_ADDRESSES;
 
@@ -34,6 +44,11 @@ export interface TokenPrice {
 export class CoinbaseTools {
   constructor(private mcp: MCPClient) {}
 
+  private tokenAddress(symbol: TokenSymbol): string {
+    const net = this.mcp.network;
+    return (TOKEN_ADDRESSES_BY_NETWORK[net] ?? TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'])[symbol];
+  }
+
   async getWalletDetails(): Promise<WalletDetails> {
     const raw = await this.mcp.callTool<WalletDetails | string>('WalletActionProvider_get_wallet_details', {});
     if (typeof raw === 'string') {
@@ -62,18 +77,22 @@ export class CoinbaseTools {
     return match ? parseFloat(match[1]) : 0;
   }
 
+  getErc20BalanceBySymbol(symbol: TokenSymbol): Promise<number> {
+    return this.getErc20Balance(this.tokenAddress(symbol));
+  }
+
   async getSwapPrice(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapPrice> {
     return this.mcp.callTool('CdpEvmWalletActionProvider_get_swap_price', {
-      fromToken: TOKEN_ADDRESSES[fromSymbol],
-      toToken: TOKEN_ADDRESSES[toSymbol],
+      fromToken: this.tokenAddress(fromSymbol),
+      toToken: this.tokenAddress(toSymbol),
       fromAmount: amount,
     });
   }
 
   async swap(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapResult> {
     return this.mcp.callTool('CdpEvmWalletActionProvider_swap', {
-      fromToken: TOKEN_ADDRESSES[fromSymbol],
-      toToken: TOKEN_ADDRESSES[toSymbol],
+      fromToken: this.tokenAddress(fromSymbol),
+      toToken: this.tokenAddress(toSymbol),
       fromAmount: amount,
     });
   }
