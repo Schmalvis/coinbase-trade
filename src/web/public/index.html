@@ -657,6 +657,9 @@
     </div>
   </div>
 
+  <div class="section-title" id="holdingsTitle" style="display:none">Holdings</div>
+  <div class="grid" id="holdingsGrid" style="display:none"></div>
+
   <div class="controls">
     <button class="btn-pause"  onclick="control('pause')">Pause</button>
     <button class="btn-resume" onclick="control('resume')">Resume</button>
@@ -820,6 +823,46 @@
       });
     }
 
+    function renderHoldings() {
+      const grid  = document.getElementById('holdingsGrid');
+      const title = document.getElementById('holdingsTitle');
+      if (!grid || !title) return;
+      const extras = assetList.filter(a => a.symbol !== 'ETH' && a.symbol !== 'USDC' && a.balance != null);
+      if (!extras.length) {
+        grid.style.display = 'none';
+        title.style.display = 'none';
+        return;
+      }
+      title.style.display = '';
+      grid.style.display = '';
+      grid.innerHTML = extras.map(a => {
+        const usdValue = (a.balance != null && a.price != null) ? (a.balance * a.price).toFixed(2) : null;
+        const balFmt = a.balance != null ? Number(a.balance).toFixed(a.decimals <= 8 ? a.decimals : 6) : '—';
+        return `
+          <div class="card">
+            <div class="label">${a.symbol}</div>
+            <div class="value">${balFmt}</div>
+            <div class="sub">${usdValue ? '$' + usdValue : ''}</div>
+          </div>`;
+      }).join('');
+    }
+
+    function renderTradePairButtons() {
+      const container = document.getElementById('tradePairBtns');
+      if (!container) return;
+      const tradeable = assetList.filter(a => a.tradeMethod === 'agentkit');
+      container.innerHTML = tradeable.map(a =>
+        `<button data-symbol="${a.symbol}"
+          class="pill ${tradePair.from === a.symbol ? 'active' : ''}"
+          onclick="setTradePairFrom('${a.symbol}')">${a.symbol}</button>`
+      ).join('');
+    }
+
+    function setTradePairFrom(symbol) {
+      const toSymbol = symbol === 'USDC' ? 'ETH' : 'USDC';
+      setTradePair(symbol, toSymbol);
+    }
+
     async function switchChartAsset(symbol) {
       activeChartAsset = symbol;
       renderAssetSelector();
@@ -864,7 +907,8 @@
       try {
         assetList = await fetch('/api/assets').then(r => r.json());
         renderAssetSelector();
-        if (typeof renderHoldings === 'function') renderHoldings(); // Task 8 adds this
+        renderHoldings();
+        renderTradePairButtons();
       } catch (e) {
         console.warn('loadAssets failed', e);
       }
@@ -969,6 +1013,7 @@
 
     function openTrade(from, to) {
       switchTradeTab('standard');
+      renderTradePairButtons();
       setTradePair(from || 'ETH', to || 'USDC');
       setTradeSide('from');
       document.getElementById('tradeAmount').value = '';
@@ -987,8 +1032,9 @@
 
     function setTradePair(from, to) {
       tradePair = { from, to };
-      document.getElementById('tradeFromETH').classList.toggle('active',  from === 'ETH');
-      document.getElementById('tradeFromUSDC').classList.toggle('active', from === 'USDC');
+      document.querySelectorAll('#tradePairBtns button').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.symbol === from);
+      });
       document.getElementById('tradeQuoteBox').style.display = 'none';
       document.getElementById('confirmTradeBtn').disabled = true;
       tradeQuotedFromAmount = null;
@@ -1431,10 +1477,7 @@
       <div class="field-group">
         <div class="field">
           <label>Direction</label>
-          <div class="pill-group">
-            <button class="pill" id="tradeFromETH" onclick="setTradePair('ETH','USDC')">ETH → USDC</button>
-            <button class="pill" id="tradeFromUSDC" onclick="setTradePair('USDC','ETH')">USDC → ETH</button>
-          </div>
+          <div class="pill-group" id="tradePairBtns"></div>
         </div>
         <div class="field">
           <div style="display:flex;gap:0.5rem;align-items:center">
