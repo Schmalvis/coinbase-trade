@@ -10,6 +10,8 @@ Autonomous trading bot for Base network (sepolia testnet / mainnet) using Coinba
 Bot tracks ETH + USDC balances, executes ETH↔USDC swaps via the Coinbase AgentKit MCP server.
 Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:latest`.
 
+**Phase 2 (multi-asset) complete** — asset registry implemented for ETH, USDC, CBBTC, CBETH with per-asset balance tracking. Dashboard updated with asset selector for price chart, Holdings section showing all tracked assets, and dynamic trade pair buttons. LOG_LEVEL hot-reload fixed — Settings modal LOG_LEVEL changes now take effect immediately without restart.
+
 **Next steps:**
 - Test mainnet with a small real ETH transfer (see `docs/real-account-options.md`)
 - Switch `NETWORK_ID=base-mainnet` and restart when ready for live trading
@@ -65,6 +67,8 @@ src/
   mcp/
     client.ts        # MCPClient — injects network into every tool call
     tools.ts         # Typed wrappers for Coinbase AgentKit tools
+  assets/
+    registry.ts      # Static asset registry (ETH, USDC, CBBTC, CBETH)
   data/
     db.ts            # SQLite via better-sqlite3 (WAL mode)
   portfolio/
