@@ -6,6 +6,8 @@ import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 
 export class TradeExecutor {
+  private readonly _assetCooldowns = new Map<string, Date>();
+
   constructor(
     private readonly tools: CoinbaseTools,
     private readonly runtimeConfig: RuntimeConfig,
@@ -70,6 +72,39 @@ export class TradeExecutor {
     const amountEth = isBuy ? amount / (price || 1) : amount;
     this.recordTrade({ signal: signal as 'buy' | 'sell', amountEth, price, txHash, triggeredBy, status, dryRun, reason });
     return true;
+  }
+
+  async executeForAsset(symbol: string, signal: Signal, reason: string): Promise<void> {
+    if (signal === 'hold') return;
+
+    if (this.runtimeConfig.get('DRY_RUN')) {
+      logger.info(`[DRY RUN] ${signal} ${symbol}: ${reason}`);
+      return;
+    }
+
+    const cooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    const last = this._assetCooldowns.get(symbol);
+    if (last && (Date.now() - last.getTime()) < cooldownSecs * 1000) {
+      logger.debug(`Cooldown active for ${symbol}, skipping`);
+      return;
+    }
+
+    const balance = botState.assetBalances.get(symbol) ?? 0;
+    if (balance <= 0) {
+      logger.warn(`No ${symbol} balance for ${signal} trade`);
+      return;
+    }
+
+    const amount = balance * 0.1;
+
+    const [fromSymbol, toSymbol] = signal === 'buy'
+      ? ['USDC', symbol]
+      : [symbol, 'USDC'];
+
+    logger.info(`Executing ${signal} ${symbol} amount=${amount}: ${reason}`);
+    await this.tools.swap(fromSymbol as any, toSymbol as any, amount.toString());
+    this._assetCooldowns.set(symbol, new Date());
+    logger.info(`executeForAsset complete: ${signal} ${symbol}`);
   }
 
   async executeEnso(
