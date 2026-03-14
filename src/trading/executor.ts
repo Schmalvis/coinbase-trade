@@ -179,6 +179,54 @@ export class TradeExecutor {
     return { txHash, dryRun };
   }
 
+  async executeRotation(
+    sellSymbol: string,
+    buySymbol: string,
+    sellAmount: number,
+    rotationId?: number,
+  ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string }> {
+    const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
+
+    // Leg 1: Sell → USDC (bypass cooldown between legs)
+    let sellTxHash: string | undefined;
+    if (!dryRun) {
+      try {
+        const result = await this.tools.swap(sellSymbol as any, 'USDC' as any, sellAmount.toString());
+        sellTxHash = result.txHash;
+      } catch (err) {
+        logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
+        return { status: 'failed' };
+      }
+    } else {
+      logger.info(`[DRY RUN] Rotation leg 1: sell ${sellAmount} ${sellSymbol} → USDC`);
+    }
+
+    // Leg 2: USDC → Buy target
+    let buyTxHash: string | undefined;
+    if (!dryRun) {
+      try {
+        const usdcBalance = botState.lastUsdcBalance ?? 0;
+        const amount = Math.max(usdcBalance * 0.95, 0); // leave 5% buffer
+        if (amount <= 0) {
+          logger.warn('Rotation leg 2 skipped: no USDC balance after sell');
+          botState.recordTrade(new Date());
+          return { status: 'leg1_done', sellTxHash };
+        }
+        const result = await this.tools.swap('USDC' as any, buySymbol as any, amount.toString());
+        buyTxHash = result.txHash;
+      } catch (err) {
+        logger.error(`Rotation leg 2 failed (buy ${buySymbol})`, err);
+        botState.recordTrade(new Date());
+        return { status: 'leg1_done', sellTxHash };
+      }
+    } else {
+      logger.info(`[DRY RUN] Rotation leg 2: buy ${buySymbol} with USDC`);
+    }
+
+    botState.recordTrade(new Date()); // set cooldown after full rotation
+    return { status: 'executed', sellTxHash, buyTxHash };
+  }
+
   private recordTrade(t: {
     signal: 'buy' | 'sell'; amountEth: number; price: number; txHash?: string;
     triggeredBy: string; status: string; dryRun: boolean; reason: string;
