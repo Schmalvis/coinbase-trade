@@ -25,10 +25,10 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 - **Testnet wallet:** `0xDca1571e62515b8fFF7CEA62794324fE3434833e` (base-sepolia)
 - **Mainnet wallet:** `0xBDadF45Fc80095Ec9BB8A0acAbc961f185095dA6` (base-mainnet)
-- **MCP server:** `http://192.168.68.139:3002/mcp` (see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
+- **MCP server:** `http://YOUR_MCP_SERVER_IP:3002/mcp` (see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
 - **Network:** controlled by `NETWORK_ID` env var — injected into every MCP tool call by `mcp/client.ts`
 - **Data dir:** must be on a POSIX filesystem (not SMB/CIFS) — SQLite WAL mode requires proper file locking
-- **Web dashboard:** `http://192.168.68.139:3003`
+- **Web dashboard:** `http://YOUR_MCP_SERVER_IP:3003`
 - **Telegram:** configured, chat ID `8423651207`
 
 ---
@@ -116,7 +116,7 @@ docs/
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `MCP_SERVER_URL` | `http://192.168.68.139:3002/mcp` | |
+| `MCP_SERVER_URL` | `http://YOUR_MCP_SERVER_IP:3002/mcp` | |
 | `NETWORK_ID` | `base-sepolia` | Change to `base-mainnet` for real trading |
 | `TELEGRAM_BOT_TOKEN` | set | |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | `8423651207` | |
