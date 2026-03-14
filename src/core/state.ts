@@ -80,7 +80,7 @@ class BotState {
   onNetworkChange(listener: (n: string) => void) { this.networkListeners.push(listener); }
   onAlert(listener: (msg: string) => void): void { this.alertListeners.push(listener); }
 
-  setWalletAddress(addr: string): void { this._walletAddress = addr; }
+  setWalletAddress(addr: string | null): void { this._walletAddress = addr; }
   emitAlert(message: string): void { this.alertListeners.forEach(l => l(message)); }
 
   emitTrade(notification: TradeNotification) {
