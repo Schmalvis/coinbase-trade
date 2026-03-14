@@ -23,8 +23,8 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 ## Key Facts
 
-- **Testnet wallet:** `0xDca1571e62515b8fFF7CEA62794324fE3434833e` (base-sepolia)
-- **Mainnet wallet:** `0xBDadF45Fc80095Ec9BB8A0acAbc961f185095dA6` (base-mainnet)
+- **Testnet wallet:** `0x9123528571C6aD8fe80eb0cC82f6a388311A3104` (base-sepolia)
+- **Mainnet wallet:** `0x7dD5Acd498BCF96832f82684584734cF48c7318D` (base-mainnet)
 - **MCP server:** `http://YOUR_MCP_SERVER_IP:3002/mcp` (see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
 - **Network:** controlled by `NETWORK_ID` env var — injected into every MCP tool call by `mcp/client.ts`
 - **Data dir:** must be on a POSIX filesystem (not SMB/CIFS) — SQLite WAL mode requires proper file locking
