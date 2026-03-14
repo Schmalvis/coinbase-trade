@@ -137,8 +137,8 @@ export class TradingEngine {
     let strategy = this._assetStrategies.get(symbol);
     if (!strategy) {
       strategy = params.strategyType === 'sma'
-        ? new SMAStrategy()
-        : new ThresholdStrategy();
+        ? new SMAStrategy({ shortWindow: params.smaShort, longWindow: params.smaLong })
+        : new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });
       this._assetStrategies.set(symbol, strategy);
     }
 
