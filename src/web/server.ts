@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { botState } from '../core/state.js';
-import { queries, discoveredAssetQueries, settingQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries, settingQueries, candleQueries, rotationQueries, dailyPnlQueries } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
@@ -11,6 +11,8 @@ import type { CoinbaseTools } from '../mcp/tools.js';
 import type { RuntimeConfig, ConfigKey } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
 import type { TradingEngine } from '../trading/engine.js';
+import type { PortfolioOptimizer } from '../trading/optimizer.js';
+import type { WatchlistManager } from '../portfolio/watchlist.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -38,6 +40,8 @@ export function startWebServer(
   runtimeConfig: RuntimeConfig,
   executor: TradeExecutor,
   engine: TradingEngine,
+  optimizer?: PortfolioOptimizer,
+  watchlistManager?: WatchlistManager,
 ): void {
   const app = express();
   app.use(express.json());
@@ -64,6 +68,8 @@ export function startWebServer(
       pendingTokenCount: botState.pendingTokenCount,
       walletAddress:     botState.walletAddress,
       mcpHealthy:        botState.mcpHealthy,
+      optimizerEnabled:  engine.optimizerEnabled,
+      optimizerMode:     optimizer?.isRiskOff ? 'risk-off' : 'normal',
     });
   });
 
@@ -386,6 +392,78 @@ export function startWebServer(
     } catch (err: unknown) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // ── Candles ────────────────────────────────────────────────────────────────
+  app.get('/api/candles', (req, res) => {
+    const { symbol, interval = '15m', limit = '100' } = req.query;
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+    const rows = candleQueries.getCandles.all(String(symbol), botState.activeNetwork, String(interval), parseInt(String(limit)));
+    res.json(rows);
+  });
+
+  // ── Scores ────────────────────────────────────────────────────────────────
+  app.get('/api/scores', (_req, res) => {
+    res.json(optimizer?.getLatestScores() ?? []);
+  });
+
+  // ── Rotations ─────────────────────────────────────────────────────────────
+  app.get('/api/rotations', (req, res) => {
+    const limit = parseInt(String(req.query.limit ?? '20'));
+    const rows = rotationQueries.getRecentRotations.all(botState.activeNetwork, limit);
+    res.json(rows);
+  });
+
+  // ── Risk ──────────────────────────────────────────────────────────────────
+  app.get('/api/risk', (_req, res) => {
+    const network = botState.activeNetwork;
+    const todayPnl = dailyPnlQueries.getTodayPnl.get(network);
+    const rotCount = rotationQueries.getTodayRotationCount.get(network);
+    res.json({
+      dailyPnl: todayPnl ?? null,
+      rotationsToday: (rotCount as any)?.cnt ?? 0,
+      maxDailyRotations: runtimeConfig.get('MAX_DAILY_ROTATIONS'),
+      maxDailyLossPct: runtimeConfig.get('MAX_DAILY_LOSS_PCT'),
+      portfolioFloor: runtimeConfig.get('PORTFOLIO_FLOOR_USD'),
+      optimizerMode: optimizer?.isRiskOff ? 'risk-off' : 'normal',
+      optimizerEnabled: engine.optimizerEnabled,
+    });
+  });
+
+  // ── Watchlist ─────────────────────────────────────────────────────────────
+  app.get('/api/watchlist', (_req, res) => {
+    res.json(watchlistManager?.getAll(botState.activeNetwork) ?? []);
+  });
+
+  app.post('/api/watchlist', (req, res) => {
+    const { symbol, network, address, coinbasePair } = req.body;
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+    watchlistManager?.add(symbol, network ?? botState.activeNetwork, address, coinbasePair);
+    res.json({ ok: true });
+  });
+
+  app.delete('/api/watchlist/:symbol', (req, res) => {
+    watchlistManager?.remove(req.params.symbol, botState.activeNetwork);
+    res.json({ ok: true });
+  });
+
+  // ── Optimizer toggle ──────────────────────────────────────────────────────
+  app.post('/api/optimizer/toggle', (req, res) => {
+    const { enabled } = req.body;
+    if (enabled) engine.enableOptimizer();
+    else engine.disableOptimizer();
+    res.json({ ok: true, enabled: engine.optimizerEnabled });
+  });
+
+  // ── Theme ─────────────────────────────────────────────────────────────────
+  app.get('/api/theme', (_req, res) => {
+    res.json({ theme: runtimeConfig.get('DASHBOARD_THEME') ?? 'dark' });
+  });
+
+  app.put('/api/theme', (req, res) => {
+    const { theme } = req.body;
+    runtimeConfig.set('DASHBOARD_THEME', theme);
+    res.json({ ok: true });
   });
 
   app.get('/', (_req, res) => {
