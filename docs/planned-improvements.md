@@ -8,11 +8,10 @@ For detailed step-by-step implementation plans, see `docs/superpowers/plans/`.
 
 ---
 
-## 1. Per-Asset Strategy Parameter Injection
+## 1. ~~Per-Asset Strategy Parameter Injection~~ (RESOLVED)
 
-**Status:** Known limitation — partially implemented but not wired
-**Priority:** High
-**Plan:** No dedicated plan file — implement directly
+**Status:** Implemented — Phase 3.5 reliability improvements
+**Resolved:** 2026-03-14
 
 ### Background
 
@@ -127,11 +126,10 @@ SQL migrations, code snippets, and a verification checklist.
 
 ---
 
-## 3. MCP Server Wallet Address Monitoring
+## 3. ~~MCP Server Wallet Address Monitoring~~ (RESOLVED)
 
-**Status:** Not implemented — identified 2026-03-14 after incident
-**Priority:** High
-**Plan:** No plan file — implement directly
+**Status:** Implemented — Phase 3.5 reliability improvements
+**Resolved:** 2026-03-14
 
 ### Background
 
@@ -181,11 +179,10 @@ re-establish after a deliberate wallet change.
 
 ---
 
-## 4. MCP Server Resilience / Graceful Degradation
+## 4. ~~MCP Server Resilience / Graceful Degradation~~ (RESOLVED)
 
-**Status:** Not implemented
-**Priority:** Medium
-**Plan:** No plan file — implement directly
+**Status:** Implemented — Phase 3.5 reliability improvements (circuit breaker, auto-pause/resume, health check)
+**Resolved:** 2026-03-14
 
 ### Background
 
@@ -222,11 +219,10 @@ when it recovers.
 
 ---
 
-## 5. Telegram /status Shows Wallet Addresses
+## 5. ~~Telegram /status Shows Wallet Addresses~~ (RESOLVED)
 
-**Status:** Not implemented
-**Priority:** Low
-**Plan:** No plan file — small change
+**Status:** Implemented — Phase 3.5 reliability improvements
+**Resolved:** 2026-03-14
 
 ### What to Build
 
@@ -254,21 +250,26 @@ from `botState` (add a `walletAddress` field to `BotState` or read from `setting
 
 | File | Purpose |
 |---|---|
-| `src/core/state.ts` | `BotState` singleton — balances, price, network, trade events |
-| `src/core/runtime-config.ts` | Live-reloadable settings from DB |
-| `src/data/db.ts` | SQLite schema, all prepared statements |
-| `src/mcp/client.ts` | `MCPClient` — injects network into every tool call |
+| `src/core/state.ts` | `BotState` singleton — balances, price, network, trade events, alerts |
+| `src/core/runtime-config.ts` | Live-reloadable settings from DB (incl. optimizer config) |
+| `src/data/db.ts` | SQLite schema, all prepared statements (incl. candles, watchlist, rotations, daily_pnl) |
+| `src/mcp/client.ts` | `MCPClient` — injects network into every tool call, circuit breaker |
 | `src/mcp/tools.ts` | Typed wrappers for Coinbase AgentKit MCP tools |
 | `src/assets/registry.ts` | Static asset registry (ETH, USDC, CBBTC, CBETH) |
-| `src/portfolio/tracker.ts` | Polls balances/prices per asset, Alchemy ERC20 discovery |
-| `src/strategy/threshold.ts` | Buy on drop %, sell on rise % strategy |
-| `src/strategy/sma.ts` | SMA crossover strategy |
-| `src/trading/engine.ts` | Runs strategy loop(s), calls executor |
-| `src/trading/executor.ts` | Risk checks + swap execution |
-| `src/web/server.ts` | Express API + static file server |
-| `src/web/public/index.html` | Dashboard (vanilla JS, Chart.js) |
-| `src/telegram/bot.ts` | Telegraf bot for Telegram commands |
+| `src/portfolio/tracker.ts` | Polls balances/prices per asset, Alchemy ERC20 discovery, feeds CandleService |
+| `src/portfolio/watchlist.ts` | WatchlistManager — external asset tracking |
 | `src/services/alchemy.ts` | ERC20 token discovery via Alchemy JSON-RPC |
+| `src/services/candles.ts` | CandleService — OHLCV from Coinbase API + synthetic candle aggregation |
+| `src/strategy/threshold.ts` | Buy on drop %, sell on rise % (accepts per-asset overrides) |
+| `src/strategy/sma.ts` | SMA crossover (accepts per-asset overrides) |
+| `src/strategy/candle.ts` | CandleStrategy — RSI, MACD, volume, candle pattern indicators |
+| `src/trading/engine.ts` | Runs strategy loop(s), optimizer loop, calls executor |
+| `src/trading/executor.ts` | Risk checks + swap execution + two-leg rotation |
+| `src/trading/optimizer.ts` | PortfolioOptimizer — scoring, rotation detection, risk-off mode |
+| `src/trading/risk-guard.ts` | RiskGuard — pure veto gate for all trades/rotations |
+| `src/web/server.ts` | Express API + static file server (incl. optimizer endpoints) |
+| `src/web/public/index.html` | Dashboard (dark/light themes, candlestick charts, optimizer panels) |
+| `src/telegram/bot.ts` | Telegraf bot for Telegram commands (incl. optimizer commands) |
 
 ## Conventions (do not deviate)
 

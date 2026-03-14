@@ -14,10 +14,14 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 3 (ERC20 discovery) complete** — AlchemyService scans the wallet for any ERC20 tokens and persists them as `discovered_assets` in SQLite. Discovered tokens appear in a dynamic asset table on the dashboard with ENABLE/DISMISS actions. Enabled tokens get their own independent strategy loop in TradingEngine. Asset Management modal allows per-asset strategy configuration. Set `ALCHEMY_API_KEY` to activate discovery.
 
+**Phase 3.5 (reliability) complete** — Per-asset strategy parameter injection wired (ThresholdStrategy/SMAStrategy accept explicit `dropPct`/`risePct`/`smaShort`/`smaLong` overrides). MCP circuit breaker with auto-pause/resume on server failures. Wallet address monitoring (detects MCP server wallet changes, pauses + alerts). Telegram alert bus for critical events.
+
+**Phase 4 (portfolio optimizer) complete** — Cross-asset opportunity rotation system. OHLCV candle data from Coinbase Advanced Trade API (15m/1h/24h) + synthetic candles from spot prices. CandleStrategy (RSI, MACD, volume, candle patterns) scores assets across timeframes. PortfolioOptimizer ranks assets, detects rotation opportunities, checks RiskGuard (position limits, daily loss limit, portfolio floor kill switch), and executes two-leg rotations (sell weak → buy strong). Watchlist for tracking assets not yet held. Full dashboard redesign with dark/light themes, candlestick charts, opportunity scores, rotation log, risk monitor. New Telegram commands (/scores, /rotations, /watchlist, /risk, /killswitch, /optimizer).
+
 **Next steps:**
-- Set `ALCHEMY_API_KEY` to enable ERC20 auto-discovery (get a free key at dashboard.alchemy.com)
-- Test mainnet with a small real ETH transfer (see `docs/real-account-options.md`)
-- Switch `NETWORK_ID=base-mainnet` and restart when ready for live trading
+- Deploy and verify optimizer in DRY_RUN mode — watch scores and rotation decisions in logs/dashboard before enabling real trades
+- Tune optimizer thresholds via dashboard Settings (ROTATION_SELL_THRESHOLD, ROTATION_BUY_THRESHOLD, MIN_ROTATION_SCORE_DELTA)
+- Add assets to watchlist via Telegram (/watch SYMBOL ADDRESS) or dashboard
 
 ---
 
@@ -78,18 +82,25 @@ src/
     tracker.ts       # Polls balances/prices; runs Alchemy ERC20 discovery if key set
   services/
     alchemy.ts       # AlchemyService: ERC20 token discovery via Alchemy JSON-RPC
+    candles.ts       # CandleService: OHLCV from Coinbase API + synthetic candle aggregation
   strategy/
     base.ts          # Strategy interface
     threshold.ts     # Buy on price drop %, sell on price rise %
     sma.ts           # SMA crossover (short/long window)
+    candle.ts        # CandleStrategy: RSI, MACD, volume, candle pattern indicators
   trading/
-    executor.ts      # Risk checks + trade execution (respects DRY_RUN)
-    engine.ts        # Runs strategy on interval; per-asset loops for discovered tokens
+    executor.ts      # Risk checks + trade execution + two-leg rotation (respects DRY_RUN)
+    engine.ts        # Runs strategy on interval; per-asset loops; optimizer loop
+    optimizer.ts     # PortfolioOptimizer: scoring, rotation detection, risk-off mode
+    risk-guard.ts    # RiskGuard: pure veto gate (position limits, loss limits, rotation caps)
+  portfolio/
+    tracker.ts       # Polls balances/prices; runs Alchemy ERC20 discovery if key set
+    watchlist.ts     # WatchlistManager: external asset tracking
   telegram/
-    bot.ts           # Telegraf bot: /status /pause /resume /trades /buy /sell
+    bot.ts           # Telegraf bot: /status /pause /resume /trades /buy /sell /scores /rotations /watchlist /risk /killswitch /optimizer
   web/
     server.ts        # Express API + static dashboard
-    public/index.html # Dark-mode dashboard with Chart.js price chart
+    public/index.html # Dashboard with dark/light themes, candlestick charts, optimizer panels
 cli.ts               # CLI (talks to running bot via HTTP)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack
@@ -108,7 +119,9 @@ docs/
 - **Wallet is deterministic:** the MCP server derives wallet addresses from `CDP_WALLET_SECRET`. Same secret = same address on every boot.
 - **Faucet:** call `CdpApiActionProvider_request_faucet_funds` via MCP to top up testnet ETH.
 - **Strategy signals require history:** threshold needs 2+ snapshots, SMA needs `SMA_LONG_WINDOW` (default 20) snapshots before it fires.
-- **Per-asset strategy params (known limitation):** discovered-asset loops use the same global `STRATEGY`, `PRICE_DROP_THRESHOLD_PCT`, `PRICE_RISE_TARGET_PCT`, `SMA_SHORT/LONG_WINDOW` config as the main ETH loop — the per-asset `drop_pct`/`rise_pct` stored in `discovered_assets` are saved to DB and shown in the UI but not yet wired into the strategy evaluation. Full per-asset param injection requires strategy constructors to accept explicit params (currently unchanged by design).
+- **Per-asset strategy params:** discovered-asset loops now use per-asset `drop_pct`/`rise_pct`/`sma_short`/`sma_long` from the `discovered_assets` DB table, falling back to global config if not set.
+- **Candle data warmup:** CandleStrategy needs 26+ candles per timeframe before producing signals. After fresh deploy, allow ~6.5 hours for 15m candles to accumulate (or the optimizer falls back to hold signals).
+- **Optimizer config is DB-persisted:** All optimizer settings (thresholds, limits, intervals) are stored in the `settings` table and survive restarts/repulls. Env vars only set initial defaults.
 
 ---
 
@@ -124,3 +137,25 @@ docs/
 | `DRY_RUN` | `false` | Set `true` to simulate without executing |
 | `DATA_DIR` | `/home/pi/.local/share/coinbase-trade/base-sepolia` | Must be POSIX filesystem |
 | `ALCHEMY_API_KEY` | (unset) | Optional. Enables ERC20 token auto-discovery via Alchemy. Get a key at dashboard.alchemy.com |
+
+### Optimizer Settings (DB-persisted, editable via dashboard)
+
+These are NOT env vars — they're stored in the `settings` DB table and managed via the dashboard Settings modal. Listed here for reference with their code defaults:
+
+| Key | Default | Notes |
+|-----|---------|-------|
+| `MAX_POSITION_PCT` | `40` | Max % of portfolio in any single non-primary asset |
+| `MAX_DAILY_LOSS_PCT` | `5` | Daily loss % that triggers trading pause |
+| `MAX_ROTATION_PCT` | `25` | Max % of portfolio per single rotation |
+| `MAX_DAILY_ROTATIONS` | `10` | Max rotations per 24hr window |
+| `PORTFOLIO_FLOOR_USD` | `100` | Absolute USD kill switch threshold |
+| `MIN_ROTATION_GAIN_PCT` | `2` | Min net gain after fees to execute rotation |
+| `MAX_CASH_PCT` | `80` | Max USDC % in risk-off mode |
+| `OPTIMIZER_INTERVAL_SECONDS` | `300` | Optimizer tick interval |
+| `ROTATION_SELL_THRESHOLD` | `-20` | Score below which held asset is sell candidate |
+| `ROTATION_BUY_THRESHOLD` | `30` | Score above which asset is buy candidate |
+| `MIN_ROTATION_SCORE_DELTA` | `40` | Min gap between sell and buy scores |
+| `RISK_OFF_THRESHOLD` | `-10` | All-asset score below which risk-off activates |
+| `RISK_ON_THRESHOLD` | `15` | Score above which risk-off deactivates |
+| `DEFAULT_FEE_ESTIMATE_PCT` | `1.0` | Fallback fee estimate when quote unavailable |
+| `DASHBOARD_THEME` | `dark` | Dashboard colour theme (light/dark) |
