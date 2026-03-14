@@ -6,45 +6,20 @@ services:
     ports:
       - "${WEB_PORT:-3003}:${WEB_PORT:-3003}"
 
+    env_file:
+      - /home/pi/docker/coinbase-trade/.env
+
     environment:
-      # MCP server
-      MCP_SERVER_URL: ${MCP_SERVER_URL}
-      NETWORK_ID: ${NETWORK_ID:-base-sepolia}
-
-      # Telegram
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_ALLOWED_CHAT_IDS: ${TELEGRAM_ALLOWED_CHAT_IDS}
-
-      # Strategy
-      STRATEGY: ${STRATEGY:-threshold}
-      PRICE_DROP_THRESHOLD_PCT: ${PRICE_DROP_THRESHOLD_PCT:-2.0}
-      PRICE_RISE_TARGET_PCT: ${PRICE_RISE_TARGET_PCT:-3.0}
-      SMA_SHORT_WINDOW: ${SMA_SHORT_WINDOW:-5}
-      SMA_LONG_WINDOW: ${SMA_LONG_WINDOW:-20}
-
-      # Polling & trading intervals
-      POLL_INTERVAL_SECONDS: ${POLL_INTERVAL_SECONDS:-30}
-      TRADE_INTERVAL_SECONDS: ${TRADE_INTERVAL_SECONDS:-60}
-
-      # Risk limits
-      MAX_TRADE_SIZE_ETH: ${MAX_TRADE_SIZE_ETH:-0.01}
-      MAX_TRADE_SIZE_USDC: ${MAX_TRADE_SIZE_USDC:-10}
-      TRADE_COOLDOWN_SECONDS: ${TRADE_COOLDOWN_SECONDS:-300}
-
-      # Misc
-      WEB_PORT: ${WEB_PORT:-3003}
-      LOG_LEVEL: ${LOG_LEVEL:-info}
-      DRY_RUN: ${DRY_RUN:-true}
       DATA_DIR: /app/data
 
     volumes:
       # DATA_DIR is always /app/data inside the container.
-      # TRADE_DATA_PATH controls where it lives on the host:
+      # TRADE_DATA_PATH (from .env) controls where it lives on the host:
       #   unset → Docker-managed named volume (automatic, no setup needed)
       #   absolute path → bind mount (transparent, easy to back up)
       #     Must be on a POSIX filesystem — NOT an SMB/CIFS mount.
       #     SQLite WAL mode requires proper file locking.
-      #     e.g. mkdir -p /home/pi/.local/share/coinbase-trade && chown 1000:1000 /home/pi/.local/share/coinbase-trade
+      #     e.g. mkdir -p /home/pi/.coinbase-trade && chown 1000:1000 /home/pi/.coinbase-trade
       - ${TRADE_DATA_PATH:-trade_data}:/app/data
 
     restart: unless-stopped
