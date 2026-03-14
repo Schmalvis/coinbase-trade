@@ -85,7 +85,7 @@ async function main() {
   candleService.startPolling();
 
   engine.start();
-  startTelegramBot(engine);
+  startTelegramBot(engine, optimizer, watchlistManager, runtimeConfig);
   startWebServer(tools, runtimeConfig, executor, engine, optimizer, watchlistManager);
 
   botState.setStatus('running');
