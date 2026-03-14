@@ -1,5 +1,5 @@
 import { CoinbaseTools } from '../mcp/tools.js';
-import { queries, discoveredAssetQueries, type DiscoveredAssetRow } from '../data/db.js';
+import { queries, discoveredAssetQueries, settingQueries, type DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
@@ -45,6 +45,24 @@ export async function startPortfolioTracker(
       const wallet  = await tools.getWalletDetails();
       const balanceStr = (wallet as any).balance ?? (wallet as any).nativeBalance ?? '0';
       const ethBalance = parseFloat(String(balanceStr)) || 0;
+
+      // Wallet address integrity check — pause and alert if server returns unexpected address
+      const walletAddress = (wallet as any).address as string | undefined;
+      if (walletAddress) {
+        const stored = settingQueries.getSetting.get('EXPECTED_WALLET_ADDRESS');
+        if (!stored) {
+          settingQueries.upsertSetting.run('EXPECTED_WALLET_ADDRESS', walletAddress);
+          botState.setWalletAddress(walletAddress);
+          logger.info(`Wallet address established: ${walletAddress}`);
+        } else if (walletAddress.toLowerCase() !== stored.value.toLowerCase()) {
+          const msg = `⚠️ WALLET ADDRESS CHANGED: expected ${stored.value}, got ${walletAddress}`;
+          logger.error(msg);
+          botState.setStatus('paused');
+          botState.emitAlert(msg);
+        } else {
+          botState.setWalletAddress(walletAddress);
+        }
+      }
 
       let portfolioUsd = 0;
 
