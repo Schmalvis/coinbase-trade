@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { botState } from '../core/state.js';
-import { queries, discoveredAssetQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries, settingQueries } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
@@ -62,6 +62,7 @@ export function startWebServer(
       availableNetworks: botState.availableNetworks,
       assetBalances:     Object.fromEntries(botState.assetBalances),
       pendingTokenCount: botState.pendingTokenCount,
+      walletAddress:     botState.walletAddress,
     });
   });
 
@@ -362,6 +363,15 @@ export function startWebServer(
       logger.error(`Faucet error: ${msg}`);
       res.status(500).json({ error: msg });
     }
+  });
+
+  // ── Wallet reset ────────────────────────────────────────────────────────────
+  app.post('/api/wallet/reset', (_req, res) => {
+    settingQueries.upsertSetting.run('EXPECTED_WALLET_ADDRESS', '');
+    botState.setWalletAddress(null);
+    queries.insertEvent.run('wallet_reset', 'Expected wallet address cleared via web API');
+    logger.info('Expected wallet address cleared via web API');
+    res.json({ ok: true });
   });
 
   // ── Network ─────────────────────────────────────────────────────────────────

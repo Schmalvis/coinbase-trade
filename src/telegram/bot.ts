@@ -1,6 +1,6 @@
 import { Telegraf } from 'telegraf';
 import { botState } from '../core/state.js';
-import { queries } from '../data/db.js';
+import { queries, settingQueries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import { config } from '../config.js';
 import type { TradingEngine } from '../trading/engine.js';
@@ -29,11 +29,14 @@ export function startTelegramBot(engine: TradingEngine): void {
     const ethBalance = botState.lastBalance ?? 0;
     const usdcBalance = botState.lastUsdcBalance ?? 0;
     const portfolioUsd = (price * ethBalance + usdcBalance).toFixed(2);
+    const walletDisplay = botState.walletAddress
+      ? `\nWallet: \`${botState.walletAddress.slice(0, 10)}...${botState.walletAddress.slice(-4)}\``
+      : '';
 
     ctx.reply(
       `*Bot Status*\n` +
       `Status: ${botState.status}\n` +
-      `Network: ${botState.activeNetwork}\n` +
+      `Network: ${botState.activeNetwork}${walletDisplay}\n` +
       `ETH price: $${price.toFixed(2)}\n` +
       `ETH balance: ${ethBalance.toFixed(6)}\n` +
       `USDC balance: ${usdcBalance.toFixed(2)}\n` +
@@ -93,6 +96,13 @@ export function startTelegramBot(engine: TradingEngine): void {
     }
   });
 
+  bot.command('resetwallet', ctx => {
+    settingQueries.upsertSetting.run('EXPECTED_WALLET_ADDRESS', '');
+    botState.setWalletAddress(null);
+    queries.insertEvent.run('wallet_reset', `Expected wallet address cleared by Telegram user ${ctx.from?.username}`);
+    ctx.reply('Expected wallet address cleared. Bot will re-establish on next poll.');
+  });
+
   bot.command('help', ctx => {
     ctx.reply(
       '/status — portfolio + bot status\n' +
@@ -102,8 +112,20 @@ export function startTelegramBot(engine: TradingEngine): void {
       '/resume — resume autonomous trading\n' +
       '/trades — last 5 trades\n' +
       '/buy — manual buy\n' +
-      '/sell — manual sell'
+      '/sell — manual sell\n' +
+      '/resetwallet — clear expected wallet (use after deliberate wallet change)'
     );
+  });
+
+  // Push alert notifications
+  botState.onAlert(async message => {
+    for (const chatId of allowed) {
+      await bot.telegram.sendMessage(
+        chatId,
+        `🚨 *ALERT*\n${message}`,
+        { parse_mode: 'Markdown' }
+      );
+    }
   });
 
   // Push trade notifications
