@@ -65,6 +65,64 @@ db.exec(`
     timestamp     TEXT    NOT NULL DEFAULT (datetime('now')),
     portfolio_usd REAL    NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS candles (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol    TEXT NOT NULL,
+    network   TEXT NOT NULL,
+    interval  TEXT NOT NULL CHECK(interval IN ('15m', '1h', '24h')),
+    open_time TEXT NOT NULL,
+    open      REAL NOT NULL,
+    high      REAL NOT NULL,
+    low       REAL NOT NULL,
+    close     REAL NOT NULL,
+    volume    REAL NOT NULL DEFAULT 0,
+    source    TEXT NOT NULL CHECK(source IN ('coinbase', 'dex', 'synthetic')),
+    UNIQUE(symbol, network, interval, open_time)
+  );
+
+  CREATE TABLE IF NOT EXISTS watchlist (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol        TEXT NOT NULL,
+    network       TEXT NOT NULL,
+    address       TEXT,
+    source        TEXT NOT NULL DEFAULT 'manual' CHECK(source IN ('manual', 'trending', 'suggested')),
+    added_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    status        TEXT NOT NULL DEFAULT 'watching' CHECK(status IN ('watching', 'promoted', 'removed')),
+    coinbase_pair TEXT,
+    UNIQUE(symbol, network)
+  );
+
+  CREATE TABLE IF NOT EXISTS rotations (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp           TEXT NOT NULL DEFAULT (datetime('now')),
+    sell_symbol         TEXT NOT NULL,
+    buy_symbol          TEXT NOT NULL,
+    sell_amount         REAL NOT NULL,
+    buy_amount          REAL,
+    sell_tx_hash        TEXT,
+    buy_tx_hash         TEXT,
+    estimated_gain_pct  REAL NOT NULL,
+    actual_gain_pct     REAL,
+    estimated_fee_pct   REAL NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'pending'
+                        CHECK(status IN ('pending', 'leg1_done', 'executed', 'failed', 'vetoed')),
+    veto_reason         TEXT,
+    dry_run             INTEGER NOT NULL DEFAULT 0,
+    network             TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_rotations_network_ts ON rotations(network, timestamp);
+
+  CREATE TABLE IF NOT EXISTS daily_pnl (
+    date          TEXT NOT NULL,
+    network       TEXT NOT NULL,
+    high_water    REAL NOT NULL,
+    current_usd   REAL NOT NULL,
+    rotations     INTEGER NOT NULL DEFAULT 0,
+    realized_pnl  REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (date, network)
+  );
 `);
 
 export const queries: Record<string, Statement> = {
@@ -182,4 +240,135 @@ export const discoveredAssetQueries = {
   getAssetByAddress: db.prepare(`
     SELECT * FROM discovered_assets WHERE address = ? AND network = ?
   `) as Statement<[string, string], DiscoveredAssetRow>,
+};
+
+// ── Optimizer tables: candles, watchlist, rotations, daily_pnl ──
+
+export interface CandleRow {
+  id: number;
+  symbol: string;
+  network: string;
+  interval: string;
+  open_time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  source: string;
+}
+
+export const candleQueries = {
+  insertCandle: db.prepare(`
+    INSERT OR REPLACE INTO candles (symbol, network, interval, open_time, open, high, low, close, volume, source)
+    VALUES (@symbol, @network, @interval, @open_time, @open, @high, @low, @close, @volume, @source)
+  `) as Statement<{ symbol: string; network: string; interval: string; open_time: string; open: number; high: number; low: number; close: number; volume: number; source: string }>,
+
+  getCandles: db.prepare(`
+    SELECT * FROM candles WHERE symbol = ? AND network = ? AND interval = ? ORDER BY open_time DESC LIMIT ?
+  `) as Statement<[string, string, string, number], CandleRow>,
+
+  deleteOldCandles: db.prepare(`
+    DELETE FROM candles WHERE interval = ? AND open_time < ?
+  `) as Statement<[string, string]>,
+};
+
+export interface WatchlistRow {
+  id: number;
+  symbol: string;
+  network: string;
+  address: string | null;
+  source: string;
+  added_at: string;
+  status: string;
+  coinbase_pair: string | null;
+}
+
+export const watchlistQueries = {
+  insertWatchlistItem: db.prepare(`
+    INSERT OR IGNORE INTO watchlist (symbol, network, address, source, coinbase_pair)
+    VALUES (@symbol, @network, @address, @source, @coinbase_pair)
+  `) as Statement<{ symbol: string; network: string; address: string | null; source: string; coinbase_pair: string | null }>,
+
+  getWatchlist: db.prepare(`
+    SELECT * FROM watchlist WHERE network = ? AND status = 'watching'
+  `) as Statement<[string], WatchlistRow>,
+
+  updateWatchlistStatus: db.prepare(`
+    UPDATE watchlist SET status = @status WHERE symbol = @symbol AND network = @network
+  `) as Statement<{ status: string; symbol: string; network: string }>,
+
+  removeWatchlistItem: db.prepare(`
+    UPDATE watchlist SET status = 'removed' WHERE symbol = ? AND network = ?
+  `) as Statement<[string, string]>,
+};
+
+export interface RotationRow {
+  id: number;
+  timestamp: string;
+  sell_symbol: string;
+  buy_symbol: string;
+  sell_amount: number;
+  buy_amount: number | null;
+  sell_tx_hash: string | null;
+  buy_tx_hash: string | null;
+  estimated_gain_pct: number;
+  actual_gain_pct: number | null;
+  estimated_fee_pct: number;
+  status: string;
+  veto_reason: string | null;
+  dry_run: number;
+  network: string;
+}
+
+export const rotationQueries = {
+  insertRotation: db.prepare(`
+    INSERT INTO rotations (sell_symbol, buy_symbol, sell_amount, estimated_gain_pct, estimated_fee_pct, dry_run, network)
+    VALUES (@sell_symbol, @buy_symbol, @sell_amount, @estimated_gain_pct, @estimated_fee_pct, @dry_run, @network)
+  `) as Statement<{ sell_symbol: string; buy_symbol: string; sell_amount: number; estimated_gain_pct: number; estimated_fee_pct: number; dry_run: number; network: string }>,
+
+  updateRotation: db.prepare(`
+    UPDATE rotations
+    SET status = @status, buy_amount = @buy_amount, sell_tx_hash = @sell_tx_hash,
+        buy_tx_hash = @buy_tx_hash, actual_gain_pct = @actual_gain_pct, veto_reason = @veto_reason
+    WHERE id = @id
+  `) as Statement<{ status: string; buy_amount: number | null; sell_tx_hash: string | null; buy_tx_hash: string | null; actual_gain_pct: number | null; veto_reason: string | null; id: number }>,
+
+  getRecentRotations: db.prepare(`
+    SELECT * FROM rotations WHERE network = ? ORDER BY id DESC LIMIT ?
+  `) as Statement<[string, number], RotationRow>,
+
+  getTodayRotationCount: db.prepare(`
+    SELECT COUNT(*) as cnt FROM rotations
+    WHERE network = ? AND date(timestamp) = date('now') AND status IN ('executed', 'leg1_done')
+  `) as Statement<[string], { cnt: number }>,
+};
+
+export interface DailyPnlRow {
+  date: string;
+  network: string;
+  high_water: number;
+  current_usd: number;
+  rotations: number;
+  realized_pnl: number;
+}
+
+export const dailyPnlQueries = {
+  upsertDailyPnl: db.prepare(`
+    INSERT INTO daily_pnl (date, network, high_water, current_usd, rotations, realized_pnl)
+    VALUES (@date, @network, @high_water, @current_usd, @rotations, @realized_pnl)
+    ON CONFLICT(date, network) DO UPDATE SET
+      high_water = MAX(daily_pnl.high_water, excluded.high_water),
+      current_usd = excluded.current_usd,
+      rotations = excluded.rotations,
+      realized_pnl = excluded.realized_pnl
+  `) as Statement<{ date: string; network: string; high_water: number; current_usd: number; rotations: number; realized_pnl: number }>,
+
+  getDailyPnl: db.prepare(`
+    SELECT * FROM daily_pnl WHERE date = ? AND network = ?
+  `) as Statement<[string, string], DailyPnlRow>,
+
+  getTodayPnl: db.prepare(`
+    SELECT * FROM daily_pnl WHERE date = date('now') AND network = ?
+  `) as Statement<[string], DailyPnlRow>,
 };
