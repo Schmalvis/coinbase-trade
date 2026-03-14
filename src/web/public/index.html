@@ -1453,6 +1453,17 @@
     /* ── Modal utilities ────────────────────────────────────────────────── */
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
     function closeOnBackdrop(event, id) { if (event.target === document.getElementById(id)) closeModal(id); }
+    document.addEventListener('keydown', function(e) {
+      if (e.key !== 'Escape') return;
+      ['settingsModal','tradeModal','faucetModal'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el && el.style.display !== 'none') {
+          if (id === 'settingsModal') closeSettingsModal();
+          else closeModal(id);
+        }
+      });
+      if (document.getElementById('asset-modal').classList.contains('open')) closeAssetModal();
+    });
 
     /* ── Asset table ────────────────────────────────────────────────────── */
     function renderAssets() {
@@ -1754,7 +1765,7 @@
 </div>
 
 <!-- Asset Management Modal -->
-<div id="asset-modal">
+<div id="asset-modal" onclick="if(event.target===this)closeAssetModal()">
   <div class="modal-box">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
       <h3 style="margin:0;font-size:0.85rem;font-weight:700">Asset Management</h3>
