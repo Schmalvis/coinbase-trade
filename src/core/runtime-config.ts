@@ -5,7 +5,13 @@ export type ConfigKey =
   | 'MAX_TRADE_SIZE_ETH' | 'MAX_TRADE_SIZE_USDC'
   | 'TRADE_COOLDOWN_SECONDS' | 'DRY_RUN' | 'LOG_LEVEL'
   | 'WEB_PORT' | 'DATA_DIR' | 'MCP_SERVER_URL'
-  | 'NETWORK_ID' | 'TELEGRAM_BOT_TOKEN' | 'TELEGRAM_ALLOWED_CHAT_IDS';
+  | 'NETWORK_ID' | 'TELEGRAM_BOT_TOKEN' | 'TELEGRAM_ALLOWED_CHAT_IDS'
+  | 'MAX_POSITION_PCT' | 'MAX_DAILY_LOSS_PCT' | 'MAX_ROTATION_PCT'
+  | 'MAX_DAILY_ROTATIONS' | 'PORTFOLIO_FLOOR_USD' | 'MIN_ROTATION_GAIN_PCT'
+  | 'MAX_CASH_PCT' | 'OPTIMIZER_INTERVAL_SECONDS'
+  | 'ROTATION_SELL_THRESHOLD' | 'ROTATION_BUY_THRESHOLD' | 'MIN_ROTATION_SCORE_DELTA'
+  | 'RISK_OFF_THRESHOLD' | 'RISK_ON_THRESHOLD' | 'DEFAULT_FEE_ESTIMATE_PCT'
+  | 'DASHBOARD_THEME';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -17,6 +23,12 @@ const ALL_KEYS = new Set<ConfigKey>([
   'TRADE_COOLDOWN_SECONDS', 'DRY_RUN', 'LOG_LEVEL',
   'WEB_PORT', 'DATA_DIR', 'MCP_SERVER_URL',
   'NETWORK_ID', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_CHAT_IDS',
+  'MAX_POSITION_PCT', 'MAX_DAILY_LOSS_PCT', 'MAX_ROTATION_PCT',
+  'MAX_DAILY_ROTATIONS', 'PORTFOLIO_FLOOR_USD', 'MIN_ROTATION_GAIN_PCT',
+  'MAX_CASH_PCT', 'OPTIMIZER_INTERVAL_SECONDS',
+  'ROTATION_SELL_THRESHOLD', 'ROTATION_BUY_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
+  'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
+  'DASHBOARD_THEME',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
@@ -49,6 +61,21 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   NETWORK_ID: () => null,
   TELEGRAM_BOT_TOKEN: () => null,
   TELEGRAM_ALLOWED_CHAT_IDS: () => null,
+  MAX_POSITION_PCT:         v => isNum(v) && (v as number) >= 5 && (v as number) <= 100 ? null : 'must be 5–100',
+  MAX_DAILY_LOSS_PCT:       v => isNum(v) && (v as number) >= 1 && (v as number) <= 50 ? null : 'must be 1–50',
+  MAX_ROTATION_PCT:         v => isNum(v) && (v as number) >= 5 && (v as number) <= 100 ? null : 'must be 5–100',
+  MAX_DAILY_ROTATIONS:      v => isInt(v) && (v as number) >= 1 && (v as number) <= 100 ? null : 'must be 1–100',
+  PORTFOLIO_FLOOR_USD:      v => isNum(v) && (v as number) >= 0 && (v as number) <= 100000 ? null : 'must be 0–100000',
+  MIN_ROTATION_GAIN_PCT:    v => isNum(v) && (v as number) >= 0.5 && (v as number) <= 50 ? null : 'must be 0.5–50',
+  MAX_CASH_PCT:             v => isNum(v) && (v as number) >= 10 && (v as number) <= 100 ? null : 'must be 10–100',
+  OPTIMIZER_INTERVAL_SECONDS: v => isNum(v) && (v as number) >= 30 && (v as number) <= 3600 ? null : 'must be 30–3600',
+  ROTATION_SELL_THRESHOLD:  v => isNum(v) && (v as number) >= -100 && (v as number) <= 0 ? null : 'must be -100–0',
+  ROTATION_BUY_THRESHOLD:   v => isNum(v) && (v as number) >= 0 && (v as number) <= 100 ? null : 'must be 0–100',
+  MIN_ROTATION_SCORE_DELTA: v => isNum(v) && (v as number) >= 10 && (v as number) <= 200 ? null : 'must be 10–200',
+  RISK_OFF_THRESHOLD:       v => isNum(v) && (v as number) >= -100 && (v as number) <= 0 ? null : 'must be -100–0',
+  RISK_ON_THRESHOLD:        v => isNum(v) && (v as number) >= 0 && (v as number) <= 100 ? null : 'must be 0–100',
+  DEFAULT_FEE_ESTIMATE_PCT: v => isNum(v) && (v as number) >= 0.1 && (v as number) <= 10 ? null : 'must be 0.1–10',
+  DASHBOARD_THEME:          v => ['light', 'dark'].includes(String(v)) ? null : 'must be "light" or "dark"',
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)
@@ -68,6 +95,11 @@ function coerce(key: ConfigKey, value: unknown): ConfigValue {
     'SMA_SHORT_WINDOW', 'SMA_LONG_WINDOW',
     'MAX_TRADE_SIZE_ETH', 'MAX_TRADE_SIZE_USDC',
     'TRADE_COOLDOWN_SECONDS', 'WEB_PORT',
+    'MAX_POSITION_PCT', 'MAX_DAILY_LOSS_PCT', 'MAX_ROTATION_PCT',
+    'MAX_DAILY_ROTATIONS', 'PORTFOLIO_FLOOR_USD', 'MIN_ROTATION_GAIN_PCT',
+    'MAX_CASH_PCT', 'OPTIMIZER_INTERVAL_SECONDS',
+    'ROTATION_SELL_THRESHOLD', 'ROTATION_BUY_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
+    'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
   ];
   if (numericKeys.includes(key) && typeof value !== 'number') {
     const n = Number(value);

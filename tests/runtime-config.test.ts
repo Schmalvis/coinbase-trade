@@ -177,9 +177,9 @@ describe('RuntimeConfig', () => {
 
   // ── getAll() ───────────────────────────────────────────────────────────────
   describe('getAll()', () => {
-    it('returns all 18 config keys', () => {
+    it('returns all 33 config keys', () => {
       const all = rc.getAll();
-      expect(Object.keys(all)).toHaveLength(18);
+      expect(Object.keys(all)).toHaveLength(33);
     });
     it('includes read-only keys', () => {
       const all = rc.getAll();

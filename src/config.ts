@@ -29,6 +29,22 @@ const schema = z.object({
 
   DATA_DIR: z.string().default('/home/pi/.local/share/coinbase-trade/base-sepolia'),
   ALCHEMY_API_KEY: z.string().optional(),
+
+  MAX_POSITION_PCT: z.coerce.number().default(40),
+  MAX_DAILY_LOSS_PCT: z.coerce.number().default(5),
+  MAX_ROTATION_PCT: z.coerce.number().default(25),
+  MAX_DAILY_ROTATIONS: z.coerce.number().default(10),
+  PORTFOLIO_FLOOR_USD: z.coerce.number().default(100),
+  MIN_ROTATION_GAIN_PCT: z.coerce.number().default(2),
+  MAX_CASH_PCT: z.coerce.number().default(80),
+  OPTIMIZER_INTERVAL_SECONDS: z.coerce.number().default(300),
+  ROTATION_SELL_THRESHOLD: z.coerce.number().default(-20),
+  ROTATION_BUY_THRESHOLD: z.coerce.number().default(30),
+  MIN_ROTATION_SCORE_DELTA: z.coerce.number().default(40),
+  RISK_OFF_THRESHOLD: z.coerce.number().default(-10),
+  RISK_ON_THRESHOLD: z.coerce.number().default(15),
+  DEFAULT_FEE_ESTIMATE_PCT: z.coerce.number().default(1.0),
+  DASHBOARD_THEME: z.string().default('dark'),
 });
 
 const parsed = schema.safeParse(process.env);
