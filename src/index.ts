@@ -29,17 +29,18 @@ async function main() {
     ? new AlchemyService(config.ALCHEMY_API_KEY)
     : undefined;
 
-  // Portfolio optimizer dependencies
-  let candleService = new CandleService(botState.activeNetwork);
-  const candleStrategy = new CandleStrategy();
-  const riskGuard = new RiskGuard(runtimeConfig);
-  const watchlistManager = new WatchlistManager();
-
-  // Restore persisted active network (survives restarts)
+  // Restore persisted active network before creating CandleService so it
+  // uses the correct network from the start rather than the default.
   const savedNetwork = settingQueries.getSetting.get('ACTIVE_NETWORK')?.value;
   if (savedNetwork && availableNetworks.includes(savedNetwork)) {
     botState.setNetwork(savedNetwork);
   }
+
+  // Portfolio optimizer dependencies — created after network restore
+  let candleService = new CandleService(botState.activeNetwork);
+  const candleStrategy = new CandleStrategy();
+  const riskGuard = new RiskGuard(runtimeConfig);
+  const watchlistManager = new WatchlistManager();
 
   logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
