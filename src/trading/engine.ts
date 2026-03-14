@@ -133,6 +133,8 @@ export class TradingEngine {
       timestamp:     r.timestamp,
     }));
 
+    // Strategy instance is bound to the params at first tick for this symbol.
+    // To apply new params, call stopAssetLoop(symbol) first (reloadAssetConfig does this).
     // Get or create strategy instance for this symbol (preserves state across ticks)
     let strategy = this._assetStrategies.get(symbol);
     if (!strategy) {

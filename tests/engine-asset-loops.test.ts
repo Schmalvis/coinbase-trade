@@ -20,7 +20,12 @@ describe('TradingEngine asset loops', () => {
     mockExecuteForAsset.mockReset();
     mockExecuteForAsset.mockResolvedValue(undefined);
   });
-  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+  afterEach(async () => {
+    const { botState } = await import('../src/core/state.js');
+    botState.setStatus('paused');
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
 
   it('stopAssetLoop is a no-op when symbol not in map', async () => {
     const mockExecutor = {} as any;
@@ -97,8 +102,5 @@ describe('TradingEngine asset loops', () => {
 
     // With per-asset dropPct=50, a 3% drop must NOT trigger buy
     expect(mockExecuteForAsset).not.toHaveBeenCalledWith('TESTTOKEN', 'buy', expect.any(String));
-
-    // Restore bot status
-    botState.setStatus('paused');
   });
 });
