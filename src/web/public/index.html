@@ -509,7 +509,14 @@
     .score-value { font-weight: 700; font-size: 0.82rem; min-width: 50px; text-align: right; }
     .score-bar-wrap { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
     .score-bar { height: 100%; border-radius: 3px; transition: width 0.3s; }
-    .score-signals { font-size: 0.6rem; color: var(--text-secondary); white-space: nowrap; }
+    .score-signals { display: flex; gap: 3px; align-items: center; }
+    .sig-pill {
+      font-size: 0.5rem; font-weight: 700; letter-spacing: 0.04em;
+      padding: 1px 4px; border-radius: 3px; white-space: nowrap;
+    }
+    .sig-pill.buy  { background: var(--green-lo); color: var(--green); }
+    .sig-pill.sell { background: var(--red-lo);   color: var(--red); }
+    .sig-pill.hold { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
     .watchlist-pill {
       font-size: 0.55rem; padding: 1px 6px;
       border: 1px solid var(--yellow); color: var(--yellow);
@@ -1012,7 +1019,13 @@
         var barWidth = Math.min(100, Math.max(0, 50 + score / 2));
         var barColor = score > 0 ? 'var(--green)' : 'var(--red)';
         var signals = s.signals || {};
-        var sigText = Object.keys(signals).map(function(k){ var v = signals[k]; return k + ':' + (v && typeof v === 'object' ? (v.signal || JSON.stringify(v)) : v); }).join(' ');
+        var tfLabels = { candle15m: '15m', candle1h: '1h', candle24h: '24h' };
+        var sigText = Object.keys(signals).map(function(k) {
+          var v = signals[k];
+          var sig = v && typeof v === 'object' ? (v.signal || 'hold') : (v || 'hold');
+          var label = tfLabels[k] || k;
+          return '<span class="sig-pill ' + sig + '">' + label + ' ' + sig.toUpperCase() + '</span>';
+        }).join('');
         var isWatchlist = s.watchlist || false;
         html += '<div class="score-item" onclick="switchChartAsset(\'' + s.symbol + '\')">' +
           '<span class="score-symbol">' + s.symbol + '</span>' +
