@@ -34,14 +34,21 @@ async function main() {
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
   logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
 
+  let pausedByMcp = false;
   const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork, (healthy) => {
     botState.setMcpHealthy(healthy);
     if (!healthy) {
+      pausedByMcp = botState.status !== 'paused'; // only flag if not already manually paused
       botState.setStatus('paused');
       botState.emitAlert('⚠️ MCP server unreachable — bot paused. Will resume automatically on recovery.');
     } else {
-      botState.setStatus('running');
-      botState.emitAlert('✅ MCP server recovered — bot resumed.');
+      if (pausedByMcp) {
+        botState.setStatus('running');
+        botState.emitAlert('✅ MCP server recovered — bot resumed.');
+      } else {
+        botState.emitAlert('✅ MCP server recovered.');
+      }
+      pausedByMcp = false;
     }
   });
   await mcp.connect();
