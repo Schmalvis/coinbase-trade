@@ -63,6 +63,7 @@ export function startWebServer(
       assetBalances:     Object.fromEntries(botState.assetBalances),
       pendingTokenCount: botState.pendingTokenCount,
       walletAddress:     botState.walletAddress,
+      mcpHealthy:        botState.mcpHealthy,
     });
   });
 

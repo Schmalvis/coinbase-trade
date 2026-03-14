@@ -34,7 +34,16 @@ async function main() {
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
   logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
 
-  const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork);
+  const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork, (healthy) => {
+    botState.setMcpHealthy(healthy);
+    if (!healthy) {
+      botState.setStatus('paused');
+      botState.emitAlert('⚠️ MCP server unreachable — bot paused. Will resume automatically on recovery.');
+    } else {
+      botState.setStatus('running');
+      botState.emitAlert('✅ MCP server recovered — bot resumed.');
+    }
+  });
   await mcp.connect();
 
   const tools = new CoinbaseTools(mcp);
