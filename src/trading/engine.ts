@@ -7,6 +7,7 @@ import { SMAStrategy } from '../strategy/sma.js';
 import type { Strategy } from '../strategy/base.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+import type { PortfolioOptimizer } from './optimizer.js';
 
 interface AssetStrategyParams {
   strategyType: 'threshold' | 'sma';
@@ -27,6 +28,8 @@ export class TradingEngine {
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
   private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy>();
+  private optimizer: PortfolioOptimizer | null = null;
+  private optimizerIntervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly executor: TradeExecutor,
@@ -34,6 +37,13 @@ export class TradingEngine {
   ) {
     this.strategy = this.buildStrategy();
     runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => this.restart());
+    runtimeConfig.subscribe('OPTIMIZER_INTERVAL_SECONDS', () => {
+      if (this.optimizerIntervalId) {
+        this.disableOptimizer();
+        this.enableOptimizer();
+        logger.info('Optimizer interval restarted due to config change');
+      }
+    });
     logger.info(`Trading engine using strategy: ${this.strategy.name}`);
 
     const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
@@ -148,5 +158,36 @@ export class TradingEngine {
 
     logger.debug(`[${symbol}] Strategy signal: ${result.signal} — ${result.reason}`);
     await this.executor.executeForAsset(symbol, result.signal, 'auto');
+  }
+
+  setOptimizer(optimizer: PortfolioOptimizer): void {
+    this.optimizer = optimizer;
+  }
+
+  enableOptimizer(): void {
+    if (!this.optimizer) {
+      logger.warn('Cannot enable optimizer — not set');
+      return;
+    }
+    if (this.optimizerIntervalId) return; // already running
+    const intervalMs = (this.runtimeConfig.get('OPTIMIZER_INTERVAL_SECONDS') as number) * 1000;
+    this.optimizerIntervalId = setInterval(() => {
+      this.optimizer!.tick(botState.activeNetwork).catch((err) =>
+        logger.error('Optimizer tick failed', err),
+      );
+    }, intervalMs);
+    logger.info(`Portfolio optimizer enabled (interval: ${intervalMs / 1000}s)`);
+  }
+
+  disableOptimizer(): void {
+    if (this.optimizerIntervalId) {
+      clearInterval(this.optimizerIntervalId);
+      this.optimizerIntervalId = null;
+      logger.info('Portfolio optimizer disabled');
+    }
+  }
+
+  get optimizerEnabled(): boolean {
+    return this.optimizerIntervalId !== null;
   }
 }

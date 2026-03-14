@@ -5,6 +5,7 @@ import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import { assetsForNetwork, type AssetDefinition } from '../assets/registry.js';
 import { AlchemyService } from '../services/alchemy.js';
+import type { CandleService } from '../services/candles.js';
 
 const pythFeedIds = new Map<string, string>(); // pythSymbol → feedId
 let polling = false;
@@ -13,6 +14,7 @@ export async function startPortfolioTracker(
   tools: CoinbaseTools,
   runtimeConfig: RuntimeConfig,
   alchemyService?: AlchemyService,
+  candleService?: CandleService,
 ): Promise<() => void> {
   logger.info('Portfolio tracker started');
 
@@ -92,6 +94,7 @@ export async function startPortfolioTracker(
           portfolioUsd += balance * price;
           queries.insertAssetSnapshot.run({ symbol: asset.symbol, price_usd: price, balance });
           botState.updateAssetBalance(asset.symbol, balance);
+          if (price > 0) candleService?.recordSpotPrice(asset.symbol, network, price);
 
           // Keep legacy price_snapshots alive for ETH (existing /api/prices default)
           if (asset.symbol === 'ETH') {
@@ -174,6 +177,7 @@ export async function startPortfolioTracker(
                 ? Number(BigInt(hexBal)) / Math.pow(10, row.decimals)
                 : 0;
               botState.updateAssetBalance(row.symbol, humanBalance);
+              if (price > 0) candleService?.recordSpotPrice(row.symbol, network, price);
             } catch (err) {
               logger.error(`Failed to price/balance discovered asset ${row.symbol}`, err);
             }
