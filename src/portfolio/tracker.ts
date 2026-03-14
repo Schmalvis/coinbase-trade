@@ -59,8 +59,15 @@ export async function startPortfolioTracker(
           logger.error(msg);
           botState.setStatus('paused');
           botState.emitAlert(msg);
+          // Intentionally do NOT update stored.value — preserve expected address for next comparison
         } else {
           botState.setWalletAddress(walletAddress);
+        }
+      } else {
+        // walletAddress absent in response
+        const stored = settingQueries.getSetting.get('EXPECTED_WALLET_ADDRESS');
+        if (stored?.value) {
+          logger.warn(`Wallet address absent in MCP response (expected ${stored.value})`);
         }
       }
 

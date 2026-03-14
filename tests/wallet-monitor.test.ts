@@ -88,6 +88,7 @@ describe('Wallet address monitoring', () => {
     expect(mockSetStatus).not.toHaveBeenCalledWith('paused');
     expect(mockEmitAlert).not.toHaveBeenCalled();
     expect(mockSetWalletAddress).toHaveBeenCalledWith('0xABC');
+    expect(mockUpsertSetting).not.toHaveBeenCalled();
   });
 
   it('pauses bot and emits alert when address changes', async () => {
