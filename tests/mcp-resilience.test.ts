@@ -79,4 +79,19 @@ describe('MCPClient resilience', () => {
     const falseCallCount = onHealthChange.mock.calls.filter(c => c[0] === false).length;
     expect(falseCallCount).toBe(1);
   });
+
+  it('counts isError tool response as a failure', async () => {
+    // Health check passes, but tool returns isError
+    mockFetch.mockResolvedValue({ ok: true });
+    mockCallTool.mockResolvedValue({
+      isError: true,
+      content: [{ type: 'text', text: 'tool failed' }],
+    });
+
+    await client.callTool('test_tool', {}).catch(() => {});
+    await client.callTool('test_tool', {}).catch(() => {});
+    await client.callTool('test_tool', {}).catch(() => {});
+
+    expect(onHealthChange).toHaveBeenCalledWith(false);
+  });
 });

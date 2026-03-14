@@ -51,11 +51,14 @@ export class MCPClient {
 
     const argsWithNetwork = { network: this.getNetwork(), ...args };
 
+    let failureRecorded = false;
+
     try {
       const result = await this.client.callTool({ name, arguments: argsWithNetwork });
 
       if (result.isError) {
         this._recordFailure();
+        failureRecorded = true;
         throw new Error(`MCP tool error [${name}]: ${JSON.stringify(result.content)}`);
       }
 
@@ -79,9 +82,7 @@ export class MCPClient {
         return text as unknown as T;
       }
     } catch (err) {
-      // Only record failure if it's not already recorded above (isError path)
-      const msg = (err as Error).message;
-      if (!msg.startsWith('MCP tool error')) {
+      if (!failureRecorded) {
         this._recordFailure();
       }
       throw err;
