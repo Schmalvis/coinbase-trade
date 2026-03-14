@@ -41,7 +41,7 @@ export class CandleService {
 
   constructor(
     private readonly network: string,
-    private readonly coinbasePairs: string[] = ['ETH-USD', 'CBBTC-USD', 'CBETH-USD'],
+    private readonly coinbasePairs: string[] = ['ETH-USD', 'BTC-USD', 'CBETH-USD'],
   ) {}
 
   async fetchCoinbaseCandles(
