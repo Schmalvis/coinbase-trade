@@ -759,10 +759,12 @@
         chart.update('none');
       });
       if (candleChart) {
+        var cs2 = getComputedStyle(document.documentElement);
         candleChart.options.scales.y.ticks.color = c.ticks;
         candleChart.options.scales.y.grid.color = c.grid;
         candleChart.options.scales.x.ticks.color = c.ticks;
         candleChart.options.scales.x.grid.color = c.grid;
+        candleChart.data.datasets[0].color = { up: cs2.getPropertyValue('--green').trim(), down: cs2.getPropertyValue('--red').trim(), unchanged: cs2.getPropertyValue('--text-secondary').trim() };
         candleChart.update('none');
       }
     }
@@ -1010,7 +1012,7 @@
         var barWidth = Math.min(100, Math.max(0, 50 + score / 2));
         var barColor = score > 0 ? 'var(--green)' : 'var(--red)';
         var signals = s.signals || {};
-        var sigText = Object.keys(signals).map(function(k){ return k + ':' + signals[k]; }).join(' ');
+        var sigText = Object.keys(signals).map(function(k){ var v = signals[k]; return k + ':' + (v && typeof v === 'object' ? (v.signal || JSON.stringify(v)) : v); }).join(' ');
         var isWatchlist = s.watchlist || false;
         html += '<div class="score-item" onclick="switchChartAsset(\'' + s.symbol + '\')">' +
           '<span class="score-symbol">' + s.symbol + '</span>' +
