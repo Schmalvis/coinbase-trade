@@ -25,6 +25,8 @@ class BotState {
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
   private statusListeners: ((s: BotStatus) => void)[] = [];
   private networkListeners: ((n: string) => void)[] = [];
+  private alertListeners: ((msg: string) => void)[] = [];
+  private _walletAddress: string | null = null;
 
   get status() { return this._status; }
   get lastPrice() { return this._lastPrice; }
@@ -36,6 +38,7 @@ class BotState {
   get isPaused() { return this._status !== 'running'; }
   get assetBalances(): ReadonlyMap<string, number> { return this._assetBalances; }
   get pendingTokenCount(): number { return this._pendingTokenCount; }
+  get walletAddress(): string | null { return this._walletAddress; }
 
   setNetwork(network: string) {
     if (!availableNetworks.includes(network)) {
@@ -75,6 +78,10 @@ class BotState {
   onTrade(listener: (n: TradeNotification) => void) { this.tradeListeners.push(listener); }
   onStatusChange(listener: (s: BotStatus) => void) { this.statusListeners.push(listener); }
   onNetworkChange(listener: (n: string) => void) { this.networkListeners.push(listener); }
+  onAlert(listener: (msg: string) => void): void { this.alertListeners.push(listener); }
+
+  setWalletAddress(addr: string): void { this._walletAddress = addr; }
+  emitAlert(message: string): void { this.alertListeners.forEach(l => l(message)); }
 
   emitTrade(notification: TradeNotification) {
     this.tradeListeners.forEach(l => l(notification));
