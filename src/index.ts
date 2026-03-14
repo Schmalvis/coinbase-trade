@@ -24,6 +24,12 @@ async function main() {
     ? new AlchemyService(config.ALCHEMY_API_KEY)
     : undefined;
 
+  // Restore persisted active network (survives restarts)
+  const savedNetwork = settingQueries.getSetting.get('ACTIVE_NETWORK')?.value;
+  if (savedNetwork && availableNetworks.includes(savedNetwork)) {
+    botState.setNetwork(savedNetwork);
+  }
+
   logger.info('Starting coinbase trade bot');
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
   logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
@@ -36,6 +42,7 @@ async function main() {
 
   botState.onNetworkChange(network => {
     logger.info(`Network switched to ${network} — re-polling portfolio`);
+    settingQueries.upsertSetting.run('ACTIVE_NETWORK', network);
     pollNow();
   });
 
