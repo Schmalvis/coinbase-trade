@@ -50,7 +50,7 @@ export async function startPortfolioTracker(
       const walletAddress = (wallet as any).address as string | undefined;
       if (walletAddress) {
         const stored = settingQueries.getSetting.get('EXPECTED_WALLET_ADDRESS');
-        if (!stored) {
+        if (!stored || !stored.value) {
           settingQueries.upsertSetting.run('EXPECTED_WALLET_ADDRESS', walletAddress);
           botState.setWalletAddress(walletAddress);
           logger.info(`Wallet address established: ${walletAddress}`);

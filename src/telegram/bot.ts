@@ -30,7 +30,7 @@ export function startTelegramBot(engine: TradingEngine): void {
     const usdcBalance = botState.lastUsdcBalance ?? 0;
     const portfolioUsd = (price * ethBalance + usdcBalance).toFixed(2);
     const walletDisplay = botState.walletAddress
-      ? `\nWallet: \`${botState.walletAddress.slice(0, 10)}...${botState.walletAddress.slice(-4)}\``
+      ? ` | Wallet: \`${botState.walletAddress.slice(0, 10)}...${botState.walletAddress.slice(-4)}\``
       : '';
 
     ctx.reply(
