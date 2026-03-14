@@ -5,6 +5,8 @@ export class ThresholdStrategy implements Strategy {
   name = 'threshold';
   private entryPrice: number | null = null;
 
+  constructor(private readonly opts?: { dropPct?: number; risePct?: number }) {}
+
   evaluate(snapshots: Snapshot[]): StrategyResult {
     if (snapshots.length < 2) return { signal: 'hold', reason: 'Not enough data' };
 
@@ -20,7 +22,10 @@ export class ThresholdStrategy implements Strategy {
     const dropPct = ((rollingHigh - current) / rollingHigh) * 100;
     const gainPct = ((current - this.entryPrice) / this.entryPrice) * 100;
 
-    if (dropPct >= config.PRICE_DROP_THRESHOLD_PCT) {
+    const dropThreshold = this.opts?.dropPct ?? config.PRICE_DROP_THRESHOLD_PCT;
+    const riseTarget    = this.opts?.risePct ?? config.PRICE_RISE_TARGET_PCT;
+
+    if (dropPct >= dropThreshold) {
       this.entryPrice = current;
       return {
         signal: 'buy',
@@ -28,7 +33,7 @@ export class ThresholdStrategy implements Strategy {
       };
     }
 
-    if (gainPct >= config.PRICE_RISE_TARGET_PCT) {
+    if (gainPct >= riseTarget) {
       this.entryPrice = current;
       return {
         signal: 'sell',
