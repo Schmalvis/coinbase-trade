@@ -1,4 +1,4 @@
-export type PriceSource = 'pyth' | 'defillama';
+export type PriceSource = 'pyth' | 'defillama' | 'fixed';
 export type TradeMethod = 'agentkit' | 'enso' | 'none';
 
 export interface AssetDefinition {
@@ -9,6 +9,7 @@ export interface AssetDefinition {
     'base-sepolia'?: string;
   };
   priceSource: PriceSource;
+  fixedPrice?: number;     // used when priceSource === 'fixed'
   pythSymbol?: string;     // Pyth ticker (e.g. 'BTC' for CBBTC)
   tradeMethod: TradeMethod;
   isNative?:   boolean;    // true for ETH (balance via wallet details, not ERC20)
@@ -34,7 +35,8 @@ export const ASSET_REGISTRY: AssetDefinition[] = [
       'base-mainnet': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       'base-sepolia': '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     },
-    priceSource: 'defillama',
+    priceSource: 'fixed',
+    fixedPrice: 1,
     tradeMethod: 'agentkit',
   },
   {
