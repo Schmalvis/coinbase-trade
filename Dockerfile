@@ -1,19 +1,25 @@
 # syntax=docker/dockerfile:1
 
-# ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:20-slim AS builder
+# ── Stage 1: Install dependencies ─────────────────────────────────────────────
+# Separate from build stage so source code changes don't invalidate the
+# expensive native-module install. On arm64 runners, better-sqlite3 downloads
+# a prebuilt binary via prebuild-install — no compilation needed.
+# Build tools are only installed as a fallback if prebuild-install fails.
+FROM node:20-slim AS deps
 
 WORKDIR /app
 
-# Build tools required for better-sqlite3 native bindings
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
-
-# Install all deps (including devDeps) — native modules compiled here
 COPY package.json package-lock.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci
 
-# Compile TypeScript → dist/
+# Try prebuilt binaries first; only install build tools if that fails.
+# This saves ~2-3 minutes on arm64 where prebuilds are available.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci || \
+    (apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/* && npm ci)
+
+# ── Stage 2: Build TypeScript ─────────────────────────────────────────────────
+FROM deps AS builder
+
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
@@ -21,8 +27,10 @@ RUN npm run build
 # Copy static assets (not handled by tsc)
 RUN cp -r src/web/public dist/web/public
 
+# Prune devDependencies — only production deps go to the runtime image
+RUN npm prune --omit=dev
 
-# ── Stage 2: Runtime ──────────────────────────────────────────────────────────
+# ── Stage 3: Runtime ──────────────────────────────────────────────────────────
 FROM node:20-slim
 
 WORKDIR /app
@@ -30,8 +38,7 @@ WORKDIR /app
 # Create data directory and hand ownership to unprivileged node user
 RUN mkdir -p /app/data && chown node:node /app/data
 
-# Copy compiled output and node_modules (with native bindings) from builder
-# Avoids re-compiling better-sqlite3 in the runtime stage
+# Copy compiled output and production-only node_modules from builder
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
