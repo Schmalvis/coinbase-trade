@@ -19,6 +19,9 @@ export async function startPortfolioTracker(
   logger.info('Portfolio tracker started');
 
   async function fetchAssetPrice(asset: AssetDefinition): Promise<number> {
+    if (asset.priceSource === 'fixed') {
+      return asset.fixedPrice ?? 1;
+    }
     if (asset.priceSource === 'pyth' && asset.pythSymbol) {
       let feedId = pythFeedIds.get(asset.pythSymbol);
       if (!feedId) {
