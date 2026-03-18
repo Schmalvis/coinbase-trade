@@ -45,6 +45,10 @@ const schema = z.object({
   RISK_ON_THRESHOLD: z.coerce.number().default(15),
   DEFAULT_FEE_ESTIMATE_PCT: z.coerce.number().default(1.0),
   DASHBOARD_THEME: z.string().default('dark'),
+  TELEGRAM_MODE: z.string().default('all'),
+  TELEGRAM_DIGEST_TIMES: z.string().default('08:00,20:00'),
+  TELEGRAM_QUIET_START: z.string().default(''),
+  TELEGRAM_QUIET_END: z.string().default(''),
 });
 
 const parsed = schema.safeParse(process.env);

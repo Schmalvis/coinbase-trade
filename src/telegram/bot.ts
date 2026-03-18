@@ -1,12 +1,74 @@
 import { Telegraf } from 'telegraf';
 import { botState } from '../core/state.js';
-import { queries, settingQueries, rotationQueries, dailyPnlQueries } from '../data/db.js';
+import { queries, settingQueries, rotationQueries, dailyPnlQueries, portfolioSnapshotQueries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import { config } from '../config.js';
 import type { TradingEngine } from '../trading/engine.js';
 import type { PortfolioOptimizer } from '../trading/optimizer.js';
 import type { WatchlistManager } from '../portfolio/watchlist.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+
+// ── Notification filtering helpers ──────────────────────────────────────────
+
+type TelegramMode = 'all' | 'important_only' | 'digest' | 'off';
+
+/** Check if current UTC time is within the quiet window */
+function isQuietHours(rc: RuntimeConfig | undefined): boolean {
+  if (!rc) return false;
+  const start = rc.get('TELEGRAM_QUIET_START') as string;
+  const end = rc.get('TELEGRAM_QUIET_END') as string;
+  if (!start || !end) return false;
+
+  const now = new Date();
+  const hhmm = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const [sh, sm] = start.split(':').map(Number);
+  const [eh, em] = end.split(':').map(Number);
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+
+  // Handle overnight windows (e.g. 22:00 → 07:00)
+  if (startMin <= endMin) {
+    return hhmm >= startMin && hhmm < endMin;
+  }
+  return hhmm >= startMin || hhmm < endMin;
+}
+
+/** Whether a message should be sent immediately based on mode + importance */
+function shouldSendNow(
+  rc: RuntimeConfig | undefined,
+  isCritical: boolean,
+): boolean {
+  if (!rc) return true;
+  const mode = (rc.get('TELEGRAM_MODE') as TelegramMode) ?? 'all';
+
+  if (mode === 'off') return false;
+  if (mode === 'all') {
+    // In quiet hours, only critical alerts break through
+    if (isQuietHours(rc)) return isCritical;
+    return true;
+  }
+  if (mode === 'important_only') return isCritical;
+  if (mode === 'digest') return isCritical; // non-critical queued for digest
+  return true;
+}
+
+// ── Digest queue ────────────────────────────────────────────────────────────
+
+const digestQueue: string[] = [];
+
+function queueForDigest(message: string): void {
+  digestQueue.push(message);
+  // Cap at 100 to prevent unbounded growth
+  if (digestQueue.length > 100) digestQueue.shift();
+}
+
+function flushDigest(): string | null {
+  if (digestQueue.length === 0) return null;
+  const summary = `📋 *Digest* (${digestQueue.length} events)\n\n` +
+    digestQueue.slice(-20).join('\n---\n'); // show last 20
+  digestQueue.length = 0;
+  return summary;
+}
 
 export function startTelegramBot(
   engine: TradingEngine,
@@ -32,6 +94,48 @@ export function startTelegramBot(
 
   bot.use(guard);
 
+  // ── Helper to send with mode filtering ──────────────────────────────────
+
+  async function sendFiltered(message: string, isCritical: boolean, parseMode: 'Markdown' | undefined = 'Markdown'): Promise<void> {
+    if (shouldSendNow(runtimeConfig, isCritical)) {
+      for (const chatId of allowed) {
+        await bot.telegram.sendMessage(chatId, message, parseMode ? { parse_mode: parseMode } : {}).catch(err =>
+          logger.warn(`Telegram send error: ${err}`),
+        );
+      }
+    } else {
+      const mode = (runtimeConfig?.get('TELEGRAM_MODE') as TelegramMode) ?? 'all';
+      if (mode === 'digest' || mode === 'important_only') {
+        queueForDigest(message.replace(/[*_`]/g, '')); // strip markdown for digest
+      }
+    }
+  }
+
+  // ── Digest scheduler ────────────────────────────────────────────────────
+
+  setInterval(() => {
+    const mode = (runtimeConfig?.get('TELEGRAM_MODE') as TelegramMode) ?? 'all';
+    if (mode !== 'digest') return;
+
+    const digestTimes = (runtimeConfig?.get('TELEGRAM_DIGEST_TIMES') as string) ?? '08:00,20:00';
+    const now = new Date();
+    const hhmm = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+
+    // Check if current minute matches any digest time
+    if (digestTimes.split(',').includes(hhmm)) {
+      const summary = flushDigest();
+      if (summary) {
+        for (const chatId of allowed) {
+          bot.telegram.sendMessage(chatId, summary, { parse_mode: 'Markdown' }).catch(err =>
+            logger.warn(`Digest send error: ${err}`),
+          );
+        }
+      }
+    }
+  }, 60_000); // check every minute
+
+  // ── Commands ────────────────────────────────────────────────────────────
+
   bot.command('status', ctx => {
     const price = botState.lastPrice ?? 0;
     const ethBalance = botState.lastBalance ?? 0;
@@ -40,6 +144,7 @@ export function startTelegramBot(
     const walletDisplay = botState.walletAddress
       ? ` | Wallet: \`${botState.walletAddress.slice(0, 10)}...${botState.walletAddress.slice(-4)}\``
       : '';
+    const tgMode = (runtimeConfig?.get('TELEGRAM_MODE') as string) ?? 'all';
 
     ctx.reply(
       `*Bot Status*\n` +
@@ -49,7 +154,8 @@ export function startTelegramBot(
       `ETH balance: ${ethBalance.toFixed(6)}\n` +
       `USDC balance: ${usdcBalance.toFixed(2)}\n` +
       `Portfolio: $${portfolioUsd}\n` +
-      `Dry run: ${config.DRY_RUN ? 'yes' : 'no'}`,
+      `Dry run: ${runtimeConfig?.get('DRY_RUN') ? 'yes' : 'no'}\n` +
+      `Notifications: ${tgMode}`,
       { parse_mode: 'Markdown' }
     );
   });
@@ -180,6 +286,74 @@ Portfolio: $${pnl?.current_usd?.toFixed(2) ?? '?'} (floor: $${floor})
 Optimizer: ${engine.optimizerEnabled ? 'active' : 'disabled'} (${mode})`);
   });
 
+  // ── /pnl — Performance summary ──────────────────────────────────────────
+
+  bot.command('pnl', ctx => {
+    const network = botState.activeNetwork;
+    const todayPnl = dailyPnlQueries.getTodayPnl.get(network) as any;
+    const currentUsd = todayPnl?.current_usd ?? 0;
+    const todayHighWater = todayPnl?.high_water ?? currentUsd;
+    const todayChange = todayHighWater > 0 ? currentUsd - todayHighWater : 0;
+    const todayChangePct = todayHighWater > 0 ? (todayChange / todayHighWater) * 100 : 0;
+
+    // 7-day and 30-day
+    const dailyRows = dailyPnlQueries.getRecentDailyPnl.all(network, 30) as any[];
+    const now = new Date();
+    const sevenDaysAgo = new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+    const rows7d = dailyRows.filter((d: any) => d.date >= sevenDaysAgo);
+    const startValue7d = rows7d.length > 0 ? rows7d[rows7d.length - 1].current_usd : currentUsd;
+    const change7d = currentUsd - startValue7d;
+    const change7dPct = startValue7d > 0 ? (change7d / startValue7d) * 100 : 0;
+
+    const startValue30d = dailyRows.length > 0 ? dailyRows[dailyRows.length - 1].current_usd : currentUsd;
+    const change30d = currentUsd - startValue30d;
+    const change30dPct = startValue30d > 0 ? (change30d / startValue30d) * 100 : 0;
+
+    // Total since first portfolio snapshot
+    const snapshots = portfolioSnapshotQueries.getRecentSnapshots.all(999999) as any[];
+    const firstSnapshot = snapshots.length > 0 ? snapshots[snapshots.length - 1] : null;
+    const totalChange = firstSnapshot ? currentUsd - firstSnapshot.portfolio_usd : 0;
+    const totalChangePct = firstSnapshot && firstSnapshot.portfolio_usd > 0
+      ? (totalChange / firstSnapshot.portfolio_usd) * 100 : 0;
+    const sinceDate = firstSnapshot?.timestamp?.slice(0, 10) ?? 'N/A';
+
+    // Today's rotation stats
+    const rotCount = (rotationQueries.getTodayRotationCount.get(network) as any)?.cnt ?? 0;
+    const recentRotations = rotationQueries.getRecentRotations.all(network, 10) as any[];
+    const profitable = recentRotations.filter((r: any) => r.status === 'executed' && (r.actual_gain_pct ?? r.estimated_gain_pct) > 0).length;
+
+    ctx.reply(
+      `📊 *Performance*\n` +
+      `Today: ${todayChange >= 0 ? '+' : ''}$${Math.abs(todayChange).toFixed(2)} (${todayChangePct >= 0 ? '+' : ''}${todayChangePct.toFixed(1)}%)\n` +
+      `7-day: ${change7d >= 0 ? '+' : ''}$${Math.abs(change7d).toFixed(2)} (${change7dPct >= 0 ? '+' : ''}${change7dPct.toFixed(1)}%)\n` +
+      `30-day: ${change30d >= 0 ? '+' : ''}$${Math.abs(change30d).toFixed(2)} (${change30dPct >= 0 ? '+' : ''}${change30dPct.toFixed(1)}%)\n` +
+      `Total: ${totalChange >= 0 ? '+' : ''}$${Math.abs(totalChange).toFixed(2)} (${totalChangePct >= 0 ? '+' : ''}${totalChangePct.toFixed(1)}%) since ${sinceDate}\n` +
+      `Rotations today: ${rotCount} (${profitable} profitable of last 10)`,
+      { parse_mode: 'Markdown' },
+    );
+  });
+
+  // ── /notify — Change notification mode ──────────────────────────────────
+
+  bot.command('notify', ctx => {
+    const arg = ctx.message.text.split(/\s+/)[1]?.toLowerCase();
+    const validModes = ['all', 'important_only', 'digest', 'off'];
+
+    if (!arg || !validModes.includes(arg)) {
+      const current = (runtimeConfig?.get('TELEGRAM_MODE') as string) ?? 'all';
+      ctx.reply(
+        `*Notification mode:* ${current}\n` +
+        `Usage: /notify <mode>\n` +
+        `Modes: all | important\\_only | digest | off`,
+        { parse_mode: 'Markdown' },
+      );
+      return;
+    }
+
+    runtimeConfig?.set('TELEGRAM_MODE', arg);
+    ctx.reply(`Notification mode set to: ${arg}`);
+  });
+
   bot.command('killswitch', ctx => {
     botState.setStatus('paused');
     engine.disableOptimizer();
@@ -204,8 +378,9 @@ Optimizer: ${engine.optimizerEnabled ? 'active' : 'disabled'} (${mode})`);
   bot.command('help', ctx => {
     ctx.reply(
       '/status — portfolio + bot status\n' +
+      '/pnl — performance summary (today/7d/30d/total)\n' +
       '/network — show active network\n' +
-      '/network <name> — switch network (e.g. /network base-mainnet)\n' +
+      '/network <name> — switch network\n' +
       '/pause — pause autonomous trading\n' +
       '/resume — resume autonomous trading\n' +
       '/trades — last 5 trades\n' +
@@ -218,37 +393,33 @@ Optimizer: ${engine.optimizerEnabled ? 'active' : 'disabled'} (${mode})`);
       '/unwatch <symbol> — remove from watchlist\n' +
       '/risk — show risk status\n' +
       '/optimizer on|off — toggle optimizer\n' +
+      '/notify <mode> — set notification mode (all/important_only/digest/off)\n' +
       '/killswitch — emergency halt all trading\n' +
-      '/resetwallet — clear expected wallet (use after deliberate wallet change)'
+      '/resetwallet — clear expected wallet'
     );
   });
 
-  // Push alert notifications
+  // ── Push alert notifications (filtered) ─────────────────────────────────
+
   botState.onAlert(async message => {
-    for (const chatId of allowed) {
-      await bot.telegram.sendMessage(
-        chatId,
-        `🚨 *ALERT*\n${message}`,
-        { parse_mode: 'Markdown' }
-      );
-    }
+    // Alerts containing these keywords are always critical (break through quiet/digest)
+    const isCritical = /FLOOR|KILL|WALLET.*CHANGED|HALT|loss limit/i.test(message);
+    await sendFiltered(`🚨 *ALERT*\n${message}`, isCritical);
   });
 
-  // Push trade notifications
+  // ── Push trade notifications (filtered) ─────────────────────────────────
+
   botState.onTrade(async notification => {
-    for (const chatId of allowed) {
-      const emoji = notification.action === 'buy' ? '🟢' : '🔴';
-      const dryTag = notification.dryRun ? ' [DRY RUN]' : '';
-      await bot.telegram.sendMessage(
-        chatId,
-        `${emoji} *${notification.action.toUpperCase()}${dryTag}*\n` +
-        `Amount: ${notification.amountEth.toFixed(6)} ETH\n` +
-        `Price: $${notification.priceUsd.toFixed(2)}\n` +
-        `Reason: ${notification.reason}` +
-        (notification.txHash ? `\nTx: \`${notification.txHash}\`` : ''),
-        { parse_mode: 'Markdown' }
-      );
-    }
+    const emoji = notification.action === 'buy' ? '🟢' : '🔴';
+    const dryTag = notification.dryRun ? ' [DRY RUN]' : '';
+    const message = `${emoji} *${notification.action.toUpperCase()}${dryTag}*\n` +
+      `Amount: ${notification.amountEth.toFixed(6)} ETH\n` +
+      `Price: $${notification.priceUsd.toFixed(2)}\n` +
+      `Reason: ${notification.reason}` +
+      (notification.txHash ? `\nTx: \`${notification.txHash}\`` : '');
+
+    // Trade notifications are never critical — they respect mode fully
+    await sendFiltered(message, false);
   });
 
   bot.launch();

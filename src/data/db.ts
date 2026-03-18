@@ -371,4 +371,14 @@ export const dailyPnlQueries = {
   getTodayPnl: db.prepare(`
     SELECT * FROM daily_pnl WHERE date = date('now') AND network = ?
   `) as Statement<[string], DailyPnlRow>,
+
+  getRecentDailyPnl: db.prepare(`
+    SELECT * FROM daily_pnl WHERE network = ? ORDER BY date DESC LIMIT ?
+  `) as Statement<[string, number], DailyPnlRow>,
+};
+
+export const portfolioSnapshotQueries = {
+  getRecentSnapshots: db.prepare(`
+    SELECT * FROM portfolio_snapshots ORDER BY id DESC LIMIT ?
+  `) as Statement<[number], { id: number; timestamp: string; portfolio_usd: number }>,
 };

@@ -11,7 +11,8 @@ export type ConfigKey =
   | 'MAX_CASH_PCT' | 'OPTIMIZER_INTERVAL_SECONDS'
   | 'ROTATION_SELL_THRESHOLD' | 'ROTATION_BUY_THRESHOLD' | 'MIN_ROTATION_SCORE_DELTA'
   | 'RISK_OFF_THRESHOLD' | 'RISK_ON_THRESHOLD' | 'DEFAULT_FEE_ESTIMATE_PCT'
-  | 'DASHBOARD_THEME';
+  | 'DASHBOARD_THEME'
+  | 'TELEGRAM_MODE' | 'TELEGRAM_DIGEST_TIMES' | 'TELEGRAM_QUIET_START' | 'TELEGRAM_QUIET_END';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -29,6 +30,7 @@ const ALL_KEYS = new Set<ConfigKey>([
   'ROTATION_SELL_THRESHOLD', 'ROTATION_BUY_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
   'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
   'DASHBOARD_THEME',
+  'TELEGRAM_MODE', 'TELEGRAM_DIGEST_TIMES', 'TELEGRAM_QUIET_START', 'TELEGRAM_QUIET_END',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
@@ -76,6 +78,10 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   RISK_ON_THRESHOLD:        v => isNum(v) && (v as number) >= 0 && (v as number) <= 100 ? null : 'must be 0–100',
   DEFAULT_FEE_ESTIMATE_PCT: v => isNum(v) && (v as number) >= 0.1 && (v as number) <= 10 ? null : 'must be 0.1–10',
   DASHBOARD_THEME:          v => ['light', 'dark'].includes(String(v)) ? null : 'must be "light" or "dark"',
+  TELEGRAM_MODE:            v => ['all', 'important_only', 'digest', 'off'].includes(String(v)) ? null : 'must be all/important_only/digest/off',
+  TELEGRAM_DIGEST_TIMES:    v => typeof v === 'string' && /^(\d{2}:\d{2})(,\d{2}:\d{2})*$/.test(v) ? null : 'must be comma-separated HH:MM times (e.g. "08:00,20:00")',
+  TELEGRAM_QUIET_START:     v => !v || (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) ? null : 'must be HH:MM or empty',
+  TELEGRAM_QUIET_END:       v => !v || (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) ? null : 'must be HH:MM or empty',
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)

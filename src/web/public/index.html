@@ -685,6 +685,33 @@
     </div>
   </div>
 
+  <div class="panel" id="performancePanel">
+    <div class="panel-title">Performance</div>
+    <div class="risk-bar" id="perfBar">
+      <div class="risk-item">
+        <div class="risk-label">Today</div>
+        <div class="risk-value" id="perfToday">--</div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label">7 Day</div>
+        <div class="risk-value" id="perf7d">--</div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label">30 Day</div>
+        <div class="risk-value" id="perf30d">--</div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label">Total</div>
+        <div class="risk-value" id="perfTotal">--</div>
+      </div>
+      <div class="risk-item">
+        <div class="risk-label">Rotations</div>
+        <div class="risk-value" id="perfRotations">--</div>
+      </div>
+    </div>
+    <div class="chart-wrap-sm" style="margin-top:0.5rem"><canvas id="pnlChart"></canvas></div>
+  </div>
+
   <div class="bottom-row">
     <div class="panel">
       <div class="panel-title">Recent Rotations</div>
@@ -740,7 +767,7 @@
   </div>
 
   <script>
-    let priceChart, portfolioChart, candleChart;
+    let priceChart, portfolioChart, candleChart, pnlChart;
     let availableNetworks = [], activeNetwork = '';
     let activeChartAsset = 'ETH';
     let activeTimeframe = '15m';
@@ -1361,9 +1388,74 @@
       } catch (e) { btn.textContent = 'Error'; setTimeout(function(){ btn.textContent = 'Request ' + assetId.toUpperCase(); btn.disabled = false; }, 3000); }
     }
 
+    /* ── Performance / P&L ──────────────────────────────────────────────── */
+    function renderPnlValue(el, change, pct) {
+      var sign = change >= 0 ? '+' : '';
+      el.textContent = sign + '$' + Math.abs(change).toFixed(2) + ' (' + sign + pct.toFixed(1) + '%)';
+      el.style.color = change >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+
+    async function loadPerformance() {
+      try {
+        var data = await fetch('/api/performance?days=30').then(function(r) { return r.json(); });
+
+        renderPnlValue(document.getElementById('perfToday'), data.today.change, data.today.change_pct);
+        renderPnlValue(document.getElementById('perf7d'), data.week.change, data.week.change_pct);
+        renderPnlValue(document.getElementById('perf30d'), data.month.change, data.month.change_pct);
+        renderPnlValue(document.getElementById('perfTotal'), data.total.change, data.total.change_pct);
+        document.getElementById('perfRotations').textContent = data.rotations.recent_profitable + '/' + data.rotations.recent_total + ' profitable';
+
+        // P&L chart
+        if (data.portfolio_history && data.portfolio_history.length > 1) {
+          var labels = data.portfolio_history.map(function(p) { return p.timestamp; });
+          var values = data.portfolio_history.map(function(p) { return p.portfolio_usd; });
+          var c = getChartColors();
+
+          if (pnlChart) {
+            pnlChart.data.labels = labels;
+            pnlChart.data.datasets[0].data = values;
+            pnlChart.update('none');
+          } else {
+            var ctx = document.getElementById('pnlChart').getContext('2d');
+            var lastVal = values[values.length - 1];
+            var firstVal = values[0];
+            var cs = getComputedStyle(document.documentElement);
+            var green = cs.getPropertyValue('--green').trim();
+            var red = cs.getPropertyValue('--red').trim();
+            var lineColor = lastVal >= firstVal ? green : red;
+
+            pnlChart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels: labels,
+                datasets: [{
+                  data: values,
+                  borderColor: lineColor,
+                  backgroundColor: lineColor + '18',
+                  fill: true,
+                  tension: 0.3,
+                  pointRadius: 0,
+                  borderWidth: 1.5,
+                }]
+              },
+              options: {
+                responsive: true, maintainAspectRatio: false,
+                scales: {
+                  x: { display: false },
+                  y: { ticks: { color: c.ticks, font: { size: 10, family: "'Inter', sans-serif" } }, grid: { color: c.grid } }
+                },
+                plugins: { legend: { display: false } },
+                animation: false,
+              }
+            });
+          }
+        }
+      } catch (e) { /* performance data not available yet */ }
+    }
+
     /* ── Refresh ─────────────────────────────────────────────────────────── */
     async function refresh() {
-      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet(), loadAssets(), loadScores(), loadRotations(), loadRisk(), loadWatchlist()]);
+      await Promise.all([loadStatus(), loadCharts(), loadTrades(), loadWallet(), loadAssets(), loadScores(), loadRotations(), loadRisk(), loadWatchlist(), loadPerformance()]);
       document.getElementById('faucetBtn').style.display = (activeNetwork && activeNetwork.indexOf('mainnet') !== -1) ? 'none' : 'inline-block';
     }
 
@@ -1389,6 +1481,11 @@
         var optFields = ['cfgMaxPositionPct','cfgMaxDailyLossPct','cfgMaxRotationPct','cfgMaxDailyRotations','cfgPortfolioFloorUsd','cfgMinRotationGainPct','cfgMaxCashPct','cfgOptimizerIntervalSec','cfgRotSellThreshold','cfgRotBuyThreshold','cfgMinRotScoreDelta','cfgRiskOffThreshold','cfgRiskOnThreshold','cfgDefaultFeeEstPct'];
         var optKeys = ['MAX_POSITION_PCT','MAX_DAILY_LOSS_PCT','MAX_ROTATION_PCT','MAX_DAILY_ROTATIONS','PORTFOLIO_FLOOR_USD','MIN_ROTATION_GAIN_PCT','MAX_CASH_PCT','OPTIMIZER_INTERVAL_SECONDS','ROTATION_SELL_THRESHOLD','ROTATION_BUY_THRESHOLD','MIN_ROTATION_SCORE_DELTA','RISK_OFF_THRESHOLD','RISK_ON_THRESHOLD','DEFAULT_FEE_ESTIMATE_PCT'];
         optFields.forEach(function(fid, i) { var el = document.getElementById(fid); if (el && s[optKeys[i]] != null) el.value = s[optKeys[i]]; });
+        // Notification fields
+        document.getElementById('cfgTelegramMode').value = s.TELEGRAM_MODE || 'all';
+        document.getElementById('cfgDigestTimes').value = s.TELEGRAM_DIGEST_TIMES || '08:00,20:00';
+        document.getElementById('cfgQuietStart').value = s.TELEGRAM_QUIET_START || '';
+        document.getElementById('cfgQuietEnd').value = s.TELEGRAM_QUIET_END || '';
         selectStrategy(selectedStrategy);
         switchTab('strategy');
         clearSettingsErrors();
@@ -1408,9 +1505,11 @@
       document.getElementById('tabStrategy').style.display = tab === 'strategy' ? '' : 'none';
       document.getElementById('tabTrading').style.display = tab === 'trading' ? '' : 'none';
       document.getElementById('tabOptimizer').style.display = tab === 'optimizer' ? '' : 'none';
+      document.getElementById('tabNotify').style.display = tab === 'notify' ? '' : 'none';
       document.getElementById('tabStrategyBtn').classList.toggle('active', tab === 'strategy');
       document.getElementById('tabTradingBtn').classList.toggle('active', tab === 'trading');
       document.getElementById('tabOptimizerBtn').classList.toggle('active', tab === 'optimizer');
+      document.getElementById('tabNotifyBtn').classList.toggle('active', tab === 'notify');
     }
 
     function clearSettingsErrors() {
@@ -1436,6 +1535,11 @@
       };
       var optMap = { cfgMaxPositionPct:'MAX_POSITION_PCT', cfgMaxDailyLossPct:'MAX_DAILY_LOSS_PCT', cfgMaxRotationPct:'MAX_ROTATION_PCT', cfgMaxDailyRotations:'MAX_DAILY_ROTATIONS', cfgPortfolioFloorUsd:'PORTFOLIO_FLOOR_USD', cfgMinRotationGainPct:'MIN_ROTATION_GAIN_PCT', cfgMaxCashPct:'MAX_CASH_PCT', cfgOptimizerIntervalSec:'OPTIMIZER_INTERVAL_SECONDS', cfgRotSellThreshold:'ROTATION_SELL_THRESHOLD', cfgRotBuyThreshold:'ROTATION_BUY_THRESHOLD', cfgMinRotScoreDelta:'MIN_ROTATION_SCORE_DELTA', cfgRiskOffThreshold:'RISK_OFF_THRESHOLD', cfgRiskOnThreshold:'RISK_ON_THRESHOLD', cfgDefaultFeeEstPct:'DEFAULT_FEE_ESTIMATE_PCT' };
       Object.keys(optMap).forEach(function(elId) { var el = document.getElementById(elId); if (el && el.value !== '') changes[optMap[elId]] = parseFloat(el.value); });
+      // Notification settings
+      changes.TELEGRAM_MODE = document.getElementById('cfgTelegramMode').value;
+      changes.TELEGRAM_DIGEST_TIMES = document.getElementById('cfgDigestTimes').value;
+      changes.TELEGRAM_QUIET_START = document.getElementById('cfgQuietStart').value;
+      changes.TELEGRAM_QUIET_END = document.getElementById('cfgQuietEnd').value;
       try {
         var data = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes: changes }) }).then(function(r){ return r.json(); });
         if (data.ok) { closeModal('settingsModal'); await loadStatus(); } else { showSettingsError(data.field, data.error); }
@@ -1661,6 +1765,7 @@
       <button class="modal-tab active" id="tabStrategyBtn" onclick="switchTab('strategy')">Strategy</button>
       <button class="modal-tab" id="tabTradingBtn" onclick="switchTab('trading')">Trading</button>
       <button class="modal-tab" id="tabOptimizerBtn" onclick="switchTab('optimizer')">Optimizer</button>
+      <button class="modal-tab" id="tabNotifyBtn" onclick="switchTab('notify')">Notifications</button>
     </div>
     <div id="tabStrategy">
       <div class="field-group">
@@ -1711,6 +1816,22 @@
         <div class="field"><label>Risk-off threshold</label><input type="number" id="cfgRiskOffThreshold" min="-100" max="0" step="1"></div>
         <div class="field"><label>Risk-on threshold</label><input type="number" id="cfgRiskOnThreshold" min="-100" max="100" step="1"></div>
         <div class="field"><label>Default fee estimate %</label><input type="number" id="cfgDefaultFeeEstPct" min="0" max="10" step="0.01"></div>
+      </div>
+    </div>
+    <div id="tabNotify" style="display:none">
+      <div class="field-group">
+        <div class="field">
+          <label>Notification mode</label>
+          <select id="cfgTelegramMode" style="background:var(--bg-primary);color:var(--text-primary);border:1px solid var(--border-hi);border-radius:6px;padding:0.4rem 0.6rem;font-family:'Inter',sans-serif;font-size:0.75rem">
+            <option value="all">All — every event sent immediately</option>
+            <option value="important_only">Important only — risk alerts only, trades queued</option>
+            <option value="digest">Digest — batched summaries at scheduled times</option>
+            <option value="off">Off — no Telegram messages</option>
+          </select>
+        </div>
+        <div class="field"><label>Digest times (UTC, comma-separated HH:MM)</label><input type="text" id="cfgDigestTimes" placeholder="08:00,20:00"></div>
+        <div class="field"><label>Quiet hours start (UTC HH:MM, empty to disable)</label><input type="text" id="cfgQuietStart" placeholder="22:00"></div>
+        <div class="field"><label>Quiet hours end (UTC HH:MM)</label><input type="text" id="cfgQuietEnd" placeholder="07:00"></div>
       </div>
     </div>
     <div class="modal-footer">
