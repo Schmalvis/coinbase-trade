@@ -18,6 +18,8 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 4 (portfolio optimizer) complete** — Cross-asset opportunity rotation system. OHLCV candle data from Coinbase Advanced Trade API (15m/1h/24h) + synthetic candles from spot prices. CandleStrategy (RSI, MACD, volume, candle patterns) scores assets across timeframes. PortfolioOptimizer ranks assets, detects rotation opportunities, checks RiskGuard (position limits, daily loss limit, portfolio floor kill switch), and executes two-leg rotations (sell weak → buy strong). Watchlist for tracking assets not yet held. Full dashboard redesign with dark/light themes, candlestick charts, opportunity scores, rotation log, risk monitor. New Telegram commands (/scores, /rotations, /watchlist, /risk, /killswitch, /optimizer).
 
+**Phase 4.5 (P&L visibility + notification control) complete** — Performance panel on dashboard showing today/7d/30d/total P&L with portfolio value chart. Telegram notification modes: `all` (default), `important_only` (risk alerts only), `digest` (batched summaries at scheduled UTC times), `off`. Quiet hours with configurable UTC window — only critical alerts (portfolio floor, kill switch, wallet change) break through. New commands: `/pnl` (performance summary), `/notify <mode>` (change notification mode). All notification settings DB-persisted via Settings modal → Notifications tab.
+
 **Next steps:**
 - Deploy and verify optimizer in DRY_RUN mode — watch scores and rotation decisions in logs/dashboard before enabling real trades
 - Tune optimizer thresholds via dashboard Settings (ROTATION_SELL_THRESHOLD, ROTATION_BUY_THRESHOLD, MIN_ROTATION_SCORE_DELTA)
