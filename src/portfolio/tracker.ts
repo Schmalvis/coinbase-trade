@@ -48,16 +48,17 @@ export async function startPortfolioTracker(
       const balanceStr = (wallet as any).balance ?? (wallet as any).nativeBalance ?? '0';
       const ethBalance = parseFloat(String(balanceStr)) || 0;
 
-      // Wallet address integrity check — pause and alert if server returns unexpected address
+      // Wallet address integrity check — scoped per network since each network has its own wallet
       const walletAddress = (wallet as any).address as string | undefined;
       if (walletAddress) {
-        const stored = settingQueries.getSetting.get('EXPECTED_WALLET_ADDRESS');
+        const settingKey = `EXPECTED_WALLET_ADDRESS_${network}`;
+        const stored = settingQueries.getSetting.get(settingKey);
         if (!stored || !stored.value) {
-          settingQueries.upsertSetting.run('EXPECTED_WALLET_ADDRESS', walletAddress);
+          settingQueries.upsertSetting.run(settingKey, walletAddress);
           botState.setWalletAddress(walletAddress);
-          logger.info(`Wallet address established: ${walletAddress}`);
+          logger.info(`Wallet address established for ${network}: ${walletAddress}`);
         } else if (walletAddress.toLowerCase() !== stored.value.toLowerCase()) {
-          const msg = `⚠️ WALLET ADDRESS CHANGED: expected ${stored.value}, got ${walletAddress}`;
+          const msg = `⚠️ WALLET ADDRESS CHANGED on ${network}: expected ${stored.value}, got ${walletAddress}`;
           logger.error(msg);
           botState.setStatus('paused');
           botState.emitAlert(msg);
@@ -67,9 +68,10 @@ export async function startPortfolioTracker(
         }
       } else {
         // walletAddress absent in response
-        const stored = settingQueries.getSetting.get('EXPECTED_WALLET_ADDRESS');
+        const settingKey = `EXPECTED_WALLET_ADDRESS_${network}`;
+        const stored = settingQueries.getSetting.get(settingKey);
         if (stored?.value) {
-          logger.warn(`Wallet address absent in MCP response (expected ${stored.value})`);
+          logger.warn(`Wallet address absent in MCP response (expected ${stored.value} on ${network})`);
         }
       }
 
