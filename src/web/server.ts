@@ -428,16 +428,51 @@ export function startWebServer(
   // ── Risk ──────────────────────────────────────────────────────────────────
   app.get('/api/risk', (_req, res) => {
     const network = botState.activeNetwork;
-    const todayPnl = dailyPnlQueries.getTodayPnl.get(network);
+    const todayPnl = dailyPnlQueries.getTodayPnl.get(network) as any;
     const rotCount = rotationQueries.getTodayRotationCount.get(network);
+
+    // Compute current portfolio value for floor comparison
+    let portfolioUsd = 0;
+    for (const [sym, bal] of botState.assetBalances) {
+      if (sym === 'USDC') portfolioUsd += bal;
+      else if (sym === 'ETH' && botState.lastPrice) portfolioUsd += bal * botState.lastPrice;
+      else {
+        const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
+        portfolioUsd += bal * (priceRow?.price_usd ?? 0);
+      }
+    }
+
+    const pnl = todayPnl ? (portfolioUsd - (todayPnl.high_water ?? portfolioUsd)) : 0;
+    const maxLoss = runtimeConfig.get('MAX_DAILY_LOSS_PCT') as number;
+    const maxRot = runtimeConfig.get('MAX_DAILY_ROTATIONS') as number;
+    const floor = runtimeConfig.get('PORTFOLIO_FLOOR_USD') as number;
+
+    // Find highest position weight among non-USDC assets
+    let maxPositionPct = 0;
+    if (portfolioUsd > 0) {
+      for (const [sym, bal] of botState.assetBalances) {
+        if (sym === 'USDC') continue;
+        let price = 0;
+        if (sym === 'ETH' && botState.lastPrice) price = botState.lastPrice;
+        else {
+          const row = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
+          price = row?.price_usd ?? 0;
+        }
+        const pct = (bal * price) / portfolioUsd * 100;
+        if (pct > maxPositionPct) maxPositionPct = pct;
+      }
+    }
+
     res.json({
-      dailyPnl: todayPnl ?? null,
-      rotationsToday: (rotCount as any)?.cnt ?? 0,
-      maxDailyRotations: runtimeConfig.get('MAX_DAILY_ROTATIONS'),
-      maxDailyLossPct: runtimeConfig.get('MAX_DAILY_LOSS_PCT'),
-      portfolioFloor: runtimeConfig.get('PORTFOLIO_FLOOR_USD'),
-      optimizerMode: optimizer?.isRiskOff ? 'risk-off' : 'normal',
-      optimizerEnabled: engine.optimizerEnabled,
+      daily_pnl: pnl,
+      daily_pnl_limit: maxLoss,
+      rotations_today: (rotCount as any)?.cnt ?? 0,
+      max_daily_rotations: maxRot,
+      max_position_pct: maxPositionPct,
+      portfolio_floor: floor,
+      portfolio_usd: portfolioUsd,
+      optimizer_status: !engine.optimizerEnabled ? 'disabled' : (optimizer?.isRiskOff ? 'risk-off' : 'active'),
+      has_data: !!todayPnl,
     });
   });
 

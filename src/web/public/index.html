@@ -638,7 +638,7 @@
         </div>
         <span id="assetSelector" style="display:flex;gap:0.2rem;flex-wrap:wrap"></span>
       </div>
-      <div class="chart-wrap"><canvas id="candleChart"></canvas></div>
+      <div class="chart-wrap" style="position:relative"><canvas id="candleChart"></canvas><div id="candleEmptyMsg" style="display:flex;position:absolute;inset:0;align-items:center;justify-content:center;color:var(--text-muted);font-size:0.75rem;text-align:center;padding:1rem;pointer-events:none">Collecting candle data\u2026</div></div>
       <div class="indicator-bar" id="indicatorBar">
         <span>RSI: <b id="indRsi">--</b></span>
         <span>MACD: <b id="indMacd">--</b></span>
@@ -708,7 +708,8 @@
 
   <div class="panel">
     <div class="panel-title">Risk Monitor</div>
-    <div class="risk-bar" id="riskBar">
+    <div id="riskPlaceholder" style="color:var(--text-muted);font-size:0.75rem;padding:0.5rem 0">Enable the portfolio optimizer in Settings &rarr; Optimizer to activate risk monitoring. Once running, daily P&amp;L, rotation counts, and position limits will appear here.</div>
+    <div class="risk-bar" id="riskContent" style="display:flex">
       <div class="risk-item">
         <div class="risk-label">Daily P&amp;L</div>
         <div class="risk-value" id="riskPnl">--</div>
@@ -869,10 +870,13 @@
     async function loadCandleChart() {
       try {
         var data = await fetch('/api/candles?symbol=' + activeChartAsset + '&interval=' + activeTimeframe + '&limit=100').then(function(r){ return r.json(); });
+        var candleOverlay = document.getElementById('candleEmptyMsg');
         if (!data || !data.length) {
           if (candleChart) { candleChart.data.datasets[0].data = []; candleChart.update('none'); }
+          if (candleOverlay) { candleOverlay.style.display = 'flex'; candleOverlay.textContent = 'Collecting ' + activeTimeframe + ' candle data for ' + activeChartAsset + '\u2026 chart populates after ~6 hours of 15m candles.'; }
           return;
         }
+        if (candleOverlay) candleOverlay.style.display = 'none';
         var candles = data.map(function(c) {
           return { x: new Date(c.timestamp || c.t).getTime(), o: c.open != null ? c.open : c.o, h: c.high != null ? c.high : c.h, l: c.low != null ? c.low : c.l, c: c.close != null ? c.close : c.c };
         });
@@ -1020,7 +1024,7 @@
 
     function renderScores(scores) {
       var el = document.getElementById('scoresList');
-      if (!scores.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:0.72rem">No scores available</div>'; return; }
+      if (!scores.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:0.72rem">Collecting data\u2026 scores available after optimizer runs (~5 min interval). Ensure optimizer is enabled in Settings \u2192 Optimizer.</div>'; return; }
       var sorted = scores.slice().sort(function(a,b){ return (b.score||0) - (a.score||0); });
       var html = '';
       sorted.forEach(function(s) {
@@ -1074,7 +1078,7 @@
         var data = await fetch('/api/rotations?limit=10').then(function(r){ return r.json(); });
         var list = Array.isArray(data) ? data : (data.rotations || []);
         var el = document.getElementById('rotationsList');
-        if (!list.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:0.72rem">No rotations yet</div>'; return; }
+        if (!list.length) { el.innerHTML = '<div style="color:var(--text-muted);font-size:0.72rem">No rotations yet. The optimizer will log rotations here when it identifies profitable asset swaps.</div>'; return; }
         var html = '';
         list.forEach(function(r) {
           var status = r.status || 'unknown';
@@ -1096,8 +1100,19 @@
     async function loadRisk() {
       try {
         var r = await fetch('/api/risk').then(function(r){ return r.json(); });
-        var pnl = r.daily_pnl != null ? r.daily_pnl : (r.dailyPnl || 0);
-        var pnlLimit = r.daily_pnl_limit != null ? r.daily_pnl_limit : (r.maxDailyLoss || 100);
+        // Show placeholder if optimizer hasn't produced data yet
+        var riskPlaceholder = document.getElementById('riskPlaceholder');
+        var riskContent = document.getElementById('riskContent');
+        if (!r.has_data && r.optimizer_status === 'disabled') {
+          if (riskPlaceholder) riskPlaceholder.style.display = 'block';
+          if (riskContent) riskContent.style.display = 'none';
+          return;
+        }
+        if (riskPlaceholder) riskPlaceholder.style.display = 'none';
+        if (riskContent) riskContent.style.display = 'flex';
+
+        var pnl = r.daily_pnl != null ? r.daily_pnl : 0;
+        var pnlLimit = r.daily_pnl_limit != null ? r.daily_pnl_limit : 100;
         var pnlPct = Math.min(100, Math.abs(pnl) / pnlLimit * 100);
         document.getElementById('riskPnl').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
         document.getElementById('riskPnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
