@@ -176,7 +176,8 @@ export async function startPortfolioTracker(
           botState.setPendingTokenCount(pendingCount);
 
           // Price all active+pending discovered assets via DefiLlama
-          const activePending = allDiscovered.filter(r => r.status !== 'dismissed');
+          // Skip registry assets — they're already priced/balanced by the main poll loop above
+          const activePending = allDiscovered.filter(r => r.status !== 'dismissed' && !registrySymbols.has(r.symbol.toUpperCase()));
           for (const row of activePending) {
             try {
               const prices = await tools.getTokenPrices([`base:${row.address}`]);
