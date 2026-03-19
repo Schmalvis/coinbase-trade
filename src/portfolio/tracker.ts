@@ -132,13 +132,15 @@ export async function startPortfolioTracker(
             hexBalanceMap.set(tb.contractAddress.toLowerCase(), tb.tokenBalance);
           }
 
-          // Skip tokens already in static registry
+          // Skip tokens already in static registry (by address or symbol)
+          const networkAssets = assetsForNetwork(network);
           const registryAddresses = new Set(
-            assetsForNetwork(network).map(a => {
+            networkAssets.map(a => {
               const addr = a.addresses[network as keyof typeof a.addresses];
               return addr ? addr.toLowerCase() : null;
             }).filter(Boolean)
           );
+          const registrySymbols = new Set(networkAssets.map(a => a.symbol.toUpperCase()));
 
           // Insert new tokens (INSERT OR IGNORE — status='pending' by default)
           for (const tb of tokenBalances) {
@@ -149,6 +151,11 @@ export async function startPortfolioTracker(
             if (!existing) {
               try {
                 const meta = await alchemyService.getTokenMetadata(tb.contractAddress, network);
+                // Skip tokens whose symbol matches a registry asset (e.g., WETH vs ETH)
+                if (registrySymbols.has(meta.symbol.toUpperCase())) {
+                  logger.debug(`Skipping discovered ${meta.symbol} — matches registry asset`);
+                  continue;
+                }
                 discoveredAssetQueries.upsertDiscoveredAsset.run({
                   address: tb.contractAddress,
                   network,

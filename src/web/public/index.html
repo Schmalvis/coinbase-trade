@@ -1682,9 +1682,9 @@
           body.appendChild(document.createTextNode(' '));
           var db = document.createElement('button'); db.textContent = 'DISMISS'; db.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; db.onclick = function(){ dismissAsset(a.address); }; body.appendChild(db);
         } else {
-          var sb = document.createElement('button'); sb.textContent = 'SAVE'; sb.onclick = function(){ saveAssetConfig(a.address); }; body.appendChild(sb);
+          var sb = document.createElement('button'); sb.textContent = 'SAVE'; sb.style.cssText = 'border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; sb.onclick = function(){ saveAssetConfig(a.address); }; body.appendChild(sb);
           body.appendChild(document.createTextNode(' '));
-          var disb = document.createElement('button'); disb.textContent = 'Disable strategy'; disb.onclick = function(){ dismissAsset(a.address); }; body.appendChild(disb);
+          var disb = document.createElement('button'); disb.textContent = 'DISABLE STRATEGY'; disb.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; disb.onclick = function(){ dismissAsset(a.address); }; body.appendChild(disb);
         }
         header.onclick = function(){ toggleModalItem(a.address); };
         item.appendChild(body);

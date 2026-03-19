@@ -61,7 +61,14 @@ export class TradingEngine {
 
   startAllAssetLoops(): void {
     const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+    // Deduplicate by symbol — first occurrence wins (registry-seeded assets are inserted first)
+    const seen = new Set<string>();
     for (const row of activeAssets) {
+      if (seen.has(row.symbol)) {
+        logger.debug(`Skipping duplicate asset loop for ${row.symbol} (${row.address})`);
+        continue;
+      }
+      seen.add(row.symbol);
       this.startAssetLoop(row.address, row.symbol, {
         strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
         dropPct: row.drop_pct, risePct: row.rise_pct,
