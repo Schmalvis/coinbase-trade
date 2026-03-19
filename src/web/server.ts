@@ -246,12 +246,17 @@ export function startWebServer(
     const errors = validateAssetParams(body);
     if (errors.length) return res.status(400).json({ error: errors[0] });
 
-    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    let row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) {
+      const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+      row = allAssets.find(r => r.address.toLowerCase() === address.toLowerCase() || r.symbol.toLowerCase() === address.toLowerCase());
+    }
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
 
+    const dbAddress = row.address;
     const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
     discoveredAssetQueries.updateAssetStrategyConfig.run({
-      address, network,
+      address: dbAddress, network,
       strategy: params.strategyType,
       drop_pct: params.dropPct,
       rise_pct: params.risePct,
@@ -260,10 +265,10 @@ export function startWebServer(
     });
     discoveredAssetQueries.updateAssetStatus.run({
       status: 'active',
-      address,
+      address: dbAddress,
       network,
     });
-    engine.startAssetLoop(address, row.symbol, {
+    engine.startAssetLoop(dbAddress, row.symbol, {
       strategyType: params.strategyType as 'threshold' | 'sma',
       dropPct: params.dropPct,
       risePct: params.risePct,
@@ -279,9 +284,13 @@ export function startWebServer(
   app.post('/api/assets/:address/dismiss', (req, res) => {
     const { address } = req.params;
     const network = botState.activeNetwork;
-    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    let row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) {
+      const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+      row = allAssets.find(r => r.address.toLowerCase() === address.toLowerCase() || r.symbol.toLowerCase() === address.toLowerCase());
+    }
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
-    discoveredAssetQueries.dismissAsset.run(address, network);
+    discoveredAssetQueries.dismissAsset.run(row.address, network);
     engine.stopAssetLoop(row.symbol);
     const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
     botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
@@ -293,7 +302,13 @@ export function startWebServer(
     const { address } = req.params;
     const network = botState.activeNetwork;
 
-    const row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    // Try by address first, then fall back to symbol lookup (handles address mismatches from seeding)
+    let row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
+    if (!row) {
+      // address might be a symbol or the DB has a different address form
+      const allActive = discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[];
+      row = allActive.find(r => r.address.toLowerCase() === address.toLowerCase() || r.symbol.toLowerCase() === address.toLowerCase());
+    }
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
 
     const body = req.body as Record<string, unknown>;
@@ -301,8 +316,9 @@ export function startWebServer(
     if (errors.length) return res.status(400).json({ error: errors[0] });
 
     const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
+    const dbAddress = row.address; // use the address from DB, not the request param
     discoveredAssetQueries.updateAssetStrategyConfig.run({
-      address, network,
+      address: dbAddress, network,
       strategy: params.strategyType,
       drop_pct: params.dropPct,
       rise_pct: params.risePct,
@@ -317,10 +333,10 @@ export function startWebServer(
       discoveredAssetQueries.updateGridConfig.run({
         grid_levels: gridLevels, grid_upper_bound: gridUpperBound,
         grid_lower_bound: gridLowerBound, grid_manual_override: gridManualOverride,
-        address, network,
+        address: dbAddress, network,
       });
     }
-    engine.reloadAssetConfig(address, row.symbol, {
+    engine.reloadAssetConfig(dbAddress, row.symbol, {
       strategyType: params.strategyType as 'threshold' | 'sma' | 'grid',
       dropPct: params.dropPct,
       risePct: params.risePct,
