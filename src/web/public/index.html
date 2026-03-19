@@ -1497,6 +1497,7 @@
       selectedStrategy = s;
       document.getElementById('pillThreshold').classList.toggle('active', s === 'threshold');
       document.getElementById('pillSma').classList.toggle('active', s === 'sma');
+      document.getElementById('pillGrid').classList.toggle('active', s === 'grid');
       document.getElementById('thresholdParams').style.display = s === 'threshold' ? '' : 'none';
       document.getElementById('smaParams').style.display = s === 'sma' ? '' : 'none';
     }
@@ -1822,6 +1823,7 @@
           <div class="pill-group">
             <button class="pill" id="pillThreshold" onclick="selectStrategy('threshold')">Threshold</button>
             <button class="pill" id="pillSma" onclick="selectStrategy('sma')">SMA</button>
+            <button class="pill" id="pillGrid" onclick="selectStrategy('grid')">Grid</button>
           </div>
         </div>
         <div id="thresholdParams">
