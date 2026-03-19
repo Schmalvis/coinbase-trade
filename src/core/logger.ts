@@ -11,13 +11,20 @@ function currentLevel(): number {
 }
 
 const logDir = path.join(config.DATA_DIR, 'logs');
-fs.mkdirSync(logDir, { recursive: true });
-const logPath = path.join(logDir, 'bot.log');
+let logPath: string | null = null;
+try {
+  fs.mkdirSync(logDir, { recursive: true });
+  logPath = path.join(logDir, 'bot.log');
+} catch {
+  console.warn(`[WARN] Cannot create log directory ${logDir} — logging to console only`);
+}
 
 function write(level: string, msg: string, meta?: unknown) {
   const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${msg}${meta ? ' ' + JSON.stringify(meta) : ''}`;
   console.log(line);
-  fs.appendFileSync(logPath, line + '\n');
+  if (logPath) {
+    try { fs.appendFileSync(logPath, line + '\n'); } catch { /* volume not writable */ }
+  }
 }
 
 export const logger = {
