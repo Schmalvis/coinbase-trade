@@ -10,7 +10,8 @@ import { botState } from './core/state.js';
 import { logger } from './core/logger.js';
 import { config, availableNetworks } from './config.js';
 import { RuntimeConfig, setRuntimeConfigSingleton } from './core/runtime-config.js';
-import { settingQueries } from './data/db.js';
+import { settingQueries, discoveredAssetQueries } from './data/db.js';
+import { ASSET_REGISTRY } from './assets/registry.js';
 import { AlchemyService } from './services/alchemy.js';
 import { CandleService } from './services/candles.js';
 import { CandleStrategy } from './strategy/candle.js';
@@ -35,6 +36,21 @@ async function main() {
   if (savedNetwork && availableNetworks.includes(savedNetwork)) {
     botState.setNetwork(savedNetwork);
   }
+
+  // Seed registry assets into discovered_assets so they get per-asset strategy controls
+  for (const asset of ASSET_REGISTRY) {
+    if (asset.symbol === 'USDC') continue;
+    const address = asset.addresses[botState.activeNetwork as keyof typeof asset.addresses]
+      ?? `native:${asset.symbol}`;
+    discoveredAssetQueries.seedRegistryAsset.run({
+      address,
+      network: botState.activeNetwork,
+      symbol: asset.symbol,
+      name: asset.symbol, // AssetDefinition has no 'name' field; symbol is the display name
+      decimals: asset.decimals,
+    });
+  }
+  logger.info('Registry assets seeded into discovered_assets');
 
   // Portfolio optimizer dependencies — created after network restore
   let candleService = new CandleService(botState.activeNetwork);
