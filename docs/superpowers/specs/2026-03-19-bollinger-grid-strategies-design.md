@@ -107,6 +107,8 @@ constructor(opts: {
 | `GRID_LOWER_BOUND` | auto | Lower price bound (auto-calculated if not set) |
 | `GRID_RECALC_HOURS` | `6` | Hours between auto-recalculation of bounds |
 
+**Precedence rule:** RuntimeConfig `GRID_UPPER_BOUND`/`GRID_LOWER_BOUND` serve as global fallback defaults only. Per-asset values from `AssetStrategyParams` take precedence. When `grid_manual_override = 1` on `discovered_assets`, those per-asset values are locked and auto-recalculation will not overwrite them.
+
 ### Grid State Persistence
 
 Grid level states survive restarts via a new DB table:
