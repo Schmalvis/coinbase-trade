@@ -440,15 +440,6 @@
     }
 
     /* ── Assets table ────────────────────────────────────────────────────── */
-    .assets-btn { position: relative; }
-    .badge {
-      position: absolute; top: -6px; right: -6px;
-      background: var(--red); color: #fff;
-      border-radius: 50%; font-size: 10px; width: 16px; height: 16px;
-      display: none; align-items: center; justify-content: center;
-      font-weight: 700;
-    }
-    .badge.visible { display: flex; }
 
     #asset-table { width: 100%; border-collapse: collapse; margin-top: 0.5rem; }
     #asset-table th, #asset-table td {
@@ -459,27 +450,18 @@
     .change-negative { color: var(--red); }
     .row-pending { background: var(--yellow-lo); }
 
-    /* ── Asset management modal ──────────────────────────────────────────── */
-    #asset-modal {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.6); z-index: 1000;
-      align-items: center; justify-content: center;
+    /* ── Inline asset config accordion ────────────────────────────────────── */
+    .asset-row-clickable { cursor: pointer; }
+    .asset-row-clickable:hover td { background: var(--bg-card-hover); }
+    .asset-config-row td { padding: 0 !important; border-top: none !important; }
+    .asset-config-panel {
+      padding: 0.75rem 1rem;
+      background: var(--bg-card);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border-hi);
     }
-    #asset-modal.open { display: flex; }
-    .modal-box {
-      background: var(--bg-card); border-radius: 16px;
-      padding: 2rem; max-width: 640px; width: 90%;
-      max-height: 80vh; overflow-y: auto;
-      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-    }
-    .asset-item { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 0.75rem; }
-    .asset-item.pending { border-style: dashed; border-color: var(--yellow); }
-    .asset-item-header {
-      padding: 0.75rem 1rem; cursor: pointer;
-      display: flex; justify-content: space-between; align-items: center;
-    }
-    .asset-item-body { display: none; padding: 1rem; border-top: 1px solid var(--border); }
-    .asset-item-body.open { display: block; }
+    .asset-config-panel .pill-group { margin-bottom: 0.5rem; }
+    .asset-config-actions { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
 
     /* ── Panels ──────────────────────────────────────────────────────────── */
     .panel {
@@ -596,10 +578,6 @@
     <div class="title">Trade Bot<span class="title-sub">/ autonomous</span></div>
     <div class="header-right">
       <div class="network-selector" id="networkSelector"></div>
-      <button class="btn-theme assets-btn" id="assets-btn" onclick="openAssetModal()">
-        ASSETS
-        <span id="assets-badge" class="badge">0</span>
-      </button>
       <button class="btn-theme" id="settingsBtn" onclick="openSettings()">Settings</button>
       <button class="btn-theme" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">--</button>
       <div id="lastUpdate">--</div>
@@ -940,7 +918,10 @@
       var el = document.getElementById('assetSelector');
       if (!el) return;
       el.innerHTML = '';
+      var seenPills = {};
       assetList.forEach(function(a) {
+        if (seenPills[a.symbol]) return;
+        seenPills[a.symbol] = true;
         var btn = document.createElement('button');
         btn.className = 'pill' + (a.symbol === activeChartAsset ? ' active' : '');
         btn.style.cssText = 'font-size:0.6rem;padding:0.15rem 0.45rem';
@@ -954,7 +935,9 @@
       var grid = document.getElementById('holdingsGrid');
       var title = document.getElementById('holdingsTitle');
       if (!grid || !title) return;
-      var extras = assetList.filter(function(a){ return a.symbol !== 'ETH' && a.symbol !== 'USDC' && a.balance != null; });
+      var allExtras = assetList.filter(function(a){ return a.symbol !== 'ETH' && a.symbol !== 'USDC' && a.balance != null; });
+      var seenH = {};
+      var extras = allExtras.filter(function(a) { if (seenH[a.symbol]) return false; seenH[a.symbol] = true; return true; });
       if (!extras.length) { grid.style.display = 'none'; title.style.display = 'none'; return; }
       title.style.display = '';
       grid.style.display = '';
@@ -1582,20 +1565,35 @@
           else closeModal(id);
         }
       });
-      if (document.getElementById('asset-modal').classList.contains('open')) closeAssetModal();
     });
 
     /* ── Asset table ────────────────────────────────────────────────────── */
+    var expandedAssetAddress = null;
+
     function renderAssets() {
       var tbody = document.getElementById('asset-table-body');
       if (!tbody) return;
       while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
-      var totalValue = 0;
-      assetList.forEach(function(a) { totalValue += (a.balance || 0) * (a.price || 0); });
 
-      assetList.forEach(function(a) {
+      // Deduplicate by symbol (first occurrence wins)
+      var seen = {};
+      var dedupedAssets = assetList.filter(function(a) {
+        if (seen[a.symbol]) return false;
+        seen[a.symbol] = true;
+        return true;
+      });
+
+      var totalValue = 0;
+      dedupedAssets.forEach(function(a) { totalValue += (a.balance || 0) * (a.price || 0); });
+
+      dedupedAssets.forEach(function(a) {
         var row = document.createElement('tr');
         if (a.status === 'pending') row.className = 'row-pending';
+        var isUsdc = a.symbol === 'USDC';
+        if (!isUsdc) {
+          row.className = (row.className ? row.className + ' ' : '') + 'asset-row-clickable';
+          row.onclick = function() { toggleAssetAccordion(a, tbody, row); };
+        }
         var value = (a.balance || 0) * (a.price || 0);
         var weightPct = totalValue > 0 ? (value / totalValue * 100) : 0;
         var ch = a.change24h;
@@ -1623,138 +1621,158 @@
         var td8 = document.createElement('td');
         if (a.status === 'active') {
           td8.style.fontSize = '0.72rem';
+          var sType = a.strategyConfig ? a.strategyConfig.type || '' : '';
           var dot8 = document.createElement('span'); dot8.style.color = 'var(--green)'; dot8.textContent = '\u25CF'; td8.appendChild(dot8);
-          td8.appendChild(document.createTextNode(' ' + (a.strategyConfig ? a.strategyConfig.type || '' : '')));
-          if (a.strategyConfig && a.strategyConfig.type === 'grid') {
+          td8.appendChild(document.createTextNode(' ' + sType));
+          if (sType === 'grid') {
             var gridBadge = document.createElement('span');
-            gridBadge.style.cssText = 'font-size:0.6rem;padding:0.1rem 0.3rem;border-radius:3px;background:var(--blue-lo,rgba(96,165,250,0.1));color:var(--blue,#60a5fa);margin-left:0.3rem;font-weight:600';
+            gridBadge.style.cssText = 'font-size:0.6rem;padding:0.1rem 0.3rem;border-radius:3px;background:var(--blue-lo);color:var(--blue);margin-left:0.3rem;font-weight:600';
             gridBadge.textContent = 'GRID';
             td8.appendChild(gridBadge);
           }
         }
         else if (a.status === 'pending') { td8.textContent = 'new token'; td8.style.color = 'var(--yellow)'; td8.style.fontSize = '0.72rem'; }
         row.appendChild(td8);
-        // Actions
+        // Actions (for pending only; active assets use accordion)
         var td9 = document.createElement('td');
         if (a.status === 'pending') {
-          var eb = document.createElement('button'); eb.textContent = 'ENABLE'; eb.className = 'btn-resume'; eb.style.cssText = 'font-size:0.6rem;padding:0.2rem 0.5rem;cursor:pointer;border-radius:4px;border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600'; eb.onclick = function(){ enableAsset(a.address); }; td9.appendChild(eb);
+          var eb = document.createElement('button'); eb.textContent = 'ENABLE'; eb.style.cssText = 'font-size:0.6rem;padding:0.2rem 0.5rem;cursor:pointer;border-radius:4px;border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600'; eb.onclick = function(e){ e.stopPropagation(); enableAsset(a.address); }; td9.appendChild(eb);
           td9.appendChild(document.createTextNode(' '));
-          var db = document.createElement('button'); db.textContent = 'DISMISS'; db.className = 'btn-sell'; db.style.cssText = 'font-size:0.6rem;padding:0.2rem 0.5rem;cursor:pointer;border-radius:4px;border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600'; db.onclick = function(){ dismissAsset(a.address); }; td9.appendChild(db);
+          var db = document.createElement('button'); db.textContent = 'DISMISS'; db.style.cssText = 'font-size:0.6rem;padding:0.2rem 0.5rem;cursor:pointer;border-radius:4px;border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600'; db.onclick = function(e){ e.stopPropagation(); dismissAsset(a.address); }; td9.appendChild(db);
         }
         row.appendChild(td9);
         tbody.appendChild(row);
-      });
-    }
 
-    function updateBadge(status) {
-      var count = status.pendingTokenCount || 0;
-      var badge = document.getElementById('assets-badge');
-      if (!badge) return;
-      badge.textContent = String(count);
-      badge.classList.toggle('visible', count > 0);
-    }
-
-    async function openAssetModal(focusAddress) { document.getElementById('asset-modal').classList.add('open'); await renderModalList(focusAddress); }
-    function closeAssetModal() { document.getElementById('asset-modal').classList.remove('open'); }
-
-    async function renderModalList(focusAddress) {
-      var list = document.getElementById('asset-modal-list');
-      while (list.firstChild) list.removeChild(list.firstChild);
-      if (!assetList.length) { var p = document.createElement('p'); p.textContent = 'No assets. Set ALCHEMY_API_KEY to enable discovery.'; list.appendChild(p); return; }
-      assetList.forEach(function(a) {
-        var item = document.createElement('div');
-        item.className = 'asset-item' + (a.status === 'pending' ? ' pending' : '');
-        item.id = 'modal-item-' + a.address;
-        var header = document.createElement('div'); header.className = 'asset-item-header';
-        var titleSpan = document.createElement('span'); titleSpan.textContent = a.symbol + ' -- ' + a.name; header.appendChild(titleSpan);
-        var statusSpan = document.createElement('span');
-        statusSpan.textContent = a.status === 'pending' ? 'pending' : 'active';
-        statusSpan.style.color = a.status === 'pending' ? 'var(--yellow)' : 'var(--green)';
-        statusSpan.style.fontSize = '0.72rem'; statusSpan.style.fontWeight = '600';
-        header.appendChild(statusSpan);
-        item.appendChild(header);
-        var body = document.createElement('div');
-        body.className = 'asset-item-body' + (focusAddress === a.address ? ' open' : '');
-        body.id = 'modal-body-' + a.address;
-        buildConfigForm(body, a);
-        if (a.status === 'pending') {
-          var eb = document.createElement('button'); eb.textContent = 'ENABLE'; eb.style.cssText = 'border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; eb.onclick = function(){ enableAsset(a.address); }; body.appendChild(eb);
-          body.appendChild(document.createTextNode(' '));
-          var db = document.createElement('button'); db.textContent = 'DISMISS'; db.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; db.onclick = function(){ dismissAsset(a.address); }; body.appendChild(db);
-        } else {
-          var sb = document.createElement('button'); sb.textContent = 'SAVE'; sb.style.cssText = 'border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; sb.onclick = function(){ saveAssetConfig(a.address); }; body.appendChild(sb);
-          body.appendChild(document.createTextNode(' '));
-          var disb = document.createElement('button'); disb.textContent = 'DISABLE STRATEGY'; disb.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:4px;padding:0.3rem 0.8rem'; disb.onclick = function(){ dismissAsset(a.address); }; body.appendChild(disb);
+        // If this asset is expanded, re-render the accordion
+        if (expandedAssetAddress === a.address) {
+          var cfgRow = buildAccordionRow(a);
+          tbody.appendChild(cfgRow);
         }
-        header.onclick = function(){ toggleModalItem(a.address); };
-        item.appendChild(body);
-        list.appendChild(item);
       });
     }
 
-    function buildConfigForm(container, asset) {
+    function toggleAssetAccordion(asset, tbody, clickedRow) {
+      if (expandedAssetAddress === asset.address) {
+        // Collapse
+        expandedAssetAddress = null;
+        var existing = document.getElementById('asset-accordion-' + asset.address);
+        if (existing) existing.parentNode.removeChild(existing);
+        return;
+      }
+      // Collapse any previously expanded
+      if (expandedAssetAddress) {
+        var prev = document.getElementById('asset-accordion-' + expandedAssetAddress);
+        if (prev) prev.parentNode.removeChild(prev);
+      }
+      expandedAssetAddress = asset.address;
+      var cfgRow = buildAccordionRow(asset);
+      // Insert after the clicked row
+      if (clickedRow.nextSibling) {
+        tbody.insertBefore(cfgRow, clickedRow.nextSibling);
+      } else {
+        tbody.appendChild(cfgRow);
+      }
+    }
+
+    function buildAccordionRow(asset) {
+      var cfgRow = document.createElement('tr');
+      cfgRow.className = 'asset-config-row';
+      cfgRow.id = 'asset-accordion-' + asset.address;
+      var cfgTd = document.createElement('td');
+      cfgTd.colSpan = 9;
+      var panel = document.createElement('div');
+      panel.className = 'asset-config-panel';
+      panel.id = 'inline-cfg-' + asset.address;
+      buildInlineConfigForm(panel, asset);
+      // Action buttons
+      var actions = document.createElement('div');
+      actions.className = 'asset-config-actions';
+      if (asset.status === 'pending') {
+        var eb = document.createElement('button'); eb.textContent = 'ENABLE'; eb.style.cssText = 'border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600;cursor:pointer;border-radius:6px;padding:0.3rem 0.8rem'; eb.onclick = function(e){ e.stopPropagation(); enableAsset(asset.address); }; actions.appendChild(eb);
+        var db = document.createElement('button'); db.textContent = 'DISMISS'; db.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:6px;padding:0.3rem 0.8rem'; db.onclick = function(e){ e.stopPropagation(); dismissAsset(asset.address); }; actions.appendChild(db);
+      } else {
+        var sb = document.createElement('button'); sb.textContent = 'SAVE'; sb.style.cssText = 'border:1px solid var(--green);background:transparent;color:var(--green);font-weight:600;cursor:pointer;border-radius:6px;padding:0.3rem 0.8rem'; sb.onclick = function(e){ e.stopPropagation(); saveAssetConfig(asset.address); }; actions.appendChild(sb);
+        var disb = document.createElement('button'); disb.textContent = 'DISABLE STRATEGY'; disb.style.cssText = 'border:1px solid var(--red);background:transparent;color:var(--red);font-weight:600;cursor:pointer;border-radius:6px;padding:0.3rem 0.8rem'; disb.onclick = function(e){ e.stopPropagation(); dismissAsset(asset.address); }; actions.appendChild(disb);
+      }
+      panel.appendChild(actions);
+      cfgTd.appendChild(panel);
+      cfgRow.appendChild(cfgTd);
+      return cfgRow;
+    }
+
+    function buildInlineConfigForm(container, asset) {
       var cfg = asset.strategyConfig || {};
+      var addr = asset.address;
+      // Strategy pills
       var pills = document.createElement('div'); pills.className = 'pill-group'; pills.style.marginBottom = '0.5rem';
+      pills.id = 'inline-pills-' + addr;
       ['threshold', 'sma', 'grid'].forEach(function(type) {
         var pill = document.createElement('button');
         pill.className = 'pill' + (cfg.type === type ? ' active' : '');
         pill.textContent = type.toUpperCase(); pill.dataset.strategy = type;
+        pill.id = 'cfg-' + addr + '-pill-' + type;
         pill.onclick = function(e) {
-          e.preventDefault();
+          e.preventDefault(); e.stopPropagation();
           pills.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
           pill.classList.add('active');
-          var isGrid = type === 'grid';
-          var gf = document.getElementById('grid-fields-' + asset.address);
-          if (gf) gf.style.display = isGrid ? '' : 'none';
+          var gf = document.getElementById('inline-grid-fields-' + addr);
+          if (gf) gf.style.display = type === 'grid' ? '' : 'none';
         };
-        pill.id = 'pill-' + asset.address + '-' + type;
         pills.appendChild(pill);
       });
       container.appendChild(pills);
-      container.dataset.address = asset.address;
+      // Config fields
       var fields = [
         { id: 'drop', label: 'Buy on drop %', val: cfg.dropPct != null ? cfg.dropPct : 3, step: '0.1', min: '0.1' },
         { id: 'rise', label: 'Sell on rise %', val: cfg.risePct != null ? cfg.risePct : 4, step: '0.1', min: '0.1' },
         { id: 'smaShort', label: 'SMA short window', val: cfg.smaShort != null ? cfg.smaShort : 5, step: '1', min: '2' },
         { id: 'smaLong', label: 'SMA long window', val: cfg.smaLong != null ? cfg.smaLong : 20, step: '1', min: '3' }
       ];
+      var fieldsWrap = document.createElement('div');
+      fieldsWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.5rem';
       fields.forEach(function(f) {
-        var row = document.createElement('div'); row.style.cssText = 'margin:0.3rem 0';
-        var lbl = document.createElement('label'); lbl.textContent = f.label + ' '; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary)';
-        var inp = document.createElement('input'); inp.type = 'number'; inp.id = 'cfg-' + asset.address + '-' + f.id;
+        var row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:0.3rem';
+        var lbl = document.createElement('label'); lbl.textContent = f.label; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary);white-space:nowrap';
+        var inp = document.createElement('input'); inp.type = 'number'; inp.id = 'cfg-' + addr + '-' + f.id;
         inp.value = String(f.val); inp.step = f.step; inp.min = f.min;
-        inp.style.cssText = 'width:70px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
-        lbl.appendChild(inp); row.appendChild(lbl); container.appendChild(row);
+        inp.style.cssText = 'width:60px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
+        inp.onclick = function(e){ e.stopPropagation(); };
+        row.appendChild(lbl); row.appendChild(inp); fieldsWrap.appendChild(row);
       });
+      container.appendChild(fieldsWrap);
       // Grid-specific fields
       var gridFields = document.createElement('div');
-      gridFields.id = 'grid-fields-' + asset.address;
+      gridFields.id = 'inline-grid-fields-' + addr;
       gridFields.style.display = cfg.type === 'grid' ? '' : 'none';
+      gridFields.style.cssText += ';display:' + (cfg.type === 'grid' ? 'flex' : 'none') + ';flex-wrap:wrap;gap:0.5rem;margin-top:0.4rem';
       var gridFieldDefs = [
-        { id: 'grid-levels-' + asset.address, label: 'Grid Levels', val: asset.grid_levels != null ? asset.grid_levels : 10, step: '1', min: '3', max: '50', placeholder: '' },
-        { id: 'grid-upper-' + asset.address, label: 'Upper Bound (empty = auto)', val: asset.grid_upper_bound != null ? asset.grid_upper_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' },
-        { id: 'grid-lower-' + asset.address, label: 'Lower Bound (empty = auto)', val: asset.grid_lower_bound != null ? asset.grid_lower_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' }
+        { id: 'grid-levels-' + addr, label: 'Grid Levels', val: asset.grid_levels != null ? asset.grid_levels : 10, step: '1', min: '3', max: '50', placeholder: '' },
+        { id: 'grid-upper-' + addr, label: 'Upper Bound', val: asset.grid_upper_bound != null ? asset.grid_upper_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' },
+        { id: 'grid-lower-' + addr, label: 'Lower Bound', val: asset.grid_lower_bound != null ? asset.grid_lower_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' }
       ];
       gridFieldDefs.forEach(function(f) {
-        var row = document.createElement('div'); row.style.cssText = 'margin:0.3rem 0';
-        var lbl = document.createElement('label'); lbl.textContent = f.label + ' '; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary)';
+        var row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:0.3rem';
+        var lbl = document.createElement('label'); lbl.textContent = f.label; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary);white-space:nowrap';
         var inp = document.createElement('input'); inp.type = 'number'; inp.id = f.id;
         if (f.val !== '') inp.value = String(f.val);
         if (f.step) inp.step = f.step;
         if (f.min) inp.min = f.min;
         if (f.max) inp.max = f.max;
         if (f.placeholder) inp.placeholder = f.placeholder;
-        inp.style.cssText = 'width:90px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
-        lbl.appendChild(inp); row.appendChild(lbl); gridFields.appendChild(row);
+        inp.style.cssText = 'width:80px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
+        inp.onclick = function(e){ e.stopPropagation(); };
+        row.appendChild(lbl); row.appendChild(inp); gridFields.appendChild(row);
       });
       container.appendChild(gridFields);
     }
 
-    function toggleModalItem(address) { var body = document.getElementById('modal-body-' + address); if (body) body.classList.toggle('open'); }
+    function updateBadge(status) {
+      // Badge removed — asset management is inline now
+    }
 
     function readConfigForm(address) {
       var strategyType = 'threshold';
-      var active = document.querySelector('#modal-item-' + address + ' .pill.active');
+      var active = document.querySelector('#inline-pills-' + address + ' .pill.active');
       if (active && active.dataset && active.dataset.strategy) strategyType = active.dataset.strategy;
       var body = {
         strategyType: strategyType,
@@ -1777,18 +1795,18 @@
     async function enableAsset(address) {
       var params = readConfigForm(address);
       var res = await postJSON('/api/assets/' + address + '/enable', params);
-      if (res.ok) { await loadAssets(); closeAssetModal(); } else alert('Error: ' + res.error);
+      if (res.ok) { expandedAssetAddress = null; await loadAssets(); } else alert('Error: ' + res.error);
     }
 
     async function dismissAsset(address) {
       var res = await postJSON('/api/assets/' + address + '/dismiss', {});
-      if (res.ok) { await loadAssets(); closeAssetModal(); } else alert('Error: ' + res.error);
+      if (res.ok) { expandedAssetAddress = null; await loadAssets(); } else alert('Error: ' + res.error);
     }
 
     async function saveAssetConfig(address) {
       var params = readConfigForm(address);
       var res = await fetch('/api/assets/' + address + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) }).then(function(r){ return r.json(); });
-      if (res.ok) { await loadAssets(); closeAssetModal(); } else alert('Error: ' + res.error);
+      if (res.ok) { expandedAssetAddress = null; await loadAssets(); } else alert('Error: ' + res.error);
     }
 
     async function postJSON(url, body) {
@@ -1950,16 +1968,6 @@
   </div>
 </div>
 
-<!-- Asset Management Modal -->
-<div id="asset-modal" onclick="if(event.target===this)closeAssetModal()">
-  <div class="modal-box">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem">
-      <h3 style="margin:0;font-size:0.85rem;font-weight:700">Asset Management</h3>
-      <button onclick="closeAssetModal()" style="font-size:0.7rem">Close</button>
-    </div>
-    <div id="asset-modal-list"></div>
-  </div>
-</div>
 
 </body>
 </html>
