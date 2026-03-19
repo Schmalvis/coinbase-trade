@@ -64,10 +64,71 @@ function queueForDigest(message: string): void {
 
 function flushDigest(): string | null {
   if (digestQueue.length === 0) return null;
-  const summary = `📋 *Digest* (${digestQueue.length} events)\n\n` +
-    digestQueue.slice(-20).join('\n---\n'); // show last 20
+  const eventCount = digestQueue.length;
   digestQueue.length = 0;
-  return summary;
+
+  // Build natural language summary from DB data
+  const network = botState.activeNetwork;
+  const now = new Date();
+  const todayPnl = dailyPnlQueries.getTodayPnl.get(network);
+  const recentRotations = rotationQueries.getRecentRotations.all(network, 50) as Array<{
+    sell_symbol: string; buy_symbol: string; status: string;
+    actual_gain_pct: number | null; timestamp: string;
+  }>;
+
+  // Filter to today's rotations
+  const todayStr = now.toISOString().slice(0, 10);
+  const todayRotations = recentRotations.filter(r => r.timestamp?.startsWith(todayStr));
+  const executed = todayRotations.filter(r => r.status === 'executed');
+  const failed = todayRotations.filter(r => r.status === 'failed' || r.status === 'vetoed');
+
+  // Summarise buys and sells
+  const bought = new Map<string, number>();
+  const sold = new Map<string, number>();
+  for (const r of executed) {
+    sold.set(r.sell_symbol, (sold.get(r.sell_symbol) ?? 0) + 1);
+    bought.set(r.buy_symbol, (bought.get(r.buy_symbol) ?? 0) + 1);
+  }
+  const boughtStr = [...bought.entries()].map(([s, n]) => `${n}x ${s}`).join(', ') || 'none';
+  const soldStr = [...sold.entries()].map(([s, n]) => `${n}x ${s}`).join(', ') || 'none';
+
+  // Portfolio value and P&L
+  const portfolioUsd = todayPnl?.current_usd ?? botState.lastBalance * botState.lastPrice;
+  const highWater = todayPnl?.high_water ?? portfolioUsd;
+  const dayChange = portfolioUsd - highWater;
+  const dayChangePct = highWater > 0 ? (dayChange / highWater) * 100 : 0;
+  const realizedPnl = todayPnl?.realized_pnl ?? 0;
+
+  const timeStr = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')} UTC`;
+
+  let lines: string[] = [];
+  lines.push(`📋 *Trading Summary*`);
+  lines.push('');
+
+  if (executed.length === 0 && failed.length === 0) {
+    lines.push(`No trades were executed since the last digest.`);
+  } else {
+    const tradeWord = executed.length === 1 ? 'trade was' : 'trades were';
+    lines.push(`${executed.length} ${tradeWord} executed today, purchasing ${boughtStr} and selling ${soldStr}.`);
+    if (failed.length > 0) {
+      lines.push(`${failed.length} rotation${failed.length > 1 ? 's were' : ' was'} vetoed or failed.`);
+    }
+  }
+
+  lines.push('');
+  const arrow = dayChange >= 0 ? '📈' : '📉';
+  const sign = dayChange >= 0 ? '+' : '';
+  lines.push(`${arrow} Portfolio is at *$${portfolioUsd.toFixed(2)}* as of ${timeStr}.`);
+  lines.push(`Today's P\\&L: *${sign}$${dayChange.toFixed(2)}* (${sign}${dayChangePct.toFixed(1)}%)`);
+  if (realizedPnl !== 0) {
+    const rSign = realizedPnl >= 0 ? '+' : '';
+    lines.push(`Realized from trades: *${rSign}$${realizedPnl.toFixed(2)}*`);
+  }
+
+  lines.push('');
+  lines.push(`_${eventCount} event${eventCount > 1 ? 's' : ''} since last digest_`);
+
+  return lines.join('\n');
 }
 
 export function startTelegramBot(
