@@ -247,6 +247,11 @@ export const discoveredAssetQueries = {
     VALUES (@address, @network, @symbol, @name, @decimals)
   `) as Statement<{ address: string; network: string; symbol: string; name: string; decimals: number }>,
 
+  seedRegistryAsset: db.prepare(`
+    INSERT OR IGNORE INTO discovered_assets (address, network, symbol, name, decimals, status)
+    VALUES (@address, @network, @symbol, @name, @decimals, 'active')
+  `) as Statement<{ address: string; network: string; symbol: string; name: string; decimals: number }>,
+
   getDiscoveredAssets: db.prepare(`
     SELECT * FROM discovered_assets WHERE network = ?
   `) as Statement<[string], DiscoveredAssetRow>,
