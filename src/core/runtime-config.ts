@@ -12,7 +12,8 @@ export type ConfigKey =
   | 'ROTATION_SELL_THRESHOLD' | 'ROTATION_BUY_THRESHOLD' | 'MIN_ROTATION_SCORE_DELTA'
   | 'RISK_OFF_THRESHOLD' | 'RISK_ON_THRESHOLD' | 'DEFAULT_FEE_ESTIMATE_PCT'
   | 'DASHBOARD_THEME'
-  | 'TELEGRAM_MODE' | 'TELEGRAM_DIGEST_TIMES' | 'TELEGRAM_QUIET_START' | 'TELEGRAM_QUIET_END';
+  | 'TELEGRAM_MODE' | 'TELEGRAM_DIGEST_TIMES' | 'TELEGRAM_QUIET_START' | 'TELEGRAM_QUIET_END'
+  | 'BB_PERIOD' | 'BB_STD_DEV' | 'GRID_LEVELS' | 'GRID_AMOUNT_PCT' | 'GRID_UPPER_BOUND' | 'GRID_LOWER_BOUND' | 'GRID_RECALC_HOURS';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -31,6 +32,7 @@ const ALL_KEYS = new Set<ConfigKey>([
   'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
   'DASHBOARD_THEME',
   'TELEGRAM_MODE', 'TELEGRAM_DIGEST_TIMES', 'TELEGRAM_QUIET_START', 'TELEGRAM_QUIET_END',
+  'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
@@ -45,7 +47,7 @@ const isInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v);
 const isNum = (v: unknown) => typeof v === 'number' && !isNaN(v);
 
 const VALIDATORS: Record<ConfigKey, Validator> = {
-  STRATEGY:               v => ['threshold', 'sma'].includes(String(v)) ? null : 'must be "threshold" or "sma"',
+  STRATEGY:               v => ['threshold', 'sma', 'grid'].includes(String(v)) ? null : 'must be "threshold", "sma", or "grid"',
   TRADE_INTERVAL_SECONDS: v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   POLL_INTERVAL_SECONDS:  v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   PRICE_DROP_THRESHOLD_PCT: v => isNum(v) && (v as number) >= 0.1 && (v as number) <= 50 ? null : 'must be 0.1–50',
@@ -82,6 +84,13 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   TELEGRAM_DIGEST_TIMES:    v => typeof v === 'string' && /^(\d{2}:\d{2})(,\d{2}:\d{2})*$/.test(v) ? null : 'must be comma-separated HH:MM times (e.g. "08:00,20:00")',
   TELEGRAM_QUIET_START:     v => !v || (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) ? null : 'must be HH:MM or empty',
   TELEGRAM_QUIET_END:       v => !v || (typeof v === 'string' && /^\d{2}:\d{2}$/.test(v)) ? null : 'must be HH:MM or empty',
+  BB_PERIOD:         v => isInt(v) && (v as number) >= 5 && (v as number) <= 100 ? null : 'must be 5-100',
+  BB_STD_DEV:        v => isNum(v) && (v as number) >= 0.5 && (v as number) <= 5 ? null : 'must be 0.5-5',
+  GRID_LEVELS:       v => isInt(v) && (v as number) >= 3 && (v as number) <= 50 ? null : 'must be 3-50',
+  GRID_AMOUNT_PCT:   v => isNum(v) && (v as number) >= 1 && (v as number) <= 25 ? null : 'must be 1-25',
+  GRID_UPPER_BOUND:  v => !v || (isNum(v) && (v as number) > 0) ? null : 'must be a positive number or empty',
+  GRID_LOWER_BOUND:  v => !v || (isNum(v) && (v as number) > 0) ? null : 'must be a positive number or empty',
+  GRID_RECALC_HOURS: v => isNum(v) && (v as number) >= 1 && (v as number) <= 48 ? null : 'must be 1-48',
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)
@@ -106,6 +115,7 @@ function coerce(key: ConfigKey, value: unknown): ConfigValue {
     'MAX_CASH_PCT', 'OPTIMIZER_INTERVAL_SECONDS',
     'ROTATION_SELL_THRESHOLD', 'ROTATION_BUY_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
     'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
+    'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
   ];
   if (numericKeys.includes(key) && typeof value !== 'number') {
     const n = Number(value);
