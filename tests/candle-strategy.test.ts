@@ -164,6 +164,31 @@ describe('CandleStrategy.evaluate', () => {
     expect(result.signal).toBe('sell');
   });
 
+  it('includes BB in reason when price is below lower Bollinger Band', () => {
+    const flat = Array.from({ length: 30 }, () => 200);
+    const drop = Array.from({ length: 10 }, (_, i) => 200 - (i + 1) * 8);
+    const closes = [...flat, ...drop];
+    const candles = closes.map((close, i) => ({
+      open: close, high: close + 1,
+      low: i === closes.length - 1 ? close - 10 : close - 1,
+      close, volume: 100,
+    }));
+    const result = strategy.evaluate(candles);
+    expect(result.reason).toContain('BB');
+  });
+
+  it('includes BB in reason when price is above upper Bollinger Band', () => {
+    const flat = Array.from({ length: 30 }, () => 100);
+    const rise = Array.from({ length: 10 }, (_, i) => 100 + (i + 1) * 8);
+    const closes = [...flat, ...rise];
+    const candles = closes.map((close, i) => ({
+      open: close, high: i === closes.length - 1 ? close + 10 : close + 1,
+      low: close - 1, close, volume: 100,
+    }));
+    const result = strategy.evaluate(candles);
+    expect(result.reason).toContain('BB');
+  });
+
   it('produces higher strength when volume is high on last candle', () => {
     // Use same flat-then-drop pattern that produces a buy signal
     const flat = Array.from({ length: 20 }, () => 200);

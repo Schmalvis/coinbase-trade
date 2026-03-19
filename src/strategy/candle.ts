@@ -217,6 +217,24 @@ export class CandleStrategy {
     const volBonus = volRatio > 1.5 ? 10 : 0;
     if (volBonus) reasons.push(`High volume (${volRatio.toFixed(1)}x avg)`);
 
+    // Bollinger Bands
+    const bb = computeBollingerBands(closes);
+    if (bb) {
+      const lastClose = closes[closes.length - 1];
+      const squeezeMult = bb.squeeze ? 1.5 : 1.0;
+      if (lastClose < bb.lower) {
+        const distance = (bb.lower - lastClose) / (bb.upper - bb.lower || 1);
+        const pts = Math.round((15 + Math.min(distance, 1) * 10) * squeezeMult);
+        buyScore += pts;
+        reasons.push(`BB below lower (${pts}pts${bb.squeeze ? ', squeeze' : ''})`);
+      } else if (lastClose > bb.upper) {
+        const distance = (lastClose - bb.upper) / (bb.upper - bb.lower || 1);
+        const pts = Math.round((15 + Math.min(distance, 1) * 10) * squeezeMult);
+        sellScore += pts;
+        reasons.push(`BB above upper (${pts}pts${bb.squeeze ? ', squeeze' : ''})`);
+      }
+    }
+
     // --- Decision ---
     const net = buyScore - sellScore;
 
