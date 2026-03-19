@@ -1,7 +1,7 @@
 # Bollinger Bands + Grid Trading Strategies — Design Spec
 
 **Date:** 2026-03-19
-**Status:** Approved
+**Status:** Approved (revised after spec review)
 
 ## Goal
 
@@ -27,28 +27,27 @@ Adds Bollinger Band signals to the CandleStrategy scoring system. Bollinger Band
   - `BB_PERIOD` (default: 20) — lookback period for the moving average
   - `BB_STD_DEV` (default: 2.0) — number of standard deviations for band width
 
-### Signal Contribution
+### Signal Contribution (raw additive scoring)
 
-| Condition | Score Contribution |
-|---|---|
-| Price below lower band | +15 to +25 (scales with distance below band) |
-| Price above upper band | -15 to -25 (scales with distance above band) |
-| Price near middle band | 0 (neutral) |
-| Bollinger Squeeze (bands narrowing significantly) | Amplifies next directional signal by 1.5x |
+The existing CandleStrategy uses raw additive `buyScore`/`sellScore` accumulation (e.g., RSI oversold = +40, MACD crossover = +25). Bollinger Bands follow the same pattern — **no refactoring of the scoring model is needed.**
 
-### Scoring Weights (updated)
-
-| Indicator | Weight |
-|---|---|
-| RSI | 0.25 |
-| MACD | 0.25 |
-| Volume | 0.15 |
-| Candle Patterns | 0.15 |
-| Bollinger Bands | 0.20 |
+| Condition | buyScore | sellScore |
+|---|---|---|
+| Price below lower band | +15 to +25 (scales with distance) | 0 |
+| Price above upper band | 0 | +15 to +25 (scales with distance) |
+| Price near middle band | 0 | 0 |
+| Bollinger Squeeze active | 1.5x multiplier on all BB scores this tick | same |
 
 ### Squeeze Detection
 
-When the band width (upper - lower) / middle drops below the 20-period average band width by more than 50%, a squeeze is flagged. The next non-neutral signal from any indicator gets a 1.5x multiplier, as breakouts from squeezes tend to be strong moves.
+Squeeze is detected **within the same `evaluate()` call** — it is stateless and requires no persistence. The calculation:
+
+1. Compute current band width: `(upper - lower) / middle`
+2. Compute average band width over the last `BB_PERIOD` candles
+3. If current width < 50% of average width → squeeze is active
+4. When squeeze is active, the Bollinger contribution scores (±15 to ±25) are multiplied by 1.5x before adding to `buyScore`/`sellScore`
+
+This is a per-tick calculation, not a cross-tick flag. If the squeeze condition is true this tick, the multiplier applies this tick. No state carried between `evaluate()` calls.
 
 ---
 
@@ -61,6 +60,24 @@ A standalone strategy that profits from sideways/ranging markets by repeatedly b
 ### New File: `src/strategy/grid.ts`
 
 Implements the `Strategy` interface from `src/strategy/base.ts`.
+
+**Candle data access:** GridStrategy receives candle data via **constructor injection** — the `CandleService` instance (or a query function) is passed at construction time in `tickAsset`. The `evaluate(snapshots)` method uses `snapshots` for the current price (mapped to `eth_price` per the existing asset loop pattern) and the injected candle accessor for auto-calculating bounds. This mirrors how CandleStrategy accesses candle data in the optimizer.
+
+**Constructor signature:**
+```typescript
+constructor(opts: {
+  symbol: string;
+  network: string;
+  gridLevels?: number;
+  amountPct?: number;
+  upperBound?: number;
+  lowerBound?: number;
+  recalcHours?: number;
+  getCandleHigh24h: () => number | null;
+  getCandleLow24h: () => number | null;
+  feeEstimatePct: number;
+})
+```
 
 ### How the Grid Works
 
@@ -78,7 +95,7 @@ Implements the `Strategy` interface from `src/strategy/base.ts`.
 - `lowerBound` = 24hr candle low - 2% buffer
 - `gridLevels` = range / minimum profitable spread (must exceed fee estimate from `DEFAULT_FEE_ESTIMATE_PCT`)
 - Recalculates every `GRID_RECALC_HOURS` (default: 6) from fresh candle data
-- Never overrides manual values — `grid_manual_override` flag per asset in DB
+- Never overrides manual values — `grid_manual_override` column on `discovered_assets` table (INTEGER DEFAULT 0, set to 1 when user manually configures bounds via dashboard)
 
 ### Configuration (DB-persisted via RuntimeConfig)
 
@@ -111,6 +128,8 @@ CREATE TABLE grid_state (
 - `getGridLevels` — get all levels for a symbol/network
 - `clearGridLevels` — clear all levels for a symbol/network (used on recalculation)
 
+**Recalculation atomicity:** Since both `clearGridLevels` and `upsertGridLevel` use synchronous `better-sqlite3` calls, and Node.js is single-threaded, recalculation is naturally atomic with respect to `tickAsset`. The recalc runs inside `evaluate()` at the start of a tick — it clears and rebuilds levels before checking crossings, all within the same synchronous call stack. No concurrent tick can interleave.
+
 ---
 
 ## 3. Integration Points
@@ -121,6 +140,9 @@ CREATE TABLE grid_state (
 - Uses the existing `startAssetLoop` / `tickAsset` pattern
 - `GridStrategy.evaluate()` receives price snapshots and returns `{signal, reason}` like all other strategies
 - Strategy instantiation in `tickAsset` extended to handle `'grid'` type
+- **Type annotation update:** `_assetStrategies: Map<string, ThresholdStrategy | SMAStrategy>` must be widened to `Map<string, ThresholdStrategy | SMAStrategy | GridStrategy>`
+- **`AssetStrategyParams.strategyType`** must be widened from `'threshold' | 'sma'` to `'threshold' | 'sma' | 'grid'`
+- Grid-specific params added to `AssetStrategyParams`: `gridLevels?: number`, `gridAmountPct?: number`, `gridUpperBound?: number`, `gridLowerBound?: number`, `gridRecalcHours?: number`
 
 ### Optimizer (`src/trading/optimizer.ts`)
 
