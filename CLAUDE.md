@@ -22,11 +22,13 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 5 (new strategies) complete** — Bollinger Bands indicator added to CandleStrategy scoring (squeeze detection, ±25pts buy/sell). Grid Trading strategy implemented as new per-asset strategy type with auto-calculated bounds from 24hr candle data, manual override, and persistent grid state. Dashboard updated with grid config fields and GRID status badge. Grid-strategy assets excluded from optimizer rotation.
 
+**Phase 5.5 (unified strategy control) complete** — Registry assets (ETH, CBBTC, CBETH) seeded into `discovered_assets` on boot. All tradeable assets now have identical per-asset strategy controls (threshold/SMA/grid) via the Asset Management modal. The separate global ETH strategy loop has been removed — all assets use the same `startAssetLoop` path. USDC remains the base currency with no strategy.
+
 **Next steps:**
 - Deploy and verify optimizer in DRY_RUN mode — watch scores and rotation decisions in logs/dashboard before enabling real trades
 - Tune optimizer thresholds via dashboard Settings (ROTATION_SELL_THRESHOLD, ROTATION_BUY_THRESHOLD, MIN_ROTATION_SCORE_DELTA)
 - Add assets to watchlist via Telegram (/watch SYMBOL ADDRESS) or dashboard
-- Try Grid Trading on a discovered asset: set strategy to 'grid' in Asset Management, configure or auto-calculate bounds
+- Set per-asset strategies via Asset Management modal (ETH, CBBTC, CBETH now have full strategy controls)
 
 ---
 
@@ -128,6 +130,7 @@ docs/
 - **Per-asset strategy params:** discovered-asset loops now use per-asset `drop_pct`/`rise_pct`/`sma_short`/`sma_long` from the `discovered_assets` DB table, falling back to global config if not set.
 - **Candle data warmup:** CandleStrategy needs 26+ candles per timeframe before producing signals. After fresh deploy, allow ~6.5 hours for 15m candles to accumulate (or the optimizer falls back to hold signals).
 - **Optimizer config is DB-persisted:** All optimizer settings (thresholds, limits, intervals) are stored in the `settings` table and survive restarts/repulls. Env vars only set initial defaults.
+- **Per-asset strategy is primary:** The global `STRATEGY` setting only sets the default for newly added assets. Per-asset config in the `discovered_assets` table (editable via dashboard Asset Management) takes precedence and persists across restarts. Registry assets (ETH, CBBTC, CBETH) are seeded on boot but existing config is never overwritten.
 
 ---
 
