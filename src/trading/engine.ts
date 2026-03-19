@@ -4,17 +4,21 @@ import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import { ThresholdStrategy } from '../strategy/threshold.js';
 import { SMAStrategy } from '../strategy/sma.js';
+import { GridStrategy } from '../strategy/grid.js';
 import type { Strategy } from '../strategy/base.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
 
 interface AssetStrategyParams {
-  strategyType: 'threshold' | 'sma';
+  strategyType: 'threshold' | 'sma' | 'grid';
   dropPct: number;
   risePct: number;
   smaShort: number;
   smaLong: number;
+  gridLevels?: number;
+  gridUpperBound?: number;
+  gridLowerBound?: number;
 }
 
 const STRATEGY_KEYS = [
@@ -27,7 +31,7 @@ export class TradingEngine {
   private strategy!: Strategy;
   private intervalId: ReturnType<typeof setInterval> | null = null;
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
-  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy>();
+  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy>();
   private optimizer: PortfolioOptimizer | null = null;
   private optimizerIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -49,11 +53,14 @@ export class TradingEngine {
     const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
     for (const row of activeAssets) {
       this.startAssetLoop(row.address, row.symbol, {
-        strategyType: row.strategy as 'threshold' | 'sma',
+        strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
         dropPct: row.drop_pct,
         risePct: row.rise_pct,
         smaShort: row.sma_short,
         smaLong: row.sma_long,
+        gridLevels: (row as any).grid_levels,
+        gridUpperBound: (row as any).grid_upper_bound ?? undefined,
+        gridLowerBound: (row as any).grid_lower_bound ?? undefined,
       });
     }
   }
@@ -130,7 +137,7 @@ export class TradingEngine {
   private async tickAsset(symbol: string, params: AssetStrategyParams): Promise<void> {
     if (botState.isPaused) return;
 
-    const limit = params.smaLong + 5;
+    const limit = params.strategyType === 'grid' ? 5 : params.smaLong + 5;
     const raw = queries.recentAssetSnapshots.all(symbol, limit) as {
       price_usd: number; balance: number; timestamp: string;
     }[];
@@ -148,9 +155,22 @@ export class TradingEngine {
     // Get or create strategy instance for this symbol (preserves state across ticks)
     let strategy = this._assetStrategies.get(symbol);
     if (!strategy) {
-      strategy = params.strategyType === 'sma'
-        ? new SMAStrategy({ shortWindow: params.smaShort, longWindow: params.smaLong })
-        : new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });
+      if (params.strategyType === 'grid') {
+        strategy = new GridStrategy({
+          symbol,
+          network: botState.activeNetwork,
+          gridLevels: params.gridLevels,
+          upperBound: params.gridUpperBound,
+          lowerBound: params.gridLowerBound,
+          getCandleHigh24h: () => null,
+          getCandleLow24h: () => null,
+          feeEstimatePct: (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) ?? 1.0,
+        });
+      } else if (params.strategyType === 'sma') {
+        strategy = new SMAStrategy({ shortWindow: params.smaShort, longWindow: params.smaLong });
+      } else {
+        strategy = new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });
+      }
       this._assetStrategies.set(symbol, strategy);
     }
 
