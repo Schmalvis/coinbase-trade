@@ -48,18 +48,24 @@ export function startWebServer(
 
   // ── Status ──────────────────────────────────────────────────────────────────
   app.get('/api/status', (_req, res) => {
-    let portfolioUsd = 0;
-    for (const [sym, bal] of botState.assetBalances) {
-      let price: number;
-      if (sym === 'USDC') {
-        price = 1.0;
-      } else if (sym === 'ETH' && botState.lastPrice) {
-        price = botState.lastPrice;
-      } else {
-        const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
-        price = priceRow?.price_usd ?? 0;
+    // Use tracker's portfolio snapshot as the authoritative value (it has full MCP context)
+    const latestSnapshot = (queries.recentPortfolioSnapshots?.all(1) as any[])?.[0];
+    let portfolioUsd = latestSnapshot?.portfolio_usd ?? 0;
+
+    // Fallback: compute from botState if no snapshot yet
+    if (portfolioUsd === 0) {
+      for (const [sym, bal] of botState.assetBalances) {
+        let price: number;
+        if (sym === 'USDC') {
+          price = 1.0;
+        } else if (sym === 'ETH' && botState.lastPrice) {
+          price = botState.lastPrice;
+        } else {
+          const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
+          price = priceRow?.price_usd ?? 0;
+        }
+        portfolioUsd += bal * price;
       }
-      portfolioUsd += bal * price;
     }
     res.json({
       status:            botState.status,
