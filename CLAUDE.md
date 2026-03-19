@@ -85,8 +85,6 @@ src/
     registry.ts      # Static asset registry (ETH, USDC, CBBTC, CBETH)
   data/
     db.ts            # SQLite via better-sqlite3 (WAL mode)
-  portfolio/
-    tracker.ts       # Polls balances/prices; runs Alchemy ERC20 discovery if key set
   services/
     alchemy.ts       # AlchemyService: ERC20 token discovery via Alchemy JSON-RPC
     candles.ts       # CandleService: OHLCV from Coinbase API + synthetic candle aggregation
@@ -112,7 +110,7 @@ src/
 cli.ts               # CLI (talks to running bot via HTTP)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack
-stack.env            # Environment variable template for Portainer deployment
+stack.env.example    # Environment variable template for Portainer deployment
 docs/
   real-account-options.md     # Options and steps for connecting real funds
   real-account-integration.md # Integration research notes
@@ -131,6 +129,12 @@ docs/
 - **Candle data warmup:** CandleStrategy needs 26+ candles per timeframe before producing signals. After fresh deploy, allow ~6.5 hours for 15m candles to accumulate (or the optimizer falls back to hold signals).
 - **Optimizer config is DB-persisted:** All optimizer settings (thresholds, limits, intervals) are stored in the `settings` table and survive restarts/repulls. Env vars only set initial defaults.
 - **Per-asset strategy is primary:** The global `STRATEGY` setting only sets the default for newly added assets. Per-asset config in the `discovered_assets` table (editable via dashboard Asset Management) takes precedence and persists across restarts. Registry assets (ETH, CBBTC, CBETH) are seeded on boot but existing config is never overwritten.
+- **Alchemy discovery must skip registry assets:** Registry assets seeded into `discovered_assets` must be excluded from the Alchemy pricing loop — native tokens (ETH) have no ERC20 hex balance, so Alchemy writes balance=0, overwriting the correct value from the main poll.
+- **botState is unreliable for display:** `botState.lastBalance`, `lastPrice`, and `assetBalances` may be null/stale between poll cycles. Dashboard API endpoints should read from DB tables (`asset_snapshots`, `portfolio_snapshots`) as authoritative source, with botState as fallback only.
+- **Header strategy vs per-asset strategy:** The header shows global `STRATEGY` config key (default for new assets). The assets table shows per-asset strategy from `discovered_assets`. Per-asset is authoritative.
+- **Docker volume permissions:** Container runs as `USER node` (UID 1000). DATA_DIR volume must be owned by 1000:1000 or logger/DB fails with EACCES. Fix: `chown -R 1000:1000 /home/pi/.local/share/coinbase-trade`
+- **Asset address lookup must be fuzzy:** Registry assets seeded with addresses from `registry.ts` (e.g., `0xeeee...` for ETH). All asset management endpoints use case-insensitive + symbol fallback lookup because frontend address may not exactly match DB address.
+- **Alchemy discovers spam tokens:** Random ERC20 airdrops (common on Base) appear as discovered assets. Users should DISMISS unknown tokens.
 
 ---
 
@@ -142,7 +146,7 @@ docs/
 | `NETWORK_ID` | `base-sepolia` | Change to `base-mainnet` for real trading |
 | `TELEGRAM_BOT_TOKEN` | set | |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | `8423651207` | |
-| `STRATEGY` | `threshold` | `threshold` or `sma` |
+| `STRATEGY` | `threshold` | `threshold`, `sma`, or `grid` — sets default for new assets only |
 | `DRY_RUN` | `false` | Set `true` to simulate without executing |
 | `DATA_DIR` | `/home/pi/.local/share/coinbase-trade/base-sepolia` | Must be POSIX filesystem |
 | `ALCHEMY_API_KEY` | (unset) | Optional. Enables ERC20 token auto-discovery via Alchemy. Get a key at dashboard.alchemy.com |
