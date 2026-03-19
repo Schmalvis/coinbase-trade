@@ -159,13 +159,21 @@ export class PortfolioOptimizer {
 
   findRotationCandidate(
     scores: OpportunityScore[],
+    network: string,
   ): { sell: OpportunityScore; buy: OpportunityScore } | null {
     const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
     const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
     const minDelta = this.runtimeConfig.get('MIN_ROTATION_SCORE_DELTA') as number;
 
-    // Sell candidates: held assets with score below threshold
-    const sellCandidates = scores.filter(s => s.isHeld && s.score < sellThreshold);
+    // Exclude grid-strategy assets from rotation
+    const gridAssets = new Set(
+      (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
+        .filter(a => a.strategy === 'grid')
+        .map(a => a.symbol)
+    );
+
+    // Sell candidates: held assets with score below threshold (excluding grid assets)
+    const sellCandidates = scores.filter(s => s.isHeld && s.score < sellThreshold && !gridAssets.has(s.symbol));
 
     // Buy candidates: any asset with score above threshold
     const buyCandidates = scores.filter(s => s.score > buyThreshold);
@@ -249,7 +257,7 @@ export class PortfolioOptimizer {
     }
 
     // 6. Find rotation candidate
-    const candidate = this.findRotationCandidate(scores);
+    const candidate = this.findRotationCandidate(scores, network);
     if (!candidate) {
       logger.debug('PortfolioOptimizer: no rotation candidate found');
       return;
