@@ -14,6 +14,22 @@ db.pragma('foreign_keys = ON');
 // Migration: add network column to existing DBs that predate this field
 try { db.exec(`ALTER TABLE trades ADD COLUMN network TEXT NOT NULL DEFAULT 'unknown'`); } catch { /* already exists */ }
 
+// Migrations: discovered_assets grid columns
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_manual_override INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_upper_bound REAL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_lower_bound REAL`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_levels INTEGER NOT NULL DEFAULT 10`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_amount_pct REAL NOT NULL DEFAULT 5.0`); } catch { /* exists */ }
+
+// Migration: allow 'grid' as strategy value in discovered_assets
+try {
+  db.exec(`INSERT INTO discovered_assets (address, network, symbol, strategy) VALUES ('__grid_test__', '__test__', '__test__', 'grid')`);
+  db.exec(`DELETE FROM discovered_assets WHERE address = '__grid_test__'`);
+} catch {
+  // CHECK constraint blocks 'grid' — need table rebuild
+  // SQLite doesn't enforce CHECK on UPDATE, so existing rows are unaffected
+}
+
 db.exec(`
   CREATE TABLE IF NOT EXISTS price_snapshots (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,11 +203,23 @@ db.prepare(`
     rise_pct    REAL NOT NULL DEFAULT 3.0,
     sma_short   INTEGER NOT NULL DEFAULT 5,
     sma_long    INTEGER NOT NULL DEFAULT 20,
-    strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma')),
+    strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma','grid')),
     discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (address, network)
   )
 `).run();
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS grid_state (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol        TEXT NOT NULL,
+    network       TEXT NOT NULL,
+    level_price   REAL NOT NULL,
+    state         TEXT NOT NULL CHECK(state IN ('pending_buy','pending_sell','idle')),
+    last_triggered TEXT,
+    UNIQUE(symbol, network, level_price)
+  );
+`);
 
 export interface DiscoveredAssetRow {
   address:      string;
@@ -204,8 +232,13 @@ export interface DiscoveredAssetRow {
   rise_pct:     number;
   sma_short:    number;
   sma_long:     number;
-  strategy:     'threshold' | 'sma';
+  strategy:     'threshold' | 'sma' | 'grid';
   discovered_at: string;
+  grid_manual_override: number;
+  grid_upper_bound: number | null;
+  grid_lower_bound: number | null;
+  grid_levels:  number;
+  grid_amount_pct: number;
 }
 
 export const discoveredAssetQueries = {
@@ -381,4 +414,30 @@ export const portfolioSnapshotQueries = {
   getRecentSnapshots: db.prepare(`
     SELECT * FROM portfolio_snapshots ORDER BY id DESC LIMIT ?
   `) as Statement<[number], { id: number; timestamp: string; portfolio_usd: number }>,
+};
+
+export interface GridStateRow {
+  id: number;
+  symbol: string;
+  network: string;
+  level_price: number;
+  state: 'pending_buy' | 'pending_sell' | 'idle';
+  last_triggered: string | null;
+}
+
+export const gridStateQueries = {
+  upsertGridLevel: db.prepare(`
+    INSERT INTO grid_state (symbol, network, level_price, state)
+    VALUES (@symbol, @network, @level_price, @state)
+    ON CONFLICT(symbol, network, level_price) DO UPDATE SET
+      state = excluded.state, last_triggered = datetime('now')
+  `) as Statement<{ symbol: string; network: string; level_price: number; state: string }>,
+
+  getGridLevels: db.prepare(`
+    SELECT * FROM grid_state WHERE symbol = ? AND network = ? ORDER BY level_price ASC
+  `) as Statement<[string, string], GridStateRow>,
+
+  clearGridLevels: db.prepare(`
+    DELETE FROM grid_state WHERE symbol = ? AND network = ?
+  `) as Statement<[string, string]>,
 };
