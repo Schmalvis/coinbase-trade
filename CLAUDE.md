@@ -20,10 +20,13 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 4.5 (P&L visibility + notification control) complete** — Performance panel on dashboard showing today/7d/30d/total P&L with portfolio value chart. Telegram notification modes: `all` (default), `important_only` (risk alerts only), `digest` (batched summaries at scheduled UTC times), `off`. Quiet hours with configurable UTC window — only critical alerts (portfolio floor, kill switch, wallet change) break through. New commands: `/pnl` (performance summary), `/notify <mode>` (change notification mode). All notification settings DB-persisted via Settings modal → Notifications tab.
 
+**Phase 5 (new strategies) complete** — Bollinger Bands indicator added to CandleStrategy scoring (squeeze detection, ±25pts buy/sell). Grid Trading strategy implemented as new per-asset strategy type with auto-calculated bounds from 24hr candle data, manual override, and persistent grid state. Dashboard updated with grid config fields and GRID status badge. Grid-strategy assets excluded from optimizer rotation.
+
 **Next steps:**
 - Deploy and verify optimizer in DRY_RUN mode — watch scores and rotation decisions in logs/dashboard before enabling real trades
 - Tune optimizer thresholds via dashboard Settings (ROTATION_SELL_THRESHOLD, ROTATION_BUY_THRESHOLD, MIN_ROTATION_SCORE_DELTA)
 - Add assets to watchlist via Telegram (/watch SYMBOL ADDRESS) or dashboard
+- Try Grid Trading on a discovered asset: set strategy to 'grid' in Asset Management, configure or auto-calculate bounds
 
 ---
 
@@ -89,7 +92,8 @@ src/
     base.ts          # Strategy interface
     threshold.ts     # Buy on price drop %, sell on price rise %
     sma.ts           # SMA crossover (short/long window)
-    candle.ts        # CandleStrategy: RSI, MACD, volume, candle pattern indicators
+    candle.ts        # CandleStrategy: RSI, MACD, volume, candle patterns, Bollinger Bands
+    grid.ts          # GridStrategy: price-level grid trading with auto-bounds
   trading/
     executor.ts      # Risk checks + trade execution + two-leg rotation (respects DRY_RUN)
     engine.ts        # Runs strategy on interval; per-asset loops; optimizer loop
@@ -161,3 +165,10 @@ These are NOT env vars — they're stored in the `settings` DB table and managed
 | `RISK_ON_THRESHOLD` | `15` | Score above which risk-off deactivates |
 | `DEFAULT_FEE_ESTIMATE_PCT` | `1.0` | Fallback fee estimate when quote unavailable |
 | `DASHBOARD_THEME` | `dark` | Dashboard colour theme (light/dark) |
+| `BB_PERIOD` | `20` | Bollinger Bands lookback period |
+| `BB_STD_DEV` | `2.0` | Bollinger Bands standard deviation multiplier |
+| `GRID_LEVELS` | `10` | Number of price levels in grid strategy |
+| `GRID_AMOUNT_PCT` | `5` | % of portfolio per grid order |
+| `GRID_UPPER_BOUND` | (auto) | Global default upper bound (per-asset overrides) |
+| `GRID_LOWER_BOUND` | (auto) | Global default lower bound (per-asset overrides) |
+| `GRID_RECALC_HOURS` | `6` | Hours between auto-recalculation of grid bounds |
