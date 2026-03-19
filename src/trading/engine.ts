@@ -5,7 +5,6 @@ import { logger } from '../core/logger.js';
 import { ThresholdStrategy } from '../strategy/threshold.js';
 import { SMAStrategy } from '../strategy/sma.js';
 import { GridStrategy } from '../strategy/grid.js';
-import type { Strategy } from '../strategy/base.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
@@ -28,8 +27,6 @@ const STRATEGY_KEYS = [
 ] as const;
 
 export class TradingEngine {
-  private strategy!: Strategy;
-  private intervalId: ReturnType<typeof setInterval> | null = null;
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
   private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy>();
   private optimizer: PortfolioOptimizer | null = null;
@@ -39,8 +36,20 @@ export class TradingEngine {
     private readonly executor: TradeExecutor,
     private readonly runtimeConfig: RuntimeConfig,
   ) {
-    this.strategy = this.buildStrategy();
-    runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => this.restart());
+    runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => {
+      const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+      for (const row of activeAssets) {
+        this.reloadAssetConfig(row.address, row.symbol, {
+          strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
+          dropPct: row.drop_pct, risePct: row.rise_pct,
+          smaShort: row.sma_short, smaLong: row.sma_long,
+          gridLevels: row.grid_levels,
+          gridUpperBound: row.grid_upper_bound ?? undefined,
+          gridLowerBound: row.grid_lower_bound ?? undefined,
+        });
+      }
+      logger.info('All asset loops reloaded due to config change');
+    });
     runtimeConfig.subscribe('OPTIMIZER_INTERVAL_SECONDS', () => {
       if (this.optimizerIntervalId) {
         this.disableOptimizer();
@@ -48,67 +57,39 @@ export class TradingEngine {
         logger.info('Optimizer interval restarted due to config change');
       }
     });
-    logger.info(`Trading engine using strategy: ${this.strategy.name}`);
+  }
 
+  startAllAssetLoops(): void {
     const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
     for (const row of activeAssets) {
       this.startAssetLoop(row.address, row.symbol, {
         strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
-        dropPct: row.drop_pct,
-        risePct: row.rise_pct,
-        smaShort: row.sma_short,
-        smaLong: row.sma_long,
-        gridLevels: (row as any).grid_levels,
-        gridUpperBound: (row as any).grid_upper_bound ?? undefined,
-        gridLowerBound: (row as any).grid_lower_bound ?? undefined,
+        dropPct: row.drop_pct, risePct: row.rise_pct,
+        smaShort: row.sma_short, smaLong: row.sma_long,
+        gridLevels: row.grid_levels,
+        gridUpperBound: row.grid_upper_bound ?? undefined,
+        gridLowerBound: row.grid_lower_bound ?? undefined,
       });
     }
+    logger.info(`Started ${activeAssets.length} asset loops`);
   }
 
-  private buildStrategy(): Strategy {
-    const s = this.runtimeConfig.get('STRATEGY') as string;
-    return s === 'sma' ? new SMAStrategy() : new ThresholdStrategy();
-  }
-
-  start(): void {
-    this.strategy = this.buildStrategy();
-    const intervalMs = (this.runtimeConfig.get('TRADE_INTERVAL_SECONDS') as number) * 1000;
-    this.intervalId = setInterval(() => this.tick(), intervalMs);
-    logger.info(`Trading engine started (interval: ${intervalMs}ms, strategy: ${this.strategy.name})`);
-  }
-
-  private restart(): void {
-    if (this.intervalId) {
-      clearInterval(this.intervalId);
-      this.intervalId = null;
-    }
-    this.start();
-    logger.info('Trading engine restarted due to config change');
-  }
-
-  async tick(): Promise<void> {
-    if (botState.isPaused) return;
-
-    const longWindow = this.runtimeConfig.get('SMA_LONG_WINDOW') as number;
-    const snapshots = queries.recentSnapshots.all(longWindow + 5) as {
-      eth_price: number;
-      eth_balance: number;
-      portfolio_usd: number;
-      timestamp: string;
-    }[];
-
-    if (snapshots.length === 0) return;
-
-    const result = this.strategy.evaluate(snapshots);
-    logger.debug(`Strategy signal: ${result.signal} — ${result.reason}`);
-
-    if (result.signal !== 'hold') {
-      await this.executor.execute(result.signal, result.reason);
+  stopAllAssetLoops(): void {
+    for (const symbol of this._assetLoops.keys()) {
+      this.stopAssetLoop(symbol);
     }
   }
 
-  async manualTrade(action: 'buy' | 'sell'): Promise<void> {
-    await this.executor.execute(action, 'Manual override via Telegram/CLI', 'manual');
+  get activeAssetCount(): number {
+    return this._assetLoops.size;
+  }
+
+  async manualTrade(action: 'buy' | 'sell', symbol?: string): Promise<void> {
+    if (symbol) {
+      await this.executor.executeForAsset(symbol, action, 'manual');
+    } else {
+      await this.executor.execute(action, 'Manual override via Telegram/CLI', 'manual');
+    }
   }
 
   startAssetLoop(address: string, symbol: string, params: AssetStrategyParams): void {

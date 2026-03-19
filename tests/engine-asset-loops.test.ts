@@ -33,7 +33,7 @@ describe('TradingEngine asset loops', () => {
       if (k === 'STRATEGY') return 'threshold';
       if (k === 'TRADE_INTERVAL_SECONDS') return 60;
       return undefined;
-    }), subscribeMany: vi.fn() } as any;
+    }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
     const { TradingEngine } = await import('../src/trading/engine.js');
     const engine = new TradingEngine(mockExecutor, mockConfig);
     // Should not throw
@@ -49,7 +49,7 @@ describe('TradingEngine asset loops', () => {
       if (k === 'STRATEGY') return 'threshold';
       if (k === 'TRADE_INTERVAL_SECONDS') return 60;
       return undefined;
-    }), subscribeMany: vi.fn() } as any;
+    }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
     const { TradingEngine } = await import('../src/trading/engine.js');
     const engine = new TradingEngine(mockExecutor, mockConfig);
 
@@ -71,7 +71,7 @@ describe('TradingEngine asset loops', () => {
       if (k === 'PRICE_DROP_THRESHOLD_PCT') return 2.0; // global: 2%
       if (k === 'PRICE_RISE_TARGET_PCT') return 3.0;
       return undefined;
-    }), subscribeMany: vi.fn() } as any;
+    }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
 
     // Import fresh engine instance (module already loaded — reuse same import)
     const { TradingEngine } = await import('../src/trading/engine.js');

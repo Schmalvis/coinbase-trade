@@ -85,7 +85,7 @@ async function main() {
   engine.enableOptimizer();
   candleService.startPolling();
 
-  engine.start();
+  engine.startAllAssetLoops();
   startTelegramBot(engine, optimizer, watchlistManager, runtimeConfig);
   startWebServer(tools, runtimeConfig, executor, engine, optimizer, watchlistManager);
 
