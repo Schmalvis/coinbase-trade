@@ -1620,7 +1620,17 @@
         var td7 = document.createElement('td'); td7.textContent = changeText; if (changeClass) td7.className = changeClass; row.appendChild(td7);
         // Strategy
         var td8 = document.createElement('td');
-        if (a.status === 'active') { td8.innerHTML = '<span style="color:var(--green)">\u25CF</span> ' + (a.strategyConfig ? a.strategyConfig.type || '' : ''); td8.style.fontSize = '0.72rem'; }
+        if (a.status === 'active') {
+          td8.style.fontSize = '0.72rem';
+          var dot8 = document.createElement('span'); dot8.style.color = 'var(--green)'; dot8.textContent = '\u25CF'; td8.appendChild(dot8);
+          td8.appendChild(document.createTextNode(' ' + (a.strategyConfig ? a.strategyConfig.type || '' : '')));
+          if (a.strategyConfig && a.strategyConfig.type === 'grid') {
+            var gridBadge = document.createElement('span');
+            gridBadge.style.cssText = 'font-size:0.6rem;padding:0.1rem 0.3rem;border-radius:3px;background:var(--blue-lo,rgba(96,165,250,0.1));color:var(--blue,#60a5fa);margin-left:0.3rem;font-weight:600';
+            gridBadge.textContent = 'GRID';
+            td8.appendChild(gridBadge);
+          }
+        }
         else if (a.status === 'pending') { td8.textContent = 'new token'; td8.style.color = 'var(--yellow)'; td8.style.fontSize = '0.72rem'; }
         row.appendChild(td8);
         // Actions
@@ -1684,11 +1694,18 @@
     function buildConfigForm(container, asset) {
       var cfg = asset.strategyConfig || {};
       var pills = document.createElement('div'); pills.className = 'pill-group'; pills.style.marginBottom = '0.5rem';
-      ['threshold', 'sma'].forEach(function(type) {
+      ['threshold', 'sma', 'grid'].forEach(function(type) {
         var pill = document.createElement('button');
         pill.className = 'pill' + (cfg.type === type ? ' active' : '');
         pill.textContent = type.toUpperCase(); pill.dataset.strategy = type;
-        pill.onclick = function(e) { e.preventDefault(); pills.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); }); pill.classList.add('active'); };
+        pill.onclick = function(e) {
+          e.preventDefault();
+          pills.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
+          pill.classList.add('active');
+          var isGrid = type === 'grid';
+          var gf = document.getElementById('grid-fields-' + asset.address);
+          if (gf) gf.style.display = isGrid ? '' : 'none';
+        };
         pill.id = 'pill-' + asset.address + '-' + type;
         pills.appendChild(pill);
       });
@@ -1708,6 +1725,28 @@
         inp.style.cssText = 'width:70px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
         lbl.appendChild(inp); row.appendChild(lbl); container.appendChild(row);
       });
+      // Grid-specific fields
+      var gridFields = document.createElement('div');
+      gridFields.id = 'grid-fields-' + asset.address;
+      gridFields.style.display = cfg.type === 'grid' ? '' : 'none';
+      var gridFieldDefs = [
+        { id: 'grid-levels-' + asset.address, label: 'Grid Levels', val: asset.grid_levels != null ? asset.grid_levels : 10, step: '1', min: '3', max: '50', placeholder: '' },
+        { id: 'grid-upper-' + asset.address, label: 'Upper Bound (empty = auto)', val: asset.grid_upper_bound != null ? asset.grid_upper_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' },
+        { id: 'grid-lower-' + asset.address, label: 'Lower Bound (empty = auto)', val: asset.grid_lower_bound != null ? asset.grid_lower_bound : '', step: '0.01', min: '', max: '', placeholder: 'auto' }
+      ];
+      gridFieldDefs.forEach(function(f) {
+        var row = document.createElement('div'); row.style.cssText = 'margin:0.3rem 0';
+        var lbl = document.createElement('label'); lbl.textContent = f.label + ' '; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary)';
+        var inp = document.createElement('input'); inp.type = 'number'; inp.id = f.id;
+        if (f.val !== '') inp.value = String(f.val);
+        if (f.step) inp.step = f.step;
+        if (f.min) inp.min = f.min;
+        if (f.max) inp.max = f.max;
+        if (f.placeholder) inp.placeholder = f.placeholder;
+        inp.style.cssText = 'width:90px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
+        lbl.appendChild(inp); row.appendChild(lbl); gridFields.appendChild(row);
+      });
+      container.appendChild(gridFields);
     }
 
     function toggleModalItem(address) { var body = document.getElementById('modal-body-' + address); if (body) body.classList.toggle('open'); }
@@ -1716,13 +1755,22 @@
       var strategyType = 'threshold';
       var active = document.querySelector('#modal-item-' + address + ' .pill.active');
       if (active && active.dataset && active.dataset.strategy) strategyType = active.dataset.strategy;
-      return {
+      var body = {
         strategyType: strategyType,
         dropPct: parseFloat(document.getElementById('cfg-' + address + '-drop').value),
         risePct: parseFloat(document.getElementById('cfg-' + address + '-rise').value),
         smaShort: parseInt(document.getElementById('cfg-' + address + '-smaShort').value),
         smaLong: parseInt(document.getElementById('cfg-' + address + '-smaLong').value)
       };
+      if (strategyType === 'grid') {
+        body.grid_levels = parseInt(document.getElementById('grid-levels-' + address).value) || 10;
+        var upperVal = document.getElementById('grid-upper-' + address).value;
+        var lowerVal = document.getElementById('grid-lower-' + address).value;
+        body.grid_upper_bound = upperVal !== '' ? parseFloat(upperVal) : null;
+        body.grid_lower_bound = lowerVal !== '' ? parseFloat(lowerVal) : null;
+        body.grid_manual_override = (body.grid_upper_bound !== null && body.grid_lower_bound !== null) ? 1 : 0;
+      }
+      return body;
     }
 
     async function enableAsset(address) {

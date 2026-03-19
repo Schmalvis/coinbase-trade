@@ -266,6 +266,13 @@ export const discoveredAssetQueries = {
     WHERE address = @address AND network = @network
   `) as Statement<{ drop_pct: number; rise_pct: number; sma_short: number; sma_long: number; strategy: string; address: string; network: string }>,
 
+  updateGridConfig: db.prepare(`
+    UPDATE discovered_assets
+    SET grid_levels = @grid_levels, grid_upper_bound = @grid_upper_bound,
+        grid_lower_bound = @grid_lower_bound, grid_manual_override = @grid_manual_override
+    WHERE address = @address AND network = @network
+  `) as Statement<{ grid_levels: number; grid_upper_bound: number | null; grid_lower_bound: number | null; grid_manual_override: number; address: string; network: string }>,
+
   dismissAsset: db.prepare(`
     UPDATE discovered_assets SET status = 'dismissed' WHERE address = ? AND network = ?
   `) as Statement<[string, string]>,

@@ -18,8 +18,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function validateAssetParams(p: Record<string, unknown>): string[] {
   const errors: string[] = [];
-  if ('strategyType' in p && !['threshold', 'sma'].includes(p.strategyType as string)) {
-    errors.push('strategyType must be threshold or sma');
+  if ('strategyType' in p && !['threshold', 'sma', 'grid'].includes(p.strategyType as string)) {
+    errors.push('strategyType must be threshold, sma, or grid');
   }
   for (const k of ['dropPct', 'risePct']) {
     if (k in p && (typeof p[k] !== 'number' || (p[k] as number) < 0.1)) {
@@ -309,8 +309,19 @@ export function startWebServer(
       sma_short: params.smaShort,
       sma_long: params.smaLong,
     });
+    if (params.strategyType === 'grid') {
+      const gridLevels = Number(body.grid_levels) || 10;
+      const gridUpperBound = body.grid_upper_bound != null ? Number(body.grid_upper_bound) : null;
+      const gridLowerBound = body.grid_lower_bound != null ? Number(body.grid_lower_bound) : null;
+      const gridManualOverride = (gridUpperBound != null && gridLowerBound != null) ? 1 : 0;
+      discoveredAssetQueries.updateGridConfig.run({
+        grid_levels: gridLevels, grid_upper_bound: gridUpperBound,
+        grid_lower_bound: gridLowerBound, grid_manual_override: gridManualOverride,
+        address, network,
+      });
+    }
     engine.reloadAssetConfig(address, row.symbol, {
-      strategyType: params.strategyType as 'threshold' | 'sma',
+      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid',
       dropPct: params.dropPct,
       risePct: params.risePct,
       smaShort: params.smaShort,
