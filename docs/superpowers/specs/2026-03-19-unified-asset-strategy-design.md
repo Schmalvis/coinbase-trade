@@ -18,12 +18,13 @@ Registry assets (ETH, CBBTC, CBETH) are seeded into the `discovered_assets` tabl
 After DB initialization but before TradingEngine starts, seed registry assets:
 
 ```typescript
-import { ASSETS } from './assets/registry.js';
+import { ASSET_REGISTRY } from './assets/registry.js';
 
-for (const asset of ASSETS) {
+for (const asset of ASSET_REGISTRY) {
   if (asset.symbol === 'USDC') continue; // USDC is base currency, no strategy
-  discoveredAssetQueries.upsertDiscoveredAsset.run({
-    address: asset.address ?? `native:${asset.symbol}`,
+  const address = asset.addresses[botState.activeNetwork] ?? `native:${asset.symbol}`;
+  discoveredAssetQueries.seedRegistryAsset.run({
+    address,
     network: botState.activeNetwork,
     symbol: asset.symbol,
     name: asset.name ?? asset.symbol,
@@ -32,9 +33,17 @@ for (const asset of ASSETS) {
 }
 ```
 
-- `INSERT OR IGNORE` ensures existing config is never overwritten
-- Native assets (ETH) use a synthetic address like `native:ETH` since they have no contract address
-- The seeded rows get default strategy from the global `STRATEGY` config (threshold/sma/grid)
+**New prepared statement in `db.ts`** — `seedRegistryAsset`:
+```sql
+INSERT OR IGNORE INTO discovered_assets (address, network, symbol, name, decimals, status)
+VALUES (@address, @network, @symbol, @name, @decimals, 'active')
+```
+
+This differs from `upsertDiscoveredAsset` in that it sets `status = 'active'` on insert (discovered tokens default to `'pending'` and require user approval; registry assets are always active).
+
+- `INSERT OR IGNORE` ensures existing config is never overwritten (if the row already exists, the seed is a no-op)
+- Uses `asset.addresses[botState.activeNetwork]` to resolve the correct per-network address from the registry
+- Native ETH uses the standard sentinel address `0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee` from the registry; falls back to `native:SYMBOL` only if not defined
 - Runs on every boot but is idempotent
 
 ## 2. TradingEngine Changes (`src/trading/engine.ts`)
@@ -60,12 +69,45 @@ The `STRATEGY_KEYS` subscription currently calls `restart()` (the global loop). 
 ```typescript
 runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => {
   // Reload all active asset loops with fresh config
-  const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork);
+  const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
   for (const row of activeAssets) {
-    this.reloadAssetConfig(row.address, row.symbol, /* params from row */);
+    this.reloadAssetConfig(row.address, row.symbol, {
+      strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
+      dropPct: row.drop_pct,
+      risePct: row.rise_pct,
+      smaShort: row.sma_short,
+      smaLong: row.sma_long,
+      gridLevels: row.grid_levels,
+      gridUpperBound: row.grid_upper_bound ?? undefined,
+      gridLowerBound: row.grid_lower_bound ?? undefined,
+    });
   }
 });
 ```
+
+### Replace `engine.start()` call in `index.ts`
+
+`index.ts` currently calls `engine.start()` to begin the global ETH loop. After removing `start()`, replace this call with a new method `engine.startAllAssetLoops()` that loads all active discovered assets and starts their loops:
+
+```typescript
+// In TradingEngine:
+startAllAssetLoops(): void {
+  const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+  for (const row of activeAssets) {
+    this.startAssetLoop(row.address, row.symbol, {
+      strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
+      dropPct: row.drop_pct, risePct: row.rise_pct,
+      smaShort: row.sma_short, smaLong: row.sma_long,
+      gridLevels: row.grid_levels,
+      gridUpperBound: row.grid_upper_bound ?? undefined,
+      gridLowerBound: row.grid_lower_bound ?? undefined,
+    });
+  }
+  logger.info(`Started ${activeAssets.length} asset loops`);
+}
+```
+
+In `index.ts`, replace `engine.start()` with `engine.startAllAssetLoops()`. The constructor should NOT auto-start loops (move that logic out of constructor into this explicit method) so startup order remains controllable.
 
 ### Keep `manualTrade`
 
