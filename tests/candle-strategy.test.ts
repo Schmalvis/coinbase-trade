@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeRSI,
   computeMACD,
+  computeBollingerBands,
   CandleStrategy,
   type Candle,
 } from '../src/strategy/candle.js';
@@ -27,6 +28,41 @@ function makeCandles(
     volume: opts?.volumes?.[i] ?? 100,
   }));
 }
+
+/* ------------------------------------------------------------------ */
+/*  computeBollingerBands                                              */
+/* ------------------------------------------------------------------ */
+
+describe('computeBollingerBands', () => {
+  it('returns middle as SMA of closes', () => {
+    const closes = Array.from({ length: 20 }, () => 100);
+    const bb = computeBollingerBands(closes, 20, 2);
+    expect(bb).not.toBeNull();
+    expect(bb!.middle).toBeCloseTo(100, 5);
+    expect(bb!.upper).toBeCloseTo(100, 5);
+    expect(bb!.lower).toBeCloseTo(100, 5);
+  });
+
+  it('bands widen with volatile prices', () => {
+    const closes = Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? 90 : 110));
+    const bb = computeBollingerBands(closes, 20, 2);
+    expect(bb!.middle).toBeCloseTo(100, 1);
+    expect(bb!.upper).toBeGreaterThan(110);
+    expect(bb!.lower).toBeLessThan(90);
+  });
+
+  it('returns null when not enough data', () => {
+    expect(computeBollingerBands([100, 101], 20, 2)).toBeNull();
+  });
+
+  it('detects squeeze when bandwidth is narrow', () => {
+    const volatile = Array.from({ length: 20 }, (_, i) => (i % 2 === 0 ? 80 : 120));
+    const flat = Array.from({ length: 20 }, () => 100);
+    const bb = computeBollingerBands([...volatile, ...flat], 20, 2);
+    expect(bb).not.toBeNull();
+    expect(bb!.squeeze).toBe(true);
+  });
+});
 
 /* ------------------------------------------------------------------ */
 /*  computeRSI                                                         */

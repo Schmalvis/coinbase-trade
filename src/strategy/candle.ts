@@ -91,6 +91,53 @@ export function computeMACD(
 }
 
 /* ------------------------------------------------------------------ */
+/*  Bollinger Bands                                                    */
+/* ------------------------------------------------------------------ */
+
+export interface BollingerResult {
+  upper: number;
+  middle: number;
+  lower: number;
+  bandwidth: number;
+  squeeze: boolean;
+}
+
+export function computeBollingerBands(
+  closes: number[],
+  period = 20,
+  stdDevMultiplier = 2.0,
+): BollingerResult | null {
+  if (closes.length < period) return null;
+
+  const window = closes.slice(-period);
+  const sma = window.reduce((a, b) => a + b, 0) / period;
+  const variance = window.reduce((sum, v) => sum + (v - sma) ** 2, 0) / period;
+  const stdDev = Math.sqrt(variance);
+
+  const upper = sma + stdDevMultiplier * stdDev;
+  const lower = sma - stdDevMultiplier * stdDev;
+  const bandwidth = sma > 0 ? (upper - lower) / sma : 0;
+
+  let squeeze = false;
+  if (closes.length >= period * 2) {
+    let bwSum = 0;
+    let bwCount = 0;
+    for (let end = closes.length - period; end <= closes.length; end++) {
+      const w = closes.slice(end - period, end);
+      const m = w.reduce((a, b) => a + b, 0) / period;
+      if (m <= 0) continue;
+      const v = w.reduce((s, x) => s + (x - m) ** 2, 0) / period;
+      bwSum += (2 * stdDevMultiplier * Math.sqrt(v)) / m;
+      bwCount++;
+    }
+    const avgBw = bwCount > 0 ? bwSum / bwCount : 0;
+    squeeze = avgBw > 0 && bandwidth < avgBw * 0.5;
+  }
+
+  return { upper, middle: sma, lower, bandwidth, squeeze };
+}
+
+/* ------------------------------------------------------------------ */
 /*  CandleStrategy                                                     */
 /* ------------------------------------------------------------------ */
 
