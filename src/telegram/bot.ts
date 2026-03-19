@@ -93,7 +93,7 @@ function flushDigest(): string | null {
   const soldStr = [...sold.entries()].map(([s, n]) => `${n}x ${s}`).join(', ') || 'none';
 
   // Portfolio value and P&L
-  const portfolioUsd = todayPnl?.current_usd ?? botState.lastBalance * botState.lastPrice;
+  const portfolioUsd = todayPnl?.current_usd ?? (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0);
   const highWater = todayPnl?.high_water ?? portfolioUsd;
   const dayChange = portfolioUsd - highWater;
   const dayChangePct = highWater > 0 ? (dayChange / highWater) * 100 : 0;
