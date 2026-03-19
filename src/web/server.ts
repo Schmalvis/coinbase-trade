@@ -67,23 +67,17 @@ export function startWebServer(
         portfolioUsd += bal * price;
       }
     }
-    // Read balances from DB snapshots as fallback when botState is stale
-    let ethBal = botState.lastBalance;
-    let usdcBal = botState.lastUsdcBalance;
-    let ethPrice = botState.lastPrice;
-    if (ethBal == null || ethBal === 0) {
-      const snap = (queries.recentAssetSnapshots.all('ETH', 1) as any[])[0];
-      if (snap) { ethBal = snap.balance; ethPrice = ethPrice ?? snap.price_usd; }
-    }
-    if (usdcBal == null || usdcBal === 0) {
-      const snap = (queries.recentAssetSnapshots.all('USDC', 1) as any[])[0];
-      if (snap) usdcBal = snap.balance;
-    }
+    // Always read balances from DB snapshots — botState is unreliable (gets cleared between poll cycles)
+    const ethSnap = (queries.recentAssetSnapshots.all('ETH', 1) as any[])[0];
+    const usdcSnap = (queries.recentAssetSnapshots.all('USDC', 1) as any[])[0];
+    const ethBal = ethSnap?.balance ?? botState.lastBalance ?? 0;
+    const usdcBal = usdcSnap?.balance ?? botState.lastUsdcBalance ?? 0;
+    const ethPrice = ethSnap?.price_usd ?? botState.lastPrice ?? 0;
     res.json({
       status:            botState.status,
-      lastPrice:         ethPrice ?? 0,
-      ethBalance:        ethBal ?? 0,
-      usdcBalance:       usdcBal ?? 0,
+      lastPrice:         ethPrice,
+      ethBalance:        ethBal,
+      usdcBalance:       usdcBal,
       portfolioUsd,
       lastTradeAt:       botState.lastTradeAt,
       dryRun:            runtimeConfig.get('DRY_RUN'),
