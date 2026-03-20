@@ -753,6 +753,14 @@
     let assetList = [];
     let scoresData = {};
 
+    /* ── Auth helpers ─────────────────────────────────────────────────── */
+    function getAuthHeaders() {
+      var h = { 'Content-Type': 'application/json' };
+      var secret = localStorage.getItem('cb-dashboard-secret');
+      if (secret) h['Authorization'] = 'Bearer ' + secret;
+      return h;
+    }
+
     /* ── Theme ──────────────────────────────────────────────────────────── */
     function getChartColors() {
       const s = getComputedStyle(document.documentElement);
@@ -763,7 +771,7 @@
       document.documentElement.dataset.theme = theme;
       document.getElementById('themeToggle').textContent = theme === 'dark' ? 'Light' : 'Dark';
       localStorage.setItem('cb-theme', theme);
-      fetch('/api/theme', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ theme }) }).catch(function(){});
+      fetch('/api/theme', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify({ theme }) }).catch(function(){});
       var c = getChartColors();
       [priceChart, portfolioChart].forEach(function(chart) {
         if (!chart) return;
@@ -805,7 +813,7 @@
 
     async function switchNetwork(network) {
       if (network === activeNetwork) return;
-      await fetch('/api/network', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: network }) });
+      await fetch('/api/network', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ network: network }) });
       activeNetwork = network;
       renderNetworkSelector();
       await refresh();
@@ -1164,14 +1172,14 @@
       var symbol = document.getElementById('watchlistSymbol').value.trim().toUpperCase();
       var address = document.getElementById('watchlistAddress').value.trim();
       if (!symbol) return;
-      await fetch('/api/watchlist', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ symbol: symbol, address: address || undefined }) });
+      await fetch('/api/watchlist', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ symbol: symbol, address: address || undefined }) });
       document.getElementById('watchlistSymbol').value = '';
       document.getElementById('watchlistAddress').value = '';
       await loadWatchlist();
     }
 
     async function removeWatchlistItem(symbol) {
-      await fetch('/api/watchlist/' + encodeURIComponent(symbol), { method: 'DELETE' });
+      await fetch('/api/watchlist/' + encodeURIComponent(symbol), { method: 'DELETE', headers: getAuthHeaders() });
       await loadWatchlist();
     }
 
@@ -1234,7 +1242,7 @@
     }
 
     /* ── Controls ────────────────────────────────────────────────────────── */
-    async function control(action) { await fetch('/api/control/' + action, { method: 'POST' }); await loadStatus(); }
+    async function control(action) { await fetch('/api/control/' + action, { method: 'POST', headers: getAuthHeaders() }); await loadStatus(); }
 
     /* ── Trade modal ────────────────────────────────────────────────────── */
     var tradePair = { from: 'ETH', to: 'USDC' };
@@ -1321,7 +1329,7 @@
       btn.disabled = true; btn.textContent = 'Executing...';
       document.getElementById('tradeResult').textContent = '';
       try {
-        var data = await fetch('/api/trade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ from: tradePair.from, to: tradePair.to, fromAmount: tradeQuotedFromAmount }) }).then(function(r){ return r.json(); });
+        var data = await fetch('/api/trade', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ from: tradePair.from, to: tradePair.to, fromAmount: tradeQuotedFromAmount }) }).then(function(r){ return r.json(); });
         if (data.ok) {
           var explorer = (activeNetwork && activeNetwork.indexOf('mainnet') !== -1) ? 'https://basescan.org' : 'https://sepolia.basescan.org';
           var tx = data.txHash ? '<a href="' + explorer + '/tx/' + data.txHash + '" target="_blank" style="color:var(--accent)">' + data.txHash.slice(0,12) + '...</a>' : '[dry run]';
@@ -1355,7 +1363,7 @@
       btn.disabled = true; btn.textContent = 'Routing...';
       document.getElementById('tradeResult').textContent = '';
       try {
-        var data = await fetch('/api/trade/enso', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tokenIn: tokenIn, tokenOut: tokenOut, amountIn: amountIn }) }).then(function(r){ return r.json(); });
+        var data = await fetch('/api/trade/enso', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ tokenIn: tokenIn, tokenOut: tokenOut, amountIn: amountIn }) }).then(function(r){ return r.json(); });
         if (data.ok) {
           var tx = data.txHash ? '<a href="https://basescan.org/tx/' + data.txHash + '" target="_blank" style="color:var(--accent)">' + data.txHash.slice(0,12) + '...</a>' : '[dry run]';
           document.getElementById('tradeResult').innerHTML = '<span style="color:var(--green)">Routed - ' + tx + '</span>';
@@ -1380,7 +1388,7 @@
       var btn = document.getElementById(btnId);
       btn.disabled = true; btn.textContent = 'Requesting...';
       try {
-        var data = await fetch('/api/faucet', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assetId: assetId }) }).then(function(r){ return r.json(); });
+        var data = await fetch('/api/faucet', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ assetId: assetId }) }).then(function(r){ return r.json(); });
         if (data.ok) { btn.textContent = 'Sent!'; setTimeout(function(){ btn.textContent = 'Request ' + assetId.toUpperCase(); btn.disabled = false; }, 5000); }
         else { btn.textContent = 'Failed'; setTimeout(function(){ btn.textContent = 'Request ' + assetId.toUpperCase(); btn.disabled = false; }, 3000); }
       } catch (e) { btn.textContent = 'Error'; setTimeout(function(){ btn.textContent = 'Request ' + assetId.toUpperCase(); btn.disabled = false; }, 3000); }
@@ -1484,6 +1492,8 @@
         document.getElementById('cfgDigestTimes').value = s.TELEGRAM_DIGEST_TIMES || '08:00,20:00';
         document.getElementById('cfgQuietStart').value = s.TELEGRAM_QUIET_START || '';
         document.getElementById('cfgQuietEnd').value = s.TELEGRAM_QUIET_END || '';
+        // Security tab — load from localStorage
+        document.getElementById('cfgDashboardSecret').value = localStorage.getItem('cb-dashboard-secret') || '';
         selectStrategy(selectedStrategy);
         switchTab('strategy');
         clearSettingsErrors();
@@ -1505,10 +1515,12 @@
       document.getElementById('tabTrading').style.display = tab === 'trading' ? '' : 'none';
       document.getElementById('tabOptimizer').style.display = tab === 'optimizer' ? '' : 'none';
       document.getElementById('tabNotify').style.display = tab === 'notify' ? '' : 'none';
+      document.getElementById('tabSecurity').style.display = tab === 'security' ? '' : 'none';
       document.getElementById('tabStrategyBtn').classList.toggle('active', tab === 'strategy');
       document.getElementById('tabTradingBtn').classList.toggle('active', tab === 'trading');
       document.getElementById('tabOptimizerBtn').classList.toggle('active', tab === 'optimizer');
       document.getElementById('tabNotifyBtn').classList.toggle('active', tab === 'notify');
+      document.getElementById('tabSecurityBtn').classList.toggle('active', tab === 'security');
     }
 
     function clearSettingsErrors() {
@@ -1540,7 +1552,7 @@
       changes.TELEGRAM_QUIET_START = document.getElementById('cfgQuietStart').value;
       changes.TELEGRAM_QUIET_END = document.getElementById('cfgQuietEnd').value;
       try {
-        var data = await fetch('/api/settings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes: changes }) }).then(function(r){ return r.json(); });
+        var data = await fetch('/api/settings', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ changes: changes }) }).then(function(r){ return r.json(); });
         if (data.ok) { closeModal('settingsModal'); await loadStatus(); } else { showSettingsError(data.field, data.error); }
       } catch (e) { alert('Save failed: ' + e.message); }
       finally { btn.disabled = false; btn.textContent = 'Save'; }
@@ -1820,12 +1832,12 @@
 
     async function saveAssetConfig(address) {
       var params = readConfigForm(address);
-      var res = await fetch('/api/assets/' + address + '/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(params) }).then(function(r){ return r.json(); });
+      var res = await fetch('/api/assets/' + address + '/config', { method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(params) }).then(function(r){ return r.json(); });
       if (res.ok) { expandedAssetAddress = null; await loadAssets(); } else alert('Error: ' + res.error);
     }
 
     async function postJSON(url, body) {
-      return await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(function(r){ return r.json(); });
+      return await fetch(url, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify(body) }).then(function(r){ return r.json(); });
     }
 
     function renderAssetPills() { renderAssetSelector(); }
@@ -1848,6 +1860,7 @@
       <button class="modal-tab" id="tabTradingBtn" onclick="switchTab('trading')">Trading</button>
       <button class="modal-tab" id="tabOptimizerBtn" onclick="switchTab('optimizer')">Optimizer</button>
       <button class="modal-tab" id="tabNotifyBtn" onclick="switchTab('notify')">Notifications</button>
+      <button class="modal-tab" id="tabSecurityBtn" onclick="switchTab('security')">Security</button>
     </div>
     <div id="tabStrategy">
       <div class="field-group">
@@ -1915,6 +1928,19 @@
         <div class="field"><label>Digest times (UTC, comma-separated HH:MM)</label><input type="text" id="cfgDigestTimes" placeholder="08:00,20:00"></div>
         <div class="field"><label>Quiet hours start (UTC HH:MM, empty to disable)</label><input type="text" id="cfgQuietStart" placeholder="22:00"></div>
         <div class="field"><label>Quiet hours end (UTC HH:MM)</label><input type="text" id="cfgQuietEnd" placeholder="07:00"></div>
+      </div>
+    </div>
+    <div id="tabSecurity" style="display:none">
+      <div class="field-group">
+        <div style="padding:0.5rem 0 0.25rem;font-size:0.7rem;color:var(--text-secondary);line-height:1.5">
+          Set a secret to require authentication for all mutating API calls (trades, settings, controls).<br>
+          Also set <code style="font-size:0.65rem">DASHBOARD_SECRET</code> in your <code>.env</code> / stack.env to the same value.
+        </div>
+        <div class="field">
+          <label>Dashboard Secret</label>
+          <input type="text" id="cfgDashboardSecret" placeholder="leave empty to disable auth" autocomplete="off"
+            oninput="localStorage.setItem('cb-dashboard-secret', this.value)">
+        </div>
       </div>
     </div>
     <div class="modal-footer">

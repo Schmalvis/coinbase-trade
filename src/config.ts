@@ -29,6 +29,7 @@ const schema = z.object({
 
   DATA_DIR: z.string().default('/home/pi/.local/share/coinbase-trade/base-sepolia'),
   ALCHEMY_API_KEY: z.string().optional(),
+  DASHBOARD_SECRET: z.string().optional().default(''),
 
   MAX_POSITION_PCT: z.coerce.number().default(40),
   MAX_DAILY_LOSS_PCT: z.coerce.number().default(5),

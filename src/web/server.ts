@@ -7,6 +7,7 @@ import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
 import { assetsForNetwork } from '../assets/registry.js';
+import { createAuthMiddleware } from './auth.js';
 import type { CoinbaseTools } from '../mcp/tools.js';
 import type { RuntimeConfig, ConfigKey } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
@@ -45,6 +46,7 @@ export function startWebServer(
 ): void {
   const app = express();
   app.use(express.json());
+  app.use(createAuthMiddleware(() => config.DASHBOARD_SECRET || undefined));
 
   // ── Status ──────────────────────────────────────────────────────────────────
   app.get('/api/status', (_req, res) => {
@@ -166,6 +168,16 @@ export function startWebServer(
     }
     if (botState.activeNetwork !== 'base-mainnet') {
       return res.status(400).json({ error: 'Enso routing is only available on base-mainnet' });
+    }
+    // C2: Allowlist — only trade tokens that are registered or explicitly enabled
+    const network = botState.activeNetwork;
+    const registryAddrs = assetsForNetwork(network)
+      .map(a => a.addresses[network as keyof typeof a.addresses]?.toLowerCase())
+      .filter((a): a is string => !!a);
+    const discoveredAddrs = (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[]).map(a => a.address.toLowerCase());
+    const allowlist = new Set([...registryAddrs, ...discoveredAddrs]);
+    if (!allowlist.has(tokenIn.toLowerCase()) && !allowlist.has(tokenOut.toLowerCase())) {
+      return res.status(400).json({ error: 'Token address not in allowlist — enable the asset first' });
     }
     try {
       const result = await executor.executeEnso(tokenIn, tokenOut, amountIn);

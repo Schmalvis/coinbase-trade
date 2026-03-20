@@ -13,7 +13,8 @@ export type ConfigKey =
   | 'RISK_OFF_THRESHOLD' | 'RISK_ON_THRESHOLD' | 'DEFAULT_FEE_ESTIMATE_PCT'
   | 'DASHBOARD_THEME'
   | 'TELEGRAM_MODE' | 'TELEGRAM_DIGEST_TIMES' | 'TELEGRAM_QUIET_START' | 'TELEGRAM_QUIET_END'
-  | 'BB_PERIOD' | 'BB_STD_DEV' | 'GRID_LEVELS' | 'GRID_AMOUNT_PCT' | 'GRID_UPPER_BOUND' | 'GRID_LOWER_BOUND' | 'GRID_RECALC_HOURS';
+  | 'BB_PERIOD' | 'BB_STD_DEV' | 'GRID_LEVELS' | 'GRID_AMOUNT_PCT' | 'GRID_UPPER_BOUND' | 'GRID_LOWER_BOUND' | 'GRID_RECALC_HOURS'
+  | 'DASHBOARD_SECRET';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -33,11 +34,13 @@ const ALL_KEYS = new Set<ConfigKey>([
   'DASHBOARD_THEME',
   'TELEGRAM_MODE', 'TELEGRAM_DIGEST_TIMES', 'TELEGRAM_QUIET_START', 'TELEGRAM_QUIET_END',
   'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
+  'DASHBOARD_SECRET',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
   'WEB_PORT', 'DATA_DIR', 'MCP_SERVER_URL',
   'NETWORK_ID', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_CHAT_IDS',
+  'DASHBOARD_SECRET', 'DRY_RUN',
 ]);
 
 // Returns null if valid, error string if invalid
@@ -91,6 +94,7 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   GRID_UPPER_BOUND:  v => !v || (isNum(v) && (v as number) > 0) ? null : 'must be a positive number or empty',
   GRID_LOWER_BOUND:  v => !v || (isNum(v) && (v as number) > 0) ? null : 'must be a positive number or empty',
   GRID_RECALC_HOURS: v => isNum(v) && (v as number) >= 1 && (v as number) <= 48 ? null : 'must be 1-48',
+  DASHBOARD_SECRET:  () => null, // read-only, validator not reached
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)
