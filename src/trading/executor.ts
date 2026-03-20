@@ -77,10 +77,38 @@ export class TradeExecutor {
   async executeForAsset(symbol: string, signal: Signal, reason: string): Promise<void> {
     if (signal === 'hold') return;
 
-    if (this.runtimeConfig.get('DRY_RUN')) {
-      logger.info(`[DRY RUN] ${signal} ${symbol}: ${reason}`);
+    // Safety: respect pause state (C3)
+    if (botState.isPaused) {
+      logger.info(`[${symbol}] Trade skipped — bot is paused`);
       return;
     }
+
+    // Safety: portfolio floor check (C3)
+    const floorUsd = this.runtimeConfig.get('PORTFOLIO_FLOOR_USD') as number;
+    const latestSnap = (queries.recentPortfolioSnapshots.all(1) as { portfolio_usd: number }[])[0];
+    if (latestSnap && latestSnap.portfolio_usd < floorUsd) {
+      logger.warn(`[${symbol}] Trade blocked — portfolio $${latestSnap.portfolio_usd.toFixed(2)} below floor $${floorUsd}`);
+      return;
+    }
+
+    // Safety: position limit check for buys (C3)
+    if (signal === 'buy') {
+      const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
+      const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
+      if (portfolioUsd > 0) {
+        const assetSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
+        if (assetSnap) {
+          const positionUsd = assetSnap.price_usd * assetSnap.balance;
+          const positionPct = (positionUsd / portfolioUsd) * 100;
+          if (positionPct >= maxPosPct) {
+            logger.warn(`[${symbol}] Buy blocked — position ${positionPct.toFixed(1)}% >= limit ${maxPosPct}%`);
+            return;
+          }
+        }
+      }
+    }
+
+    const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
     const cooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
     const last = this._assetCooldowns.get(symbol);
@@ -104,10 +132,36 @@ export class TradeExecutor {
       ? ['USDC', symbol]
       : [symbol, 'USDC'];
 
+    const price = botState.lastPrice ?? 0;
+
+    if (dryRun) {
+      logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
+      this.recordTrade({
+        signal: signal as 'buy' | 'sell', amountEth: amount, price,
+        triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
+      });
+      return;
+    }
+
     logger.info(`Executing ${signal} ${symbol} amount=${amount}: ${reason}`);
-    await this.tools.swap(fromSymbol as any, toSymbol as any, amount.toString());
+
+    let txHash: string | undefined;
+    let status = 'executed';
+
+    try {
+      const result = await this.tools.swap(fromSymbol as any, toSymbol as any, amount.toString());
+      txHash = result.txHash;
+    } catch (err) {
+      logger.error(`[${symbol}] Swap failed for ${signal}`, err);
+      status = 'failed';
+    }
+
     this._assetCooldowns.set(symbol, new Date());
-    logger.info(`executeForAsset complete: ${signal} ${symbol}`);
+    this.recordTrade({
+      signal: signal as 'buy' | 'sell', amountEth: amount, price, txHash,
+      triggeredBy: 'asset-strategy', status, dryRun: false, reason,
+    });
+    logger.info(`executeForAsset complete: ${signal} ${symbol} (${status})`);
   }
 
   async executeEnso(
@@ -205,8 +259,15 @@ export class TradeExecutor {
     let buyTxHash: string | undefined;
     if (!dryRun) {
       try {
-        const usdcBalance = botState.lastUsdcBalance ?? 0;
-        const amount = Math.max(usdcBalance * 0.95, 0); // leave 5% buffer
+        // Fetch fresh USDC balance after leg 1 (H1 — stale balance fix)
+        let freshUsdcBalance: number;
+        try {
+          const usdcAddr = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC on Base
+          freshUsdcBalance = await this.tools.getErc20Balance(usdcAddr);
+        } catch {
+          freshUsdcBalance = botState.lastUsdcBalance ?? 0;
+        }
+        const amount = Math.max(freshUsdcBalance * 0.95, 0); // leave 5% buffer
         if (amount <= 0) {
           logger.warn('Rotation leg 2 skipped: no USDC balance after sell');
           botState.recordTrade(new Date());

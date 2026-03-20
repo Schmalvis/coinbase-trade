@@ -102,7 +102,9 @@ export class TradingEngine {
   startAssetLoop(address: string, symbol: string, params: AssetStrategyParams): void {
     this.stopAssetLoop(symbol);
     const ms = (this.runtimeConfig.get('TRADE_INTERVAL_SECONDS') as number) * 1000;
-    const id = setInterval(() => void this.tickAsset(symbol, params), ms);
+    const id = setInterval(() => {
+      this.tickAsset(symbol, params).catch(err => logger.error(`Asset loop error for ${symbol}`, err));
+    }, ms);
     this._assetLoops.set(symbol, id);
     logger.info(`Asset loop started: ${symbol} every ${ms}ms`);
   }
