@@ -892,7 +892,7 @@
         }
         if (candleOverlay) candleOverlay.style.display = 'none';
         var candles = data.map(function(c) {
-          return { x: new Date(c.timestamp || c.t).getTime(), o: c.open != null ? c.open : c.o, h: c.high != null ? c.high : c.h, l: c.low != null ? c.low : c.l, c: c.close != null ? c.close : c.c };
+          return { x: new Date(c.open_time || c.timestamp || c.t).getTime(), o: c.open != null ? c.open : c.o, h: c.high != null ? c.high : c.h, l: c.low != null ? c.low : c.l, c: c.close != null ? c.close : c.c };
         });
         var cc = getChartColors();
         var cs = getComputedStyle(document.documentElement);
