@@ -135,6 +135,7 @@ docs/
 - **Docker volume permissions:** Container runs as `USER node` (UID 1000). DATA_DIR volume must be owned by 1000:1000 or logger/DB fails with EACCES. Fix: `chown -R 1000:1000 /home/pi/.local/share/coinbase-trade`
 - **Asset address lookup must be fuzzy:** Registry assets seeded with addresses from `registry.ts` (e.g., `0xeeee...` for ETH). All asset management endpoints use case-insensitive + symbol fallback lookup because frontend address may not exactly match DB address.
 - **Alchemy discovers spam tokens:** Random ERC20 airdrops (common on Base) appear as discovered assets. Users should DISMISS unknown tokens.
+- **SMA strategy enhanced:** SMA now uses EMA by default (faster reaction to price changes). Crossover signals are filtered by volume (>1.5x 20-period average required) and RSI (buy blocked when RSI>70, sell blocked when RSI<30). Filters require 15m candle data — they're bypassed gracefully when candles haven't accumulated yet.
 
 ---
 
