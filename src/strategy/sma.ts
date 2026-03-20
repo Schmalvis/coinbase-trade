@@ -63,11 +63,37 @@ export class SMAStrategy implements Strategy {
 
     if (!this.prevShortAboveLong && shortAboveLong) {
       this.prevShortAboveLong = true;
+
+      // Volume confirmation filter
+      const vol = this.opts?.getVolume?.();
+      if (vol && vol.current / vol.average < 1.5) {
+        return { signal: 'hold', reason: `Bullish crossover blocked — low volume (${vol.current}/${vol.average}) — ${reason}` };
+      }
+
+      // RSI filter — block buy when overbought
+      const rsi = this.opts?.getRsi?.();
+      if (rsi != null && rsi > 70) {
+        return { signal: 'hold', reason: `Bullish crossover blocked — RSI overbought (${rsi}) — ${reason}` };
+      }
+
       return { signal: 'buy', reason: `Bullish crossover — ${reason}` };
     }
 
     if (this.prevShortAboveLong && !shortAboveLong) {
       this.prevShortAboveLong = false;
+
+      // Volume confirmation filter
+      const vol = this.opts?.getVolume?.();
+      if (vol && vol.current / vol.average < 1.5) {
+        return { signal: 'hold', reason: `Bearish crossover blocked — low volume (${vol.current}/${vol.average}) — ${reason}` };
+      }
+
+      // RSI filter — block sell when oversold
+      const rsi = this.opts?.getRsi?.();
+      if (rsi != null && rsi < 30) {
+        return { signal: 'hold', reason: `Bearish crossover blocked — RSI oversold (${rsi}) — ${reason}` };
+      }
+
       return { signal: 'sell', reason: `Bearish crossover — ${reason}` };
     }
 

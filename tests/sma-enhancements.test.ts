@@ -77,3 +77,98 @@ describe('SMAStrategy — EMA mode', () => {
     expect(result.reason).not.toContain('EMA');
   });
 });
+
+describe('SMAStrategy — volume confirmation filter', () => {
+  it('blocks buy signal when volume < 1.5x average', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getVolume: () => ({ current: 50, average: 100 }),
+    });
+    // Init: short < long
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    // Crossover: short > long → buy, but volume too low
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('hold');
+    expect(result.reason.toLowerCase()).toContain('volume');
+  });
+
+  it('allows buy when volume >= 1.5x average', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getVolume: () => ({ current: 200, average: 100 }),
+    });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+
+  it('allows signal when getVolume returns null (graceful degradation)', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getVolume: () => null,
+    });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+
+  it('allows signal when getVolume not provided', () => {
+    const s = new SMAStrategy({ shortWindow: 2, longWindow: 4 });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+});
+
+describe('SMAStrategy — RSI filter', () => {
+  it('blocks buy when RSI > 70 (overbought)', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getRsi: () => 75,
+    });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('hold');
+    expect(result.reason).toContain('RSI');
+  });
+
+  it('blocks sell when RSI < 30 (oversold)', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getRsi: () => 25,
+    });
+    // Init: short > long
+    s.evaluate(makeSnaps([10, 9, 3, 4]));
+    // Crossover: short < long → sell, but RSI oversold
+    const result = s.evaluate(makeSnaps([1, 2, 3, 4]));
+    expect(result.signal).toBe('hold');
+    expect(result.reason).toContain('RSI');
+  });
+
+  it('allows buy when RSI is neutral (50)', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getRsi: () => 50,
+    });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+
+  it('allows signal when getRsi returns null', () => {
+    const s = new SMAStrategy({
+      shortWindow: 2, longWindow: 4,
+      getRsi: () => null,
+    });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+
+  it('allows signal when getRsi not provided', () => {
+    const s = new SMAStrategy({ shortWindow: 2, longWindow: 4 });
+    s.evaluate(makeSnaps([1, 2, 3, 4]));
+    const result = s.evaluate(makeSnaps([10, 9, 3, 4]));
+    expect(result.signal).toBe('buy');
+  });
+});
