@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { logger } from '../core/logger.js';
 
 const FAILURE_THRESHOLD = 3;
+const MCP_TIMEOUT_MS = 30_000;
 
 export class MCPClient {
   private client: Client;
@@ -54,7 +55,13 @@ export class MCPClient {
     let failureRecorded = false;
 
     try {
-      const result = await this.client.callTool({ name, arguments: argsWithNetwork });
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(`MCP tool '${name}' timed out after ${MCP_TIMEOUT_MS}ms`)), MCP_TIMEOUT_MS);
+      });
+      const result = await Promise.race([
+        this.client.callTool({ name, arguments: argsWithNetwork }),
+        timeoutPromise,
+      ]) as any;
 
       if (result.isError) {
         this._recordFailure();

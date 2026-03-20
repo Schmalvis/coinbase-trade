@@ -101,9 +101,11 @@ export async function startPortfolioTracker(
           botState.updateAssetBalance(asset.symbol, balance);
           if (price > 0) candleService?.recordSpotPrice(asset.symbol, network, price);
 
-          // Keep legacy price_snapshots alive for ETH (existing /api/prices default)
+          // Legacy price_snapshots for ETH — portfolio_usd is set after the
+          // asset loop completes via insertPortfolioSnapshot (the authoritative
+          // snapshot). We still record eth_price/eth_balance here for the
+          // /api/prices default endpoint but omit the misleading portfolio_usd.
           if (asset.symbol === 'ETH') {
-            queries.insertSnapshot.run({ eth_price: price, eth_balance: balance, portfolio_usd: 0 });
             botState.updatePrice(price);
           }
 

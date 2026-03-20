@@ -6,7 +6,7 @@ import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import { assetsForNetwork } from '../assets/registry.js';
-import { queries, rotationQueries, dailyPnlQueries, discoveredAssetQueries, watchlistQueries } from '../data/db.js';
+import { queries, rotationQueries, dailyPnlQueries, discoveredAssetQueries, watchlistQueries, runTransaction } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 
 export interface OpportunityScore {
@@ -320,15 +320,26 @@ export class PortfolioOptimizer {
       );
     }
 
-    // 10. Record rotation in DB
-    rotationQueries.insertRotation.run({
-      sell_symbol: candidate.sell.symbol,
-      buy_symbol: candidate.buy.symbol,
-      sell_amount: actualAmount,
-      estimated_gain_pct: estimatedGainPct,
-      estimated_fee_pct: estimatedFeePct,
-      dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
-      network,
+    // 10. Record rotation + update daily PnL atomically
+    runTransaction(() => {
+      rotationQueries.insertRotation.run({
+        sell_symbol: candidate.sell.symbol,
+        buy_symbol: candidate.buy.symbol,
+        sell_amount: actualAmount,
+        estimated_gain_pct: estimatedGainPct,
+        estimated_fee_pct: estimatedFeePct,
+        dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
+        network,
+      });
+
+      dailyPnlQueries.upsertDailyPnl.run({
+        date: today,
+        network,
+        high_water: totalPortfolioUsd,
+        current_usd: totalPortfolioUsd,
+        rotations: todayCount + 1,
+        realized_pnl: 0,
+      });
     });
 
     logger.info(

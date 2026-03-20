@@ -141,6 +141,9 @@ db.exec(`
   );
 `);
 
+/** Wraps `fn` in BEGIN/COMMIT with automatic ROLLBACK on error. */
+export const runTransaction: (fn: () => void) => void = db.transaction((fn: () => void) => fn());
+
 export const queries: Record<string, Statement> = {
   insertSnapshot: db.prepare(`
     INSERT INTO price_snapshots (eth_price, eth_balance, portfolio_usd)
