@@ -147,7 +147,8 @@ docs/
 | `TELEGRAM_BOT_TOKEN` | set | |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | `8423651207` | |
 | `STRATEGY` | `threshold` | `threshold`, `sma`, or `grid` — sets default for new assets only |
-| `DRY_RUN` | `false` | Set `true` to simulate without executing |
+| `DRY_RUN` | `false` | Set `true` to simulate without executing. Read-only at runtime — cannot be changed via dashboard API |
+| `DASHBOARD_SECRET` | (unset) | Optional. Bearer token for mutating API endpoints (POST/PUT/DELETE). If unset, all requests allowed. Set this if dashboard is network-accessible |
 | `DATA_DIR` | `/home/pi/.local/share/coinbase-trade/base-sepolia` | Must be POSIX filesystem |
 | `ALCHEMY_API_KEY` | (unset) | Optional. Enables ERC20 token auto-discovery via Alchemy. Get a key at dashboard.alchemy.com |
 

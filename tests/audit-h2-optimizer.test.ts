@@ -43,6 +43,7 @@ vi.mock('../src/data/db.js', () => ({
     upsertGridLevel: mockUpsertGridLevel,
     clearGridLevels: mockClearGridLevels,
   },
+  runTransaction: (fn: () => void) => fn(),
 }));
 
 // ── Mock botState ──
