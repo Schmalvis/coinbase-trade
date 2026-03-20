@@ -1,4 +1,5 @@
 import { gridStateQueries, type GridStateRow } from '../data/db.js';
+import { logger } from '../core/logger.js';
 import type { Strategy, Snapshot, StrategyResult } from './base.js';
 
 export interface GridStrategyOpts {
@@ -65,8 +66,8 @@ export class GridStrategy implements Strategy {
     }
 
     if (!this.initialized) {
-      if (this.upperBound == null || this.lowerBound == null) {
-        return { signal: 'hold', reason: 'Grid bounds not available' };
+      if (this.upperBound == null || this.lowerBound == null || this.upperBound <= this.lowerBound) {
+        return { signal: 'hold', reason: 'Grid bounds invalid or not available' };
       }
       this.initializeLevels(currentPrice);
       this.initialized = true;
@@ -122,6 +123,10 @@ export class GridStrategy implements Strategy {
   }
 
   private initializeLevels(currentPrice: number): void {
+    if (!this.upperBound || !this.lowerBound || this.upperBound <= this.lowerBound || this.gridLevelCount < 2) {
+      logger.warn(`Grid bounds invalid for ${this.symbol}: upper=${this.upperBound} lower=${this.lowerBound} levels=${this.gridLevelCount}`);
+      return;
+    }
     gridStateQueries.clearGridLevels.run(this.symbol, this.network);
 
     const upper = this.upperBound!;

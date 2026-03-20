@@ -1,4 +1,4 @@
-import { queries, discoveredAssetQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries, candleQueries } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
@@ -152,8 +152,14 @@ export class TradingEngine {
           gridLevels: params.gridLevels,
           upperBound: params.gridUpperBound,
           lowerBound: params.gridLowerBound,
-          getCandleHigh24h: () => null,
-          getCandleLow24h: () => null,
+          getCandleHigh24h: () => {
+            const candles = candleQueries.getCandles.all(symbol, botState.activeNetwork, '24h', 1) as any[];
+            return candles.length > 0 ? candles[0].high : null;
+          },
+          getCandleLow24h: () => {
+            const candles = candleQueries.getCandles.all(symbol, botState.activeNetwork, '24h', 1) as any[];
+            return candles.length > 0 ? candles[0].low : null;
+          },
           feeEstimatePct: (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) ?? 1.0,
         });
       } else if (params.strategyType === 'sma') {

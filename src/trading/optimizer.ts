@@ -6,7 +6,7 @@ import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import { assetsForNetwork } from '../assets/registry.js';
-import { rotationQueries, dailyPnlQueries, discoveredAssetQueries, watchlistQueries } from '../data/db.js';
+import { queries, rotationQueries, dailyPnlQueries, discoveredAssetQueries, watchlistQueries } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 
 export interface OpportunityScore {
@@ -265,10 +265,17 @@ export class PortfolioOptimizer {
 
     // 7. Estimate fees
     const estimatedFeePct = this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number;
-    const estimatedGainPct = candidate.buy.score - candidate.sell.score;
-    const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) *
-      (candidate.sell.symbol === 'USDC' ? 1 :
-        candidate.sell.symbol === 'ETH' ? (botState.lastPrice ?? 0) : 0);
+    // Score delta to estimated percentage: 40pt delta ≈ 2% gain
+    const rawScoreDelta = candidate.buy.score - candidate.sell.score;
+    const estimatedGainPct = rawScoreDelta * 0.05;
+    let sellPrice = 0;
+    if (candidate.sell.symbol === 'USDC') sellPrice = 1;
+    else if (candidate.sell.symbol === 'ETH') sellPrice = botState.lastPrice ?? 0;
+    else {
+      const snap = (queries.recentAssetSnapshots.all(candidate.sell.symbol, 1) as any[])[0];
+      sellPrice = snap?.price_usd ?? 0;
+    }
+    const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) * sellPrice;
     const sellAmount = sellUsdValue * 0.1; // rotate 10% of held position
 
     // 8. Check RiskGuard

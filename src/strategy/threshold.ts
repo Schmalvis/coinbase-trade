@@ -4,6 +4,8 @@ import { config } from '../config.js';
 export class ThresholdStrategy implements Strategy {
   name = 'threshold';
   private entryPrice: number | null = null;
+  private consecutiveBuys = 0;
+  private readonly maxConsecutiveBuys = 3;
 
   constructor(private readonly opts?: { dropPct?: number; risePct?: number }) {}
 
@@ -26,7 +28,11 @@ export class ThresholdStrategy implements Strategy {
     const riseTarget    = this.opts?.risePct ?? config.PRICE_RISE_TARGET_PCT;
 
     if (dropPct >= dropThreshold) {
+      if (this.consecutiveBuys >= this.maxConsecutiveBuys) {
+        return { signal: 'hold', reason: `Consecutive buy limit (${this.maxConsecutiveBuys}) reached — waiting for reversal` };
+      }
       this.entryPrice = current;
+      this.consecutiveBuys++;
       return {
         signal: 'buy',
         reason: `Price dropped ${dropPct.toFixed(2)}% from recent high ($${rollingHigh.toFixed(2)} → $${current.toFixed(2)})`,
@@ -35,6 +41,7 @@ export class ThresholdStrategy implements Strategy {
 
     if (gainPct >= riseTarget) {
       this.entryPrice = current;
+      this.consecutiveBuys = 0;
       return {
         signal: 'sell',
         reason: `Price up ${gainPct.toFixed(2)}% from entry ($${this.entryPrice.toFixed(2)} → $${current.toFixed(2)})`,
