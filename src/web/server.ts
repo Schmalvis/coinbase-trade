@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { botState } from '../core/state.js';
-import { queries, discoveredAssetQueries, settingQueries, candleQueries, rotationQueries, dailyPnlQueries, portfolioSnapshotQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries, settingQueries, candleQueries, rotationQueries, dailyPnlQueries, portfolioSnapshotQueries, passkeyQueries } from '../data/db.js';
 import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
@@ -71,8 +71,12 @@ export function startWebServer(
   const getTotpSecret = () => settingQueries.getSetting.get('TOTP_SECRET')?.value || undefined;
   app.use(requireAuth(getTotpSecret));
 
-  // 5. Auth routes (login, setup, logout)
-  registerAuthRoutes(app, settingQueries, sessionSecret);
+  // 5. Auth routes (login, setup, logout, passkeys)
+  registerAuthRoutes(app, settingQueries, sessionSecret, passkeyQueries, {
+    rpId: config.WEBAUTHN_RP_ID,
+    rpName: config.WEBAUTHN_RP_NAME,
+    origin: config.WEBAUTHN_ORIGIN,
+  });
 
   // 6. Static files
   app.use(express.static(path.join(__dirname, 'public')));

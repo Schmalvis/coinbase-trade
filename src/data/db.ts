@@ -448,6 +448,50 @@ export interface GridStateRow {
   last_triggered: string | null;
 }
 
+// ── Passkeys table for WebAuthn ──────────────────────────────────
+db.exec(`
+  CREATE TABLE IF NOT EXISTS passkeys (
+    id              TEXT PRIMARY KEY,
+    public_key      TEXT NOT NULL,
+    counter         INTEGER NOT NULL DEFAULT 0,
+    transports      TEXT,
+    created_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    label           TEXT NOT NULL DEFAULT 'default'
+  );
+`);
+
+export interface PasskeyRow {
+  id: string;
+  public_key: string;
+  counter: number;
+  transports: string | null;
+  created_at: string;
+  label: string;
+}
+
+export const passkeyQueries = {
+  insertPasskey: db.prepare(`
+    INSERT INTO passkeys (id, public_key, counter, transports, label)
+    VALUES (@id, @public_key, @counter, @transports, @label)
+  `) as Statement<{ id: string; public_key: string; counter: number; transports: string | null; label: string }>,
+
+  getPasskeyById: db.prepare(`
+    SELECT * FROM passkeys WHERE id = ?
+  `) as Statement<[string], PasskeyRow>,
+
+  getAllPasskeys: db.prepare(`
+    SELECT * FROM passkeys
+  `) as Statement<[], PasskeyRow>,
+
+  updatePasskeyCounter: db.prepare(`
+    UPDATE passkeys SET counter = ? WHERE id = ?
+  `) as Statement<[number, string]>,
+
+  deletePasskey: db.prepare(`
+    DELETE FROM passkeys WHERE id = ?
+  `) as Statement<[string]>,
+};
+
 export const gridStateQueries = {
   upsertGridLevel: db.prepare(`
     INSERT INTO grid_state (symbol, network, level_price, state)

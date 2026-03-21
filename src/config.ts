@@ -52,6 +52,10 @@ const schema = z.object({
   TELEGRAM_DIGEST_TIMES: z.string().default('08:00,20:00'),
   TELEGRAM_QUIET_START: z.string().default(''),
   TELEGRAM_QUIET_END: z.string().default(''),
+
+  WEBAUTHN_RP_ID: z.string().default('schmalvis.com'),
+  WEBAUTHN_RP_NAME: z.string().default('Coinbase Trade'),
+  WEBAUTHN_ORIGIN: z.string().default('https://trader.schmalvis.com'),
 });
 
 const parsed = schema.safeParse(process.env);

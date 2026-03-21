@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.10.2",
+    "@simplewebauthn/server": "^13.3.0",
     "better-sqlite3": "^9.6.0",
     "commander": "^12.1.0",
     "dotenv": "^16.4.5",
