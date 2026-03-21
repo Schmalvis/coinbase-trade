@@ -138,6 +138,7 @@ docs/
 - **SMA strategy enhanced:** SMA now uses EMA by default (faster reaction to price changes). Crossover signals are filtered by volume (>1.5x 20-period average required) and RSI (buy blocked when RSI>70, sell blocked when RSI<30). Filters require 15m candle data — they're bypassed gracefully when candles haven't accumulated yet.
 - **Trade sanity check:** Executor rejects trades where USD value exceeds 2x portfolio value. Prevents phantom trades from MCP response parsing errors. Skipped when portfolio is 0 (fresh start).
 - **Inline asset management:** Click any asset row in the ASSETS table to expand an inline config panel with strategy selection, params, and save/disable. No separate ASSETS modal.
+- **TOTP authentication:** Dashboard is protected by TOTP (authenticator app). On first boot with no TOTP secret, redirects to `/auth/setup` showing QR code. Scan with Google Authenticator/Authy/1Password, verify code, done. Subsequent visits require 6-digit code. Sessions persist for 7 days via signed cookie. Rate limited to 5 login attempts per minute. IP allowlist optional via `ALLOWED_IPS` env var.
 
 ---
 
@@ -152,6 +153,8 @@ docs/
 | `STRATEGY` | `threshold` | `threshold`, `sma`, or `grid` — sets default for new assets only |
 | `DRY_RUN` | `false` | Set `true` to simulate without executing. Read-only at runtime — cannot be changed via dashboard API |
 | `DASHBOARD_SECRET` | (unset) | Optional. Bearer token for mutating API endpoints (POST/PUT/DELETE). If unset, all requests allowed. Set this if dashboard is network-accessible |
+| `SESSION_SECRET` | (auto-generated) | Secret for signing session cookies. If unset, a random 32-byte key is generated on each boot (sessions won't survive restarts). Set a fixed value for persistent sessions |
+| `ALLOWED_IPS` | (unset) | Optional. Comma-separated CIDR ranges or IPs (e.g., `192.168.1.0/24,10.0.0.5`). If set, requests from outside are rejected with 403. If unset, all IPs allowed |
 | `DATA_DIR` | `/home/pi/.local/share/coinbase-trade/base-sepolia` | Must be POSIX filesystem |
 | `ALCHEMY_API_KEY` | (unset) | Optional. Enables ERC20 token auto-discovery via Alchemy. Get a key at dashboard.alchemy.com |
 
