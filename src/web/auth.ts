@@ -230,11 +230,13 @@ export function registerAuthRoutes(
     let secret: string;
     try {
       secret = decryptSecret(encryptedSecret, sessionSecret);
-    } catch {
+    } catch (err: any) {
+      logger.error(`TOTP decrypt failed: ${err.message} (secret length: ${encryptedSecret.length}, sessionSecret length: ${sessionSecret.length})`);
       return res.status(500).json({ error: 'Failed to decrypt TOTP secret' });
     }
 
     if (!verifyToken(secret, token)) {
+      logger.warn(`TOTP login failed for ${ip} — invalid code`);
       return res.status(401).json({ error: 'Invalid code' });
     }
     resetRateLimit(ip);
