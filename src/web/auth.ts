@@ -149,11 +149,11 @@ export function registerAuthRoutes(
     res.sendFile(path.join(publicDir, 'setup.html'));
   });
 
-  // GET /auth/setup-qr — return QR code data URI
+  // GET /auth/setup-qr — return QR code as PNG image
   router.get('/setup-qr', async (req, res) => {
     const existing = settingQueries.getSetting.get('TOTP_SECRET');
     if (existing?.value) {
-      return res.status(403).json({ error: 'Already configured' });
+      return res.status(403).send('Already configured');
     }
     // Generate or reuse pending secret from session
     let pendingSecret = (req.session as any)?._pendingTotpSecret;
@@ -164,8 +164,9 @@ export function registerAuthRoutes(
       (req.session as any)._pendingTotpUri = result.uri;
     }
     const uri = (req.session as any)._pendingTotpUri;
-    const qrDataUri = await QRCode.toDataURL(uri);
-    res.json({ qr: qrDataUri });
+    const pngBuffer = await QRCode.toBuffer(uri, { type: 'png', width: 256 });
+    res.setHeader('Content-Type', 'image/png');
+    res.send(pngBuffer);
   });
 
   // GET /auth/setup-info — return secret for manual entry
