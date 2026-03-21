@@ -242,6 +242,20 @@ export function registerAuthRoutes(
     res.json({ ok: true });
   });
 
+  // POST /auth/reset — clear TOTP secret and passkeys (LAN only: 192.168.68.x)
+  router.post('/reset', (req, res) => {
+    const ip = (req.ip || '').replace(/^::ffff:/, '');
+    if (!ip.startsWith('192.168.68.')) {
+      logger.warn(`Auth reset rejected from ${ip}`);
+      return res.status(403).json({ error: 'Reset only allowed from local network' });
+    }
+    settingQueries.upsertSetting.run('TOTP_SECRET', '');
+    logger.info(`Auth reset by ${ip} — TOTP secret cleared`);
+    req.session.destroy(() => {
+      res.json({ ok: true, message: 'TOTP secret cleared. Visit /auth/setup to reconfigure.' });
+    });
+  });
+
   // POST /auth/logout
   router.post('/logout', (req, res) => {
     req.session.destroy(() => {
