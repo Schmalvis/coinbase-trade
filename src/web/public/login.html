@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trade Bot Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0c0c14;
+      --card-bg: #13132a;
+      --card-border: rgba(255,255,255,0.05);
+      --text: #e2e8f0;
+      --text-muted: #94a3b8;
+      --input-bg: #1a1a35;
+      --input-border: rgba(255,255,255,0.1);
+      --accent: #4ade80;
+      --accent-hover: #22c55e;
+      --error: #f87171;
+      --font: 'Inter', sans-serif;
+    }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 2.5rem 2rem;
+      width: 100%;
+      max-width: 400px;
+      text-align: center;
+    }
+
+    .card h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.5rem;
+    }
+
+    .card .subtitle {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      margin-bottom: 2rem;
+    }
+
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+      text-align: left;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 10px;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 1.25rem;
+      letter-spacing: 0.5em;
+      text-align: center;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-group input:focus {
+      border-color: var(--accent);
+    }
+
+    .btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      color: #0c0c14;
+      font-family: var(--font);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background: var(--accent-hover); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .error-msg {
+      display: none;
+      color: var(--error);
+      font-size: 0.8125rem;
+      margin-top: 1rem;
+    }
+
+    .error-msg.visible { display: block; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Trade Bot</h1>
+    <p class="subtitle">Enter your authenticator code</p>
+    <form id="login-form">
+      <div class="form-group">
+        <label for="token">6-digit code</label>
+        <input
+          type="text"
+          id="token"
+          name="token"
+          maxlength="6"
+          inputmode="numeric"
+          pattern="[0-9]{6}"
+          autocomplete="one-time-code"
+          autofocus
+          required
+        >
+      </div>
+      <button type="submit" class="btn" id="submit-btn">Login</button>
+    </form>
+    <p class="error-msg" id="error-msg"></p>
+  </div>
+
+  <script>
+    (function () {
+      var form = document.getElementById('login-form');
+      var tokenInput = document.getElementById('token');
+      var errorMsg = document.getElementById('error-msg');
+      var submitBtn = document.getElementById('submit-btn');
+
+      function showError(text) {
+        errorMsg.textContent = text;
+        errorMsg.classList.add('visible');
+      }
+
+      function hideError() {
+        errorMsg.classList.remove('visible');
+        errorMsg.textContent = '';
+      }
+
+      // Only allow numeric input
+      tokenInput.addEventListener('input', function () {
+        this.value = this.value.replace(/[^0-9]/g, '');
+        hideError();
+      });
+
+      form.addEventListener('submit', function (e) {
+        e.preventDefault();
+        hideError();
+
+        var token = tokenInput.value.trim();
+        if (token.length !== 6) {
+          showError('Please enter a 6-digit code');
+          return;
+        }
+
+        submitBtn.disabled = true;
+
+        fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token: token })
+        })
+          .then(function (res) {
+            if (res.ok) {
+              window.location.href = '/';
+              return;
+            }
+            if (res.status === 429) {
+              showError('Too many attempts \u2014 try again in 60 seconds');
+            } else if (res.status === 401) {
+              showError('Invalid code');
+            } else {
+              showError('Login failed (HTTP ' + res.status + ')');
+            }
+            submitBtn.disabled = false;
+            tokenInput.value = '';
+            tokenInput.focus();
+          })
+          .catch(function () {
+            showError('Network error \u2014 check your connection');
+            submitBtn.disabled = false;
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
