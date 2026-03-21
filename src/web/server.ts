@@ -1,4 +1,5 @@
 import express from 'express';
+import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { botState } from '../core/state.js';
@@ -7,7 +8,7 @@ import type { DiscoveredAssetRow } from '../data/db.js';
 import { config } from '../config.js';
 import { logger } from '../core/logger.js';
 import { assetsForNetwork } from '../assets/registry.js';
-import { createAuthMiddleware } from './auth.js';
+import { createAuthMiddleware, createSessionMiddleware, isIpAllowed, requireAuth, registerAuthRoutes } from './auth.js';
 import type { CoinbaseTools } from '../mcp/tools.js';
 import type { RuntimeConfig, ConfigKey } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
@@ -45,7 +46,38 @@ export function startWebServer(
   watchlistManager?: WatchlistManager,
 ): void {
   const app = express();
+  const sessionSecret = config.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+  app.set('trust proxy', true); // for correct req.ip behind reverse proxy
+
+  // 1. JSON body parsing
   app.use(express.json());
+
+  // 2. Session middleware
+  app.use(createSessionMiddleware(sessionSecret));
+
+  // 3. IP allowlist
+  const allowedIps = config.ALLOWED_IPS || '';
+  if (allowedIps) {
+    app.use((req, res, next) => {
+      if (!isIpAllowed(req.ip || '', allowedIps)) {
+        res.status(403).send('Forbidden');
+        return;
+      }
+      next();
+    });
+  }
+
+  // 4. TOTP route protection (session-based auth for browser access)
+  const getTotpSecret = () => settingQueries.getSetting.get('TOTP_SECRET')?.value || undefined;
+  app.use(requireAuth(getTotpSecret));
+
+  // 5. Auth routes (login, setup, logout)
+  registerAuthRoutes(app, settingQueries, sessionSecret);
+
+  // 6. Static files
+  app.use(express.static(path.join(__dirname, 'public')));
+
+  // 7. Bearer token auth for mutating API endpoints (CLI/Telegram)
   app.use(createAuthMiddleware(() => config.DASHBOARD_SECRET || undefined));
 
   // ── Status ──────────────────────────────────────────────────────────────────
