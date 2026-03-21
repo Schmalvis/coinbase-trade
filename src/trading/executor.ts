@@ -54,6 +54,14 @@ export class TradeExecutor {
       return false;
     }
 
+    // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
+    const portfolioUsd = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0) + (botState.lastUsdcBalance ?? 0);
+    const tradeValueUsd = amount * (price || 0);
+    if (portfolioUsd > 0 && tradeValueUsd > portfolioUsd * 2) {
+      logger.error(`Trade sanity check BLOCKED: ${signal} value $${tradeValueUsd.toFixed(2)} > 2x portfolio $${portfolioUsd.toFixed(2)}`);
+      return false;
+    }
+
     logger.info(`${dryRun ? '[DRY RUN] ' : ''}Executing ${signal.toUpperCase()} ${amount} ${fromSymbol} → ${toSymbol} — ${reason}`);
 
     let txHash: string | undefined;
@@ -133,6 +141,14 @@ export class TradeExecutor {
       : [symbol, 'USDC'];
 
     const price = botState.lastPrice ?? 0;
+
+    // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
+    const portfolioUsdAsset = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0) + (botState.lastUsdcBalance ?? 0);
+    const tradeValueUsdAsset = amount * (price || 0);
+    if (portfolioUsdAsset > 0 && tradeValueUsdAsset > portfolioUsdAsset * 2) {
+      logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${portfolioUsdAsset.toFixed(2)}`);
+      return;
+    }
 
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
