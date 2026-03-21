@@ -131,11 +131,13 @@ docs/
 - **Per-asset strategy is primary:** The global `STRATEGY` setting only sets the default for newly added assets. Per-asset config in the `discovered_assets` table (editable via dashboard Asset Management) takes precedence and persists across restarts. Registry assets (ETH, CBBTC, CBETH) are seeded on boot but existing config is never overwritten.
 - **Alchemy discovery must skip registry assets:** Registry assets seeded into `discovered_assets` must be excluded from the Alchemy pricing loop — native tokens (ETH) have no ERC20 hex balance, so Alchemy writes balance=0, overwriting the correct value from the main poll.
 - **botState is unreliable for display:** `botState.lastBalance`, `lastPrice`, and `assetBalances` may be null/stale between poll cycles. Dashboard API endpoints should read from DB tables (`asset_snapshots`, `portfolio_snapshots`) as authoritative source, with botState as fallback only.
-- **Header strategy vs per-asset strategy:** The header shows global `STRATEGY` config key (default for new assets). The assets table shows per-asset strategy from `discovered_assets`. Per-asset is authoritative.
+- **Header strategy vs per-asset strategy:** The header now shows ETH's actual per-asset strategy from `discovered_assets`, not the global default. The global `STRATEGY` key only sets the default for newly seeded assets.
 - **Docker volume permissions:** Container runs as `USER node` (UID 1000). DATA_DIR volume must be owned by 1000:1000 or logger/DB fails with EACCES. Fix: `chown -R 1000:1000 /home/pi/.local/share/coinbase-trade`
 - **Asset address lookup must be fuzzy:** Registry assets seeded with addresses from `registry.ts` (e.g., `0xeeee...` for ETH). All asset management endpoints use case-insensitive + symbol fallback lookup because frontend address may not exactly match DB address.
 - **Alchemy discovers spam tokens:** Random ERC20 airdrops (common on Base) appear as discovered assets. Users should DISMISS unknown tokens.
 - **SMA strategy enhanced:** SMA now uses EMA by default (faster reaction to price changes). Crossover signals are filtered by volume (>1.5x 20-period average required) and RSI (buy blocked when RSI>70, sell blocked when RSI<30). Filters require 15m candle data — they're bypassed gracefully when candles haven't accumulated yet.
+- **Trade sanity check:** Executor rejects trades where USD value exceeds 2x portfolio value. Prevents phantom trades from MCP response parsing errors. Skipped when portfolio is 0 (fresh start).
+- **Inline asset management:** Click any asset row in the ASSETS table to expand an inline config panel with strategy selection, params, and save/disable. No separate ASSETS modal.
 
 ---
 
