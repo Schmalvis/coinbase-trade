@@ -839,7 +839,7 @@
         statusEl.className = 'value status-' + s.status;
         if (s.dryRun) statusEl.innerHTML += '<span class="dry-badge">Dry</span>';
         document.getElementById('price').textContent = s.lastPrice ? '$' + s.lastPrice.toFixed(2) : '--';
-        document.getElementById('strategy').textContent = s.strategy ? 'Strategy: ' + s.strategy : '';
+        document.getElementById('strategy').textContent = (s.ethStrategy || s.strategy) ? 'Strategy: ' + (s.ethStrategy || s.strategy) : '';
         document.getElementById('ethBalance').textContent = s.ethBalance != null ? s.ethBalance.toFixed(6) + ' ETH' : '--';
         document.getElementById('usdcBalance').textContent = s.usdcBalance != null ? s.usdcBalance.toFixed(2) + ' USDC' : '--';
         document.getElementById('portfolio').textContent = s.portfolioUsd != null ? '$' + s.portfolioUsd.toFixed(2) : '--';

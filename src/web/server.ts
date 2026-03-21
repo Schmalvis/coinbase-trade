@@ -73,6 +73,8 @@ export function startWebServer(
     const ethBal = ethSnap?.balance ?? botState.lastBalance ?? 0;
     const usdcBal = usdcSnap?.balance ?? botState.lastUsdcBalance ?? 0;
     const ethPrice = ethSnap?.price_usd ?? botState.lastPrice ?? 0;
+    const ethAsset = discoveredAssetQueries.getAssetBySymbol?.get('ETH', botState.activeNetwork) as DiscoveredAssetRow | undefined;
+    const ethStrategy = ethAsset?.strategy ?? runtimeConfig.get('STRATEGY');
     res.json({
       status:            botState.status,
       lastPrice:         ethPrice,
@@ -82,6 +84,7 @@ export function startWebServer(
       lastTradeAt:       botState.lastTradeAt,
       dryRun:            runtimeConfig.get('DRY_RUN'),
       strategy:          runtimeConfig.get('STRATEGY'),
+      ethStrategy,
       activeNetwork:     botState.activeNetwork,
       availableNetworks: botState.availableNetworks,
       assetBalances:     Object.fromEntries(botState.assetBalances),
@@ -505,14 +508,20 @@ export function startWebServer(
       }
     }
 
+    const dailyPnlPct = portfolioUsd > 0 ? (pnl / portfolioUsd) * 100 : 0;
+    const maxPosCfg = runtimeConfig.get('MAX_POSITION_PCT') as number;
+
     res.json({
       daily_pnl: pnl,
+      daily_pnl_pct: dailyPnlPct,
       daily_pnl_limit: maxLoss,
       rotations_today: (rotCount as any)?.cnt ?? 0,
       max_daily_rotations: maxRot,
       max_position_pct: maxPositionPct,
+      max_position_limit: maxPosCfg,
       portfolio_floor: floor,
       portfolio_usd: portfolioUsd,
+      optimizer_enabled: !!engine.optimizerEnabled,
       optimizer_status: !engine.optimizerEnabled ? 'disabled' : (optimizer?.isRiskOff ? 'risk-off' : 'active'),
       has_data: !!todayPnl,
     });
