@@ -197,6 +197,63 @@
     }
 
     .error-msg.visible { display: block; }
+
+    .passkey-section {
+      display: none;
+      text-align: center;
+    }
+
+    .passkey-section.visible { display: block; }
+
+    .passkey-section h2 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .passkey-section .passkey-subtitle {
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-bottom: 1.5rem;
+    }
+
+    .passkey-register-btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: var(--accent);
+      color: #0c0c14;
+      font-family: var(--font);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+      margin-bottom: 0.75rem;
+    }
+
+    .passkey-register-btn:hover { background: var(--accent-hover); }
+    .passkey-register-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .skip-link {
+      display: inline-block;
+      color: var(--text-muted);
+      font-size: 0.8125rem;
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+
+    .skip-link:hover { color: var(--text); }
+
+    .success-msg {
+      display: none;
+      color: var(--accent);
+      font-size: 0.875rem;
+      margin-top: 1rem;
+    }
+
+    .success-msg.visible { display: block; }
   </style>
 </head>
 <body>
@@ -241,9 +298,35 @@
       <button type="submit" class="btn" id="submit-btn">Confirm</button>
     </form>
     <p class="error-msg" id="error-msg"></p>
+
+    <div class="passkey-section" id="passkey-section">
+      <div class="divider" style="margin:1.5rem 0;height:1px;background:rgba(255,255,255,0.05);"></div>
+      <h2>Register a passkey?</h2>
+      <p class="passkey-subtitle">Use biometrics or a security key for faster login next time</p>
+      <button type="button" class="passkey-register-btn" id="passkey-register-btn">Register passkey</button>
+      <br>
+      <a class="skip-link" id="skip-link" href="/">Skip — go to dashboard</a>
+      <p class="success-msg" id="passkey-success-msg"></p>
+    </div>
   </div>
 
   <script>
+    function base64urlToBuffer(base64url) {
+      var padding = '='.repeat((4 - (base64url.length % 4)) % 4);
+      var base64 = base64url.replace(/-/g, '+').replace(/_/g, '/') + padding;
+      var binary = atob(base64);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
     (function () {
       var form = document.getElementById('setup-form');
       var tokenInput = document.getElementById('token');
@@ -312,7 +395,19 @@
         })
           .then(function (res) {
             if (res.ok) {
-              window.location.href = '/';
+              // Show passkey registration option if WebAuthn is supported
+              if (window.PublicKeyCredential) {
+                document.getElementById('passkey-section').classList.add('visible');
+                form.style.display = 'none';
+                document.querySelector('.qr-container').style.display = 'none';
+                document.querySelector('.manual-entry').style.display = 'none';
+                document.querySelector('.verify-heading').style.display = 'none';
+                document.querySelector('.verify-subtitle').style.display = 'none';
+                document.querySelector('.subtitle').textContent = 'TOTP configured successfully!';
+                document.querySelector('.divider').style.display = 'none';
+              } else {
+                window.location.href = '/';
+              }
               return;
             }
             return res.json().then(function (data) {
@@ -325,6 +420,72 @@
           .catch(function () {
             showError('Network error \u2014 check your connection');
             submitBtn.disabled = false;
+          });
+      });
+
+      // Passkey registration handler
+      var passkeyBtn = document.getElementById('passkey-register-btn');
+      var passkeySuccessMsg = document.getElementById('passkey-success-msg');
+
+      passkeyBtn.addEventListener('click', function () {
+        passkeyBtn.disabled = true;
+        passkeyBtn.textContent = 'Waiting for passkey...';
+
+        fetch('/auth/passkey/register-options')
+          .then(function (res) {
+            if (!res.ok) throw new Error('Failed to get registration options');
+            return res.json();
+          })
+          .then(function (options) {
+            options.challenge = base64urlToBuffer(options.challenge);
+            options.user.id = base64urlToBuffer(options.user.id);
+            if (options.excludeCredentials) {
+              options.excludeCredentials.forEach(function (c) {
+                c.id = base64urlToBuffer(c.id);
+              });
+            }
+            return navigator.credentials.create({ publicKey: options });
+          })
+          .then(function (credential) {
+            var body = {
+              id: credential.id,
+              rawId: bufferToBase64url(credential.rawId),
+              response: {
+                attestationObject: bufferToBase64url(credential.response.attestationObject),
+                clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+              },
+              type: credential.type,
+              authenticatorAttachment: credential.authenticatorAttachment || undefined,
+            };
+            if (credential.response.getTransports) {
+              body.response.transports = credential.response.getTransports();
+            }
+            return fetch('/auth/passkey/register', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+          })
+          .then(function (res) {
+            if (res.ok) {
+              passkeyBtn.style.display = 'none';
+              passkeySuccessMsg.textContent = 'Passkey registered! Redirecting...';
+              passkeySuccessMsg.classList.add('visible');
+              setTimeout(function () { window.location.href = '/'; }, 1500);
+              return;
+            }
+            return res.json().then(function (data) {
+              showError(data.error || 'Passkey registration failed');
+              passkeyBtn.disabled = false;
+              passkeyBtn.textContent = 'Register passkey';
+            });
+          })
+          .catch(function (err) {
+            if (err.name !== 'NotAllowedError') {
+              showError('Passkey error: ' + (err.message || 'unknown'));
+            }
+            passkeyBtn.disabled = false;
+            passkeyBtn.textContent = 'Register passkey';
           });
       });
     })();

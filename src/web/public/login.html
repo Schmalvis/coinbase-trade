@@ -114,12 +114,43 @@
     }
 
     .error-msg.visible { display: block; }
+
+    .passkey-btn {
+      width: 100%;
+      padding: 0.75rem;
+      background: transparent;
+      color: var(--accent);
+      font-family: var(--font);
+      font-size: 0.9375rem;
+      font-weight: 600;
+      border: 2px solid var(--accent);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s, color 0.2s;
+      margin-bottom: 1.25rem;
+      display: none;
+    }
+
+    .passkey-btn.visible { display: block; }
+    .passkey-btn:hover { background: var(--accent); color: #0c0c14; }
+    .passkey-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .divider-text {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      margin-bottom: 1.25rem;
+      display: none;
+    }
+    .divider-text.visible { display: block; }
   </style>
 </head>
 <body>
   <div class="card">
     <h1>Trade Bot</h1>
     <p class="subtitle">Enter your authenticator code</p>
+    <button type="button" class="passkey-btn" id="passkey-btn">Sign in with passkey</button>
+    <p class="divider-text" id="divider-text">or enter your authenticator code</p>
+
     <form id="login-form">
       <div class="form-group">
         <label for="token">6-digit code</label>
@@ -141,11 +172,29 @@
   </div>
 
   <script>
+    function base64urlToBuffer(base64url) {
+      var padding = '='.repeat((4 - (base64url.length % 4)) % 4);
+      var base64 = base64url.replace(/-/g, '+').replace(/_/g, '/') + padding;
+      var binary = atob(base64);
+      var bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    }
+
+    function bufferToBase64url(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var binary = '';
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    }
+
     (function () {
       var form = document.getElementById('login-form');
       var tokenInput = document.getElementById('token');
       var errorMsg = document.getElementById('error-msg');
       var submitBtn = document.getElementById('submit-btn');
+      var passkeyBtn = document.getElementById('passkey-btn');
+      var dividerText = document.getElementById('divider-text');
 
       function showError(text) {
         errorMsg.textContent = text;
@@ -156,6 +205,78 @@
         errorMsg.classList.remove('visible');
         errorMsg.textContent = '';
       }
+
+      // Check if passkeys are available and show button
+      if (window.PublicKeyCredential) {
+        fetch('/auth/passkey/login-options')
+          .then(function (res) {
+            if (res.ok) {
+              passkeyBtn.classList.add('visible');
+              dividerText.classList.add('visible');
+            }
+          })
+          .catch(function () { /* no passkeys, hide button */ });
+      }
+
+      passkeyBtn.addEventListener('click', function () {
+        hideError();
+        passkeyBtn.disabled = true;
+        passkeyBtn.textContent = 'Waiting for passkey...';
+
+        fetch('/auth/passkey/login-options')
+          .then(function (res) {
+            if (!res.ok) throw new Error('No passkeys available');
+            return res.json();
+          })
+          .then(function (options) {
+            options.challenge = base64urlToBuffer(options.challenge);
+            if (options.allowCredentials) {
+              options.allowCredentials.forEach(function (c) {
+                c.id = base64urlToBuffer(c.id);
+              });
+            }
+            return navigator.credentials.get({ publicKey: options });
+          })
+          .then(function (credential) {
+            var body = {
+              id: credential.id,
+              rawId: bufferToBase64url(credential.rawId),
+              response: {
+                authenticatorData: bufferToBase64url(credential.response.authenticatorData),
+                clientDataJSON: bufferToBase64url(credential.response.clientDataJSON),
+                signature: bufferToBase64url(credential.response.signature),
+              },
+              type: credential.type,
+              authenticatorAttachment: credential.authenticatorAttachment || undefined,
+            };
+            if (credential.response.userHandle) {
+              body.response.userHandle = bufferToBase64url(credential.response.userHandle);
+            }
+            return fetch('/auth/passkey/login', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body),
+            });
+          })
+          .then(function (res) {
+            if (res.ok) {
+              window.location.href = '/';
+              return;
+            }
+            return res.json().then(function (data) {
+              showError(data.error || 'Passkey login failed');
+            });
+          })
+          .catch(function (err) {
+            if (err.name !== 'NotAllowedError') {
+              showError('Passkey error: ' + (err.message || 'unknown'));
+            }
+          })
+          .finally(function () {
+            passkeyBtn.disabled = false;
+            passkeyBtn.textContent = 'Sign in with passkey';
+          });
+      });
 
       // Only allow numeric input
       tokenInput.addEventListener('input', function () {
