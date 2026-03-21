@@ -1,4 +1,5 @@
 import type { Request, Response, NextFunction } from 'express';
+import session from 'express-session';
 import { logger } from '../core/logger.js';
 
 /**
@@ -39,4 +40,49 @@ export function createAuthMiddleware(getSecret: () => string | undefined) {
 
     next();
   };
+}
+
+/* ── IP allowlist ─────────────────────────────────────────────── */
+
+export function isIpAllowed(ip: string, allowlist: string): boolean {
+  if (!allowlist || allowlist.trim() === '') return true;
+  const cidrs = allowlist.split(',').map(s => s.trim()).filter(Boolean);
+  const normalizedIp = ip.replace(/^::ffff:/, '');
+  for (const cidr of cidrs) {
+    if (cidr.includes('/')) {
+      const [network, bits] = cidr.split('/');
+      if (ipInSubnet(normalizedIp, network, parseInt(bits))) return true;
+    } else {
+      if (normalizedIp === cidr) return true;
+    }
+  }
+  return false;
+}
+
+function ipInSubnet(ip: string, network: string, bits: number): boolean {
+  const ipNum = ipToNumber(ip);
+  const netNum = ipToNumber(network);
+  const mask = ~((1 << (32 - bits)) - 1) >>> 0;
+  return (ipNum & mask) === (netNum & mask);
+}
+
+function ipToNumber(ip: string): number {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) + parseInt(octet), 0) >>> 0;
+}
+
+/* ── Session middleware ────────────────────────────────────────── */
+
+export function createSessionMiddleware(secret: string) {
+  return session({
+    secret,
+    resave: false,
+    saveUninitialized: false,
+    name: 'trade_session',
+    cookie: {
+      httpOnly: true,
+      secure: false,
+      maxAge: 7 * 24 * 60 * 60 * 1000,
+      sameSite: 'lax',
+    },
+  });
 }
