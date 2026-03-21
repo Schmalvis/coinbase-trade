@@ -1114,42 +1114,43 @@
     async function loadRisk() {
       try {
         var r = await fetch('/api/risk').then(function(r){ return r.json(); });
-        // Show placeholder if optimizer hasn't produced data yet
         var riskPlaceholder = document.getElementById('riskPlaceholder');
         var riskContent = document.getElementById('riskContent');
-        if (!r.has_data && r.optimizer_status === 'disabled') {
-          if (riskPlaceholder) riskPlaceholder.style.display = 'block';
-          if (riskContent) riskContent.style.display = 'none';
-          return;
-        }
+        // Always show risk content with real values / sensible defaults
         if (riskPlaceholder) riskPlaceholder.style.display = 'none';
         if (riskContent) riskContent.style.display = 'flex';
 
+        // Daily P&L — default $0.00 when no trades yet
         var pnl = r.daily_pnl != null ? r.daily_pnl : 0;
         var pnlLimit = r.daily_pnl_limit != null ? r.daily_pnl_limit : 100;
-        var pnlPct = Math.min(100, Math.abs(pnl) / pnlLimit * 100);
+        var pnlPct = pnlLimit > 0 ? Math.min(100, Math.abs(pnl) / pnlLimit * 100) : 0;
         document.getElementById('riskPnl').textContent = (pnl >= 0 ? '+' : '') + '$' + pnl.toFixed(2);
         document.getElementById('riskPnl').style.color = pnl >= 0 ? 'var(--green)' : 'var(--red)';
         document.getElementById('riskPnlBar').style.width = pnlPct + '%';
         document.getElementById('riskPnlBar').style.background = pnl >= 0 ? 'var(--green)' : 'var(--red)';
 
-        var rotToday = r.rotations_today != null ? r.rotations_today : (r.rotationsToday || 0);
-        var rotMax = r.max_daily_rotations != null ? r.max_daily_rotations : (r.maxDailyRotations || 10);
+        // Rotations today — default 0
+        var rotToday = r.rotations_today != null ? r.rotations_today : 0;
+        var rotMax = r.max_daily_rotations != null ? r.max_daily_rotations : 10;
         document.getElementById('riskRotations').textContent = rotToday + ' / ' + rotMax;
         document.getElementById('riskRotBar').style.width = (rotMax > 0 ? rotToday / rotMax * 100 : 0) + '%';
 
-        var maxPos = r.max_position_pct != null ? r.max_position_pct : (r.maxPositionPct || 0);
-        document.getElementById('riskMaxPos').textContent = maxPos.toFixed(1) + '%';
-        document.getElementById('riskPosBar').style.width = maxPos + '%';
+        // Max position — show current vs configured limit
+        var maxPos = r.max_position_pct != null ? r.max_position_pct : 0;
+        var maxPosLimit = r.max_position_limit != null ? r.max_position_limit : 40;
+        document.getElementById('riskMaxPos').textContent = maxPos.toFixed(1) + '% / ' + maxPosLimit.toFixed(0) + '%';
+        document.getElementById('riskPosBar').style.width = (maxPosLimit > 0 ? Math.min(100, maxPos / maxPosLimit * 100) : 0) + '%';
 
-        var floor = r.portfolio_floor != null ? r.portfolio_floor : (r.portfolioFloor || 0);
-        var current = r.portfolio_usd != null ? r.portfolio_usd : (r.portfolioUsd || 0);
+        // Portfolio floor — show current value vs configured floor
+        var floor = r.portfolio_floor != null ? r.portfolio_floor : 100;
+        var current = r.portfolio_usd != null ? r.portfolio_usd : 0;
         document.getElementById('riskFloor').textContent = '$' + current.toFixed(0) + ' / $' + floor.toFixed(0);
         var floorPct = floor > 0 ? Math.min(100, current / floor * 100) : 100;
         document.getElementById('riskFloorBar').style.width = floorPct + '%';
         document.getElementById('riskFloorBar').style.background = floorPct < 110 ? 'var(--red)' : 'var(--green)';
 
-        var optStatus = r.optimizer_status != null ? r.optimizer_status : (r.optimizerStatus || 'disabled');
+        // Optimizer status — show enabled/disabled/active/risk-off
+        var optStatus = r.optimizer_status != null ? r.optimizer_status : 'disabled';
         var optEl = document.getElementById('riskOptStatus');
         optEl.textContent = optStatus.charAt(0).toUpperCase() + optStatus.slice(1);
         optEl.style.color = optStatus === 'active' ? 'var(--green)' : optStatus === 'risk-off' ? 'var(--red)' : 'var(--text-secondary)';
