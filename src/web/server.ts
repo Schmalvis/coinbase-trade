@@ -326,12 +326,16 @@ export function startWebServer(
     const { address } = req.params;
     const network = botState.activeNetwork;
 
-    // Try by address first, then fall back to symbol lookup (handles address mismatches from seeding)
+    // Cascade: exact address → case-insensitive address → symbol fallback
     let row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
     if (!row) {
-      // address might be a symbol or the DB has a different address form
-      const allActive = discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[];
-      row = allActive.find(r => r.address.toLowerCase() === address.toLowerCase() || r.symbol.toLowerCase() === address.toLowerCase());
+      // Case-insensitive address match
+      const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+      row = allAssets.find(r => r.address.toLowerCase() === address.toLowerCase());
+    }
+    if (!row) {
+      // Symbol fallback (handles registry assets whose sentinel address differs from frontend)
+      row = discoveredAssetQueries.getAssetBySymbol.get(address, network) as DiscoveredAssetRow | undefined;
     }
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
 

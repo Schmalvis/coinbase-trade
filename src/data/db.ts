@@ -288,6 +288,10 @@ export const discoveredAssetQueries = {
   getAssetByAddress: db.prepare(`
     SELECT * FROM discovered_assets WHERE address = ? AND network = ?
   `) as Statement<[string, string], DiscoveredAssetRow>,
+
+  getAssetBySymbol: db.prepare(
+    `SELECT * FROM discovered_assets WHERE UPPER(symbol) = UPPER(?) AND network = ? LIMIT 1`
+  ) as Statement<[string, string], DiscoveredAssetRow>,
 };
 
 // ── Optimizer tables: candles, watchlist, rotations, daily_pnl ──
