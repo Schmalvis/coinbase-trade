@@ -54,24 +54,22 @@ export function startWebServer(
     const latestSnapshot = (queries.recentPortfolioSnapshots?.all(1) as any[])?.[0];
     let portfolioUsd = latestSnapshot?.portfolio_usd ?? 0;
 
-    // Fallback: compute from botState if no snapshot yet
+    // Fallback: compute from DB asset snapshots if no portfolio snapshot yet
     if (portfolioUsd === 0) {
       for (const [sym, bal] of botState.assetBalances) {
         let price: number;
         if (sym === 'USDC') {
           price = 1.0;
-        } else if (sym === 'ETH' && botState.lastPrice) {
-          price = botState.lastPrice;
         } else {
-          const priceRow = (queries.recentAssetSnapshots.all(sym, 1) as any[])[0];
-          price = priceRow?.price_usd ?? 0;
+          const snap = queries.getLatestAssetSnapshot?.get(sym) as { price_usd: number } | undefined;
+          price = snap?.price_usd ?? (sym === 'ETH' ? (botState.lastPrice ?? 0) : 0);
         }
         portfolioUsd += bal * price;
       }
     }
     // Always read balances from DB snapshots — botState is unreliable (gets cleared between poll cycles)
-    const ethSnap = (queries.recentAssetSnapshots.all('ETH', 1) as any[])[0];
-    const usdcSnap = (queries.recentAssetSnapshots.all('USDC', 1) as any[])[0];
+    const ethSnap = queries.getLatestAssetSnapshot?.get('ETH') as { balance: number; price_usd: number } | undefined;
+    const usdcSnap = queries.getLatestAssetSnapshot?.get('USDC') as { balance: number; price_usd: number } | undefined;
     const ethBal = ethSnap?.balance ?? botState.lastBalance ?? 0;
     const usdcBal = usdcSnap?.balance ?? botState.lastUsdcBalance ?? 0;
     const ethPrice = ethSnap?.price_usd ?? botState.lastPrice ?? 0;

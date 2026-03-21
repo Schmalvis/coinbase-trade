@@ -175,6 +175,10 @@ export const queries: Record<string, Statement> = {
     'SELECT * FROM asset_snapshots WHERE symbol = ? ORDER BY id DESC LIMIT ?'
   ),
 
+  getLatestAssetSnapshot: db.prepare(
+    'SELECT * FROM asset_snapshots WHERE symbol = ? ORDER BY id DESC LIMIT 1'
+  ),
+
   insertPortfolioSnapshot: db.prepare(
     'INSERT INTO portfolio_snapshots (portfolio_usd) VALUES (@portfolio_usd)'
   ),
