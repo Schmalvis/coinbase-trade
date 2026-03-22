@@ -1751,6 +1751,8 @@
           pill.classList.add('active');
           var gf = document.getElementById('inline-grid-fields-' + addr);
           if (gf) gf.style.display = type === 'grid' ? '' : 'none';
+          var smaT = document.getElementById('sma-toggles-' + addr);
+          if (smaT) smaT.style.display = type === 'sma' ? 'flex' : 'none';
         };
         pills.appendChild(pill);
       });
@@ -1774,6 +1776,25 @@
         row.appendChild(lbl); row.appendChild(inp); fieldsWrap.appendChild(row);
       });
       container.appendChild(fieldsWrap);
+      // SMA enhancement toggles
+      var smaToggles = document.createElement('div');
+      smaToggles.id = 'sma-toggles-' + addr;
+      smaToggles.style.cssText = 'margin:0.5rem 0;display:' + (cfg.type === 'sma' ? 'flex' : 'none') + ';gap:1rem;flex-wrap:wrap;font-size:0.72rem;color:var(--text-secondary)';
+      function mkToggle(labelText, inputId, checked) {
+        var lbl = document.createElement('label');
+        lbl.style.cssText = 'display:flex;align-items:center;gap:0.3rem;cursor:pointer';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.id = inputId; cb.checked = checked;
+        cb.style.cssText = 'accent-color:var(--green)';
+        cb.onclick = function(e){ e.stopPropagation(); };
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(labelText));
+        return lbl;
+      }
+      smaToggles.appendChild(mkToggle('Use EMA', 'ema-' + addr, asset.sma_use_ema !== 0));
+      smaToggles.appendChild(mkToggle('Volume filter', 'vol-' + addr, asset.sma_volume_filter !== 0));
+      smaToggles.appendChild(mkToggle('RSI filter', 'rsi-' + addr, asset.sma_rsi_filter !== 0));
+      container.appendChild(smaToggles);
       // Grid-specific fields
       var gridFields = document.createElement('div');
       gridFields.id = 'inline-grid-fields-' + addr;
@@ -1815,6 +1836,12 @@
         smaShort: parseInt(document.getElementById('cfg-' + address + '-smaShort').value),
         smaLong: parseInt(document.getElementById('cfg-' + address + '-smaLong').value)
       };
+      var emaEl = document.getElementById('ema-' + address);
+      var volEl = document.getElementById('vol-' + address);
+      var rsiEl = document.getElementById('rsi-' + address);
+      body.sma_use_ema = emaEl ? (emaEl.checked ? 1 : 0) : 1;
+      body.sma_volume_filter = volEl ? (volEl.checked ? 1 : 0) : 1;
+      body.sma_rsi_filter = rsiEl ? (rsiEl.checked ? 1 : 0) : 1;
       if (strategyType === 'grid') {
         body.grid_levels = parseInt(document.getElementById('grid-levels-' + address).value) || 10;
         var upperVal = document.getElementById('grid-upper-' + address).value;
