@@ -5,6 +5,8 @@
   import NetworkSelector from './lib/components/NetworkSelector.svelte';
   import ThemeToggle from './lib/components/ThemeToggle.svelte';
   import { startPolling } from './lib/stores/polling';
+  import CandleChart from './lib/components/CandleChart.svelte';
+  import ScoresPanel from './lib/components/ScoresPanel.svelte';
 
   onMount(() => {
     startPolling(5000);
@@ -32,6 +34,9 @@
     <AssetsTable />
   </div>
 
-  <!-- Placeholder for remaining panels -->
-  <div class="p-4 text-[var(--text-muted)] text-sm">More panels coming...</div>
+  <!-- Chart and scores row -->
+  <div class="px-4 mt-4 flex gap-4 flex-col lg:flex-row">
+    <div class="flex-[2]"><CandleChart /></div>
+    <div class="flex-1"><ScoresPanel /></div>
+  </div>
 </div>
