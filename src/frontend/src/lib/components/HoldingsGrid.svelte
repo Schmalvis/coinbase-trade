@@ -2,7 +2,7 @@
   import { assets } from '../stores/assets';
 
   $: holdings = ($assets ?? []).filter(
-    a => a.symbol !== 'ETH' && a.symbol !== 'USDC' && (a.balance ?? 0) > 0
+    a => a.symbol !== 'ETH' && a.symbol !== 'USDC' && (a.balance ?? 0) > 0 && (a.price ?? 0) * (a.balance ?? 0) > 0.01
   );
 </script>
 
