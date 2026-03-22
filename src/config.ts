@@ -25,7 +25,7 @@ const schema = z.object({
 
   WEB_PORT: z.coerce.number().default(8080),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
-  DRY_RUN: z.string().transform(s => s === 'true').default('true'),
+  DRY_RUN: z.string().transform(s => s.toLowerCase() === 'true').default('true'),
 
   DATA_DIR: z.string().default('/home/pi/.local/share/coinbase-trade/base-sepolia'),
   ALCHEMY_API_KEY: z.string().optional(),

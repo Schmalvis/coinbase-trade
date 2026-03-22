@@ -165,7 +165,7 @@ export class TradeExecutor {
     let status = 'executed';
 
     try {
-      const result = await this.tools.swap(fromSymbol as any, toSymbol as any, amount.toString());
+      const result = await this.tools.swap(fromSymbol, toSymbol, amount.toString());
       txHash = result.txHash;
     } catch (err) {
       logger.error(`[${symbol}] Swap failed for ${signal}`, err);
@@ -261,7 +261,7 @@ export class TradeExecutor {
     let sellTxHash: string | undefined;
     if (!dryRun) {
       try {
-        const result = await this.tools.swap(sellSymbol as any, 'USDC' as any, sellAmount.toString());
+        const result = await this.tools.swap(sellSymbol, 'USDC', sellAmount.toString());
         sellTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
@@ -278,8 +278,7 @@ export class TradeExecutor {
         // Fetch fresh USDC balance after leg 1 (H1 — stale balance fix)
         let freshUsdcBalance: number;
         try {
-          const usdcAddr = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC on Base
-          freshUsdcBalance = await this.tools.getErc20Balance(usdcAddr);
+          freshUsdcBalance = await this.tools.getErc20BalanceBySymbol('USDC');
         } catch {
           freshUsdcBalance = botState.lastUsdcBalance ?? 0;
         }
@@ -289,7 +288,7 @@ export class TradeExecutor {
           botState.recordTrade(new Date());
           return { status: 'leg1_done', sellTxHash };
         }
-        const result = await this.tools.swap('USDC' as any, buySymbol as any, amount.toString());
+        const result = await this.tools.swap('USDC', buySymbol, amount.toString());
         buyTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 2 failed (buy ${buySymbol})`, err);

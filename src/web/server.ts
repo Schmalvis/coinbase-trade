@@ -46,7 +46,12 @@ export function startWebServer(
   watchlistManager?: WatchlistManager,
 ): void {
   const app = express();
-  const sessionSecret = config.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+  let sessionSecret = config.SESSION_SECRET;
+  if (!sessionSecret) {
+    // Derive a stable secret from DATA_DIR so TOTP encryption survives restarts
+    sessionSecret = crypto.createHash('sha256').update(`totp-key:${config.DATA_DIR}`).digest('hex');
+    logger.warn('SESSION_SECRET not set — deriving from DATA_DIR. Set SESSION_SECRET env var for production.');
+  }
   app.set('trust proxy', true); // for correct req.ip behind reverse proxy
 
   // 1. JSON body parsing
