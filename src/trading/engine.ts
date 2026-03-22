@@ -18,6 +18,9 @@ interface AssetStrategyParams {
   gridLevels?: number;
   gridUpperBound?: number;
   gridLowerBound?: number;
+  smaUseEma?: boolean;
+  smaVolumeFilter?: boolean;
+  smaRsiFilter?: boolean;
 }
 
 const STRATEGY_KEYS = [
@@ -46,6 +49,9 @@ export class TradingEngine {
           gridLevels: row.grid_levels,
           gridUpperBound: row.grid_upper_bound ?? undefined,
           gridLowerBound: row.grid_lower_bound ?? undefined,
+          smaUseEma: !!row.sma_use_ema,
+          smaVolumeFilter: !!row.sma_volume_filter,
+          smaRsiFilter: !!row.sma_rsi_filter,
         });
       }
       logger.info('All asset loops reloaded due to config change');
@@ -76,6 +82,9 @@ export class TradingEngine {
         gridLevels: row.grid_levels,
         gridUpperBound: row.grid_upper_bound ?? undefined,
         gridLowerBound: row.grid_lower_bound ?? undefined,
+        smaUseEma: !!row.sma_use_ema,
+        smaVolumeFilter: !!row.sma_volume_filter,
+        smaRsiFilter: !!row.sma_rsi_filter,
       });
     }
     logger.info(`Started ${activeAssets.length} asset loops`);
@@ -166,15 +175,15 @@ export class TradingEngine {
         strategy = new SMAStrategy({
           shortWindow: params.smaShort,
           longWindow: params.smaLong,
-          useEma: true,
-          getVolume: () => {
+          useEma: !!params.smaUseEma,
+          getVolume: params.smaVolumeFilter !== false ? () => {
             const candles = candleQueries.getCandles.all(symbol, botState.activeNetwork, '15m', 21) as any[];
             if (candles.length < 2) return null;
             const current = candles[0].volume ?? 0;
             const avg = candles.slice(0, 20).reduce((s: number, c: any) => s + (c.volume ?? 0), 0) / Math.min(candles.length, 20);
             return avg > 0 ? { current, average: avg } : null;
-          },
-          getRsi: () => {
+          } : undefined,
+          getRsi: params.smaRsiFilter !== false ? () => {
             const candles = candleQueries.getCandles.all(symbol, botState.activeNetwork, '15m', 15) as any[];
             if (candles.length < 14) return null;
             const closes = candles.map((c: any) => c.close).reverse();
@@ -189,7 +198,7 @@ export class TradingEngine {
             if (avgLoss === 0) return 100;
             const rs = avgGain / avgLoss;
             return 100 - (100 / (1 + rs));
-          },
+          } : undefined,
         });
       } else {
         strategy = new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });

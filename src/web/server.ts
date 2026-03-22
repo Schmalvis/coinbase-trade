@@ -320,7 +320,7 @@ export function startWebServer(
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
 
     const dbAddress = row.address;
-    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
+    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number; smaUseEma?: boolean; smaVolumeFilter?: boolean; smaRsiFilter?: boolean };
     discoveredAssetQueries.updateAssetStrategyConfig.run({
       address: dbAddress, network,
       strategy: params.strategyType,
@@ -328,6 +328,9 @@ export function startWebServer(
       rise_pct: params.risePct,
       sma_short: params.smaShort,
       sma_long: params.smaLong,
+      sma_use_ema: params.smaUseEma !== false ? 1 : 0,
+      sma_volume_filter: params.smaVolumeFilter !== false ? 1 : 0,
+      sma_rsi_filter: params.smaRsiFilter !== false ? 1 : 0,
     });
     discoveredAssetQueries.updateAssetStatus.run({
       status: 'active',
@@ -385,7 +388,7 @@ export function startWebServer(
     const errors = validateAssetParams(body);
     if (errors.length) return res.status(400).json({ error: errors[0] });
 
-    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number };
+    const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number; smaUseEma?: boolean; smaVolumeFilter?: boolean; smaRsiFilter?: boolean };
     const dbAddress = row.address; // use the address from DB, not the request param
     discoveredAssetQueries.updateAssetStrategyConfig.run({
       address: dbAddress, network,
@@ -394,6 +397,9 @@ export function startWebServer(
       rise_pct: params.risePct,
       sma_short: params.smaShort,
       sma_long: params.smaLong,
+      sma_use_ema: params.smaUseEma !== false ? 1 : 0,
+      sma_volume_filter: params.smaVolumeFilter !== false ? 1 : 0,
+      sma_rsi_filter: params.smaRsiFilter !== false ? 1 : 0,
     });
     if (params.strategyType === 'grid') {
       const gridLevels = Number(body.grid_levels) || 10;
