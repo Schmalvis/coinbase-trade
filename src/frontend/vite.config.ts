@@ -5,7 +5,7 @@ export default defineConfig({
   plugins: [svelte()],
   build: {
     outDir: '../../dist/web/public',
-    emptyOutDir: false,
+    emptyOutDir: true,
   },
   server: {
     port: 5173,

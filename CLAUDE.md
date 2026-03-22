@@ -49,10 +49,13 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 ```bash
 cd /home/pi/share/coinbase-trade
 
-# Dev (live reload)
+# Dev (backend, live reload)
 npm run dev
 
-# Production
+# Dev (frontend with HMR — proxies API to localhost:3003)
+npm run dev:frontend
+
+# Production build (backend + frontend)
 npm run build && npm start
 
 # Container
@@ -66,6 +69,8 @@ npx tsx cli.ts trades
 ```
 
 **Note:** tsx/esm cold-start takes ~15 seconds on the Pi — this is normal, not a hang.
+
+**Note:** Two separate npm installs are required. After cloning, run `npm ci` (backend) and `cd src/frontend && npm ci` (Svelte/Vite/Tailwind). The Dockerfile handles both automatically.
 
 ---
 
@@ -107,19 +112,18 @@ src/
   web/
     server.ts        # Express API + static dashboard
     public/
-      index.html     # Dashboard HTML + CSS only (no inline JS)
-      js/            # Frontend TypeScript modules (bundled by esbuild into bundle.js)
-        main.ts      # Entry point — imports all modules, init, polling loop
-        state.ts     # Shared mutable state
-        api.ts       # Fetch wrappers (getAuthHeaders, postJSON, etc.)
-        theme.ts     # Dark/light theme toggle
-        charts.ts    # Chart.js candle/line charts
-        status.ts    # Status loading, wallet, trades, rotations, watchlist, trade modal
-        assets.ts    # Asset table rendering, inline config accordion
-        settings.ts  # Settings modal open/close/save
-        scores.ts    # Opportunity scores panel
-        risk.ts      # Risk monitor panel
-        performance.ts # P&L performance panel
+      login.html     # TOTP login page (static, served directly)
+      setup.html     # TOTP setup page (static, served directly)
+src/frontend/        # Svelte + Vite + Tailwind dashboard (builds to dist/web/public/)
+  src/
+    App.svelte       # Root component
+    main.ts          # Entry point
+    app.css          # Global styles
+    lib/
+      api.ts         # Typed fetch wrappers for all API endpoints
+      types.ts       # TypeScript interfaces for API responses
+      stores/        # Svelte writable stores (status, assets, candles, scores, risk, performance, settings, polling)
+      components/    # Svelte components (Header, AssetsTable, CandleChart, OpportunityScores, etc.)
 cli.ts               # CLI (talks to running bot via HTTP)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack

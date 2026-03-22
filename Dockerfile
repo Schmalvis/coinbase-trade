@@ -22,6 +22,8 @@ FROM deps AS builder
 
 COPY tsconfig.json ./
 COPY src/ ./src/
+# Install frontend deps (separate package.json in src/frontend/)
+RUN cd src/frontend && npm ci
 RUN npm run build
 
 # Prune devDependencies — only production deps go to the runtime image
