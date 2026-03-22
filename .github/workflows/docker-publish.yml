@@ -23,6 +23,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci --ignore-scripts
+      - run: cd src/frontend && npm ci
       - run: npm run build
 
   # ── Docker build + push (runs on native arm64 runner — no QEMU) ──────────
