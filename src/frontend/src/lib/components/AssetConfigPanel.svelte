@@ -94,13 +94,9 @@
   async function handleDisable() {
     saving = true;
     try {
-      const res = await saveAssetConfig(asset.address, { strategyType: 'none' });
-      if (res.ok) {
-        await loadAssets();
-        dispatch('saved');
-      } else {
-        alert('Error: ' + (res.error || 'Unknown error'));
-      }
+      await dismissAsset(asset.address);
+      await loadAssets();
+      dispatch('dismissed');
     } finally {
       saving = false;
     }
