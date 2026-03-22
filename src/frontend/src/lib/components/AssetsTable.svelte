@@ -8,16 +8,19 @@
     expandedAddress = expandedAddress === address ? null : address;
   }
 
-  function formatPrice(price: number): string {
+  function formatPrice(price: number | null): string {
+    if (price == null) return '--';
     if (price >= 1) return '$' + price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     return '$' + price.toPrecision(4);
   }
 
-  function formatValue(val: number): string {
+  function formatValue(val: number | null): string {
+    if (val == null) return '--';
     return '$' + val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function formatBalance(bal: number): string {
+  function formatBalance(bal: number | null): string {
+    if (bal == null) return '--';
     if (bal >= 1) return bal.toLocaleString(undefined, { maximumFractionDigits: 4 });
     return bal.toPrecision(4);
   }
@@ -72,18 +75,18 @@
             {formatBalance(asset.balance)}
           </td>
           <td class="px-4 py-3 text-sm text-right text-[var(--text-primary)]">
-            {formatValue(asset.value)}
+            {formatValue((asset.price ?? 0) * (asset.balance ?? 0))}
           </td>
           <td class="px-4 py-3 text-sm">
-            <span class="text-[var(--text-primary)]">{asset.weight.toFixed(1)}%</span>
+            <span class="text-[var(--text-primary)]">{(asset.weight ?? 0).toFixed(1)}%</span>
             <div class="w-16 h-1 bg-[var(--border)] rounded-full mt-1 inline-block ml-1 align-middle">
-              <div class="h-full bg-accent-blue rounded-full" style="width: {Math.min(asset.weight, 100)}%"></div>
+              <div class="h-full bg-accent-blue rounded-full" style="width: {Math.min(asset.weight ?? 0, 100)}%"></div>
             </div>
           </td>
           <td
             class="px-4 py-3 text-sm text-right font-semibold"
-            class:text-accent-green={asset.score != null && asset.score > 0}
-            class:text-accent-red={asset.score != null && asset.score < 0}
+            class:text-accent-green={(asset.score ?? 0) > 0}
+            class:text-accent-red={(asset.score ?? 0) < 0}
             class:text-[var(--text-muted)]={asset.score == null || asset.score === 0}
           >
             {asset.score != null ? asset.score.toFixed(1) : '--'}
@@ -101,8 +104,8 @@
               <span class="text-xs font-bold px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">PENDING</span>
             {:else}
               <span class="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"></span>
-              <span class="text-[var(--text-primary)]">{asset.strategy}</span>
-              {#if asset.strategy === 'grid'}
+              <span class="text-[var(--text-primary)]">{asset.strategy || asset.strategyConfig?.type || 'threshold'}</span>
+              {#if (asset.strategy || asset.strategyConfig?.type) === 'grid'}
                 <span class="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">GRID</span>
               {/if}
             {/if}
