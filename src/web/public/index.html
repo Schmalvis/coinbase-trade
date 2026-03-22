@@ -1749,6 +1749,10 @@
           e.preventDefault(); e.stopPropagation();
           pills.querySelectorAll('.pill').forEach(function(p){ p.classList.remove('active'); });
           pill.classList.add('active');
+          var tf = document.getElementById('threshold-fields-' + addr);
+          if (tf) tf.style.display = type === 'threshold' ? 'flex' : 'none';
+          var sf = document.getElementById('sma-fields-' + addr);
+          if (sf) sf.style.display = type === 'sma' ? 'flex' : 'none';
           var gf = document.getElementById('inline-grid-fields-' + addr);
           if (gf) gf.style.display = type === 'grid' ? '' : 'none';
           var smaT = document.getElementById('sma-toggles-' + addr);
@@ -1757,25 +1761,38 @@
         pills.appendChild(pill);
       });
       container.appendChild(pills);
-      // Config fields
-      var fields = [
-        { id: 'drop', label: 'Buy on drop %', val: cfg.dropPct != null ? cfg.dropPct : 3, step: '0.1', min: '0.1' },
-        { id: 'rise', label: 'Sell on rise %', val: cfg.risePct != null ? cfg.risePct : 4, step: '0.1', min: '0.1' },
-        { id: 'smaShort', label: 'SMA short window', val: cfg.smaShort != null ? cfg.smaShort : 5, step: '1', min: '2' },
-        { id: 'smaLong', label: 'SMA long window', val: cfg.smaLong != null ? cfg.smaLong : 20, step: '1', min: '3' }
-      ];
-      var fieldsWrap = document.createElement('div');
-      fieldsWrap.style.cssText = 'display:flex;flex-wrap:wrap;gap:0.5rem';
-      fields.forEach(function(f) {
+      // Threshold fields (only visible when threshold selected)
+      var thresholdFields = document.createElement('div');
+      thresholdFields.id = 'threshold-fields-' + addr;
+      thresholdFields.style.cssText = 'display:' + (cfg.type === 'threshold' ? 'flex' : 'none') + ';flex-wrap:wrap;gap:0.5rem';
+      [{ id: 'drop', label: 'Buy on drop %', val: cfg.dropPct != null ? cfg.dropPct : 3, step: '0.1', min: '0.1' },
+       { id: 'rise', label: 'Sell on rise %', val: cfg.risePct != null ? cfg.risePct : 4, step: '0.1', min: '0.1' }
+      ].forEach(function(f) {
         var row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:0.3rem';
         var lbl = document.createElement('label'); lbl.textContent = f.label; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary);white-space:nowrap';
         var inp = document.createElement('input'); inp.type = 'number'; inp.id = 'cfg-' + addr + '-' + f.id;
         inp.value = String(f.val); inp.step = f.step; inp.min = f.min;
         inp.style.cssText = 'width:60px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
         inp.onclick = function(e){ e.stopPropagation(); };
-        row.appendChild(lbl); row.appendChild(inp); fieldsWrap.appendChild(row);
+        row.appendChild(lbl); row.appendChild(inp); thresholdFields.appendChild(row);
       });
-      container.appendChild(fieldsWrap);
+      container.appendChild(thresholdFields);
+      // SMA fields (only visible when sma selected)
+      var smaFields = document.createElement('div');
+      smaFields.id = 'sma-fields-' + addr;
+      smaFields.style.cssText = 'display:' + (cfg.type === 'sma' ? 'flex' : 'none') + ';flex-wrap:wrap;gap:0.5rem';
+      [{ id: 'smaShort', label: 'SMA short window', val: cfg.smaShort != null ? cfg.smaShort : 5, step: '1', min: '2' },
+       { id: 'smaLong', label: 'SMA long window', val: cfg.smaLong != null ? cfg.smaLong : 20, step: '1', min: '3' }
+      ].forEach(function(f) {
+        var row = document.createElement('div'); row.style.cssText = 'display:flex;align-items:center;gap:0.3rem';
+        var lbl = document.createElement('label'); lbl.textContent = f.label; lbl.style.cssText = 'font-size:0.65rem;color:var(--text-secondary);white-space:nowrap';
+        var inp = document.createElement('input'); inp.type = 'number'; inp.id = 'cfg-' + addr + '-' + f.id;
+        inp.value = String(f.val); inp.step = f.step; inp.min = f.min;
+        inp.style.cssText = 'width:60px;background:var(--bg-primary);border:1px solid var(--border-hi);color:var(--text-primary);border-radius:6px;padding:0.2rem 0.4rem;font-size:0.75rem';
+        inp.onclick = function(e){ e.stopPropagation(); };
+        row.appendChild(lbl); row.appendChild(inp); smaFields.appendChild(row);
+      });
+      container.appendChild(smaFields);
       // SMA enhancement toggles
       var smaToggles = document.createElement('div');
       smaToggles.id = 'sma-toggles-' + addr;
