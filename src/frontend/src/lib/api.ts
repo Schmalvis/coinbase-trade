@@ -51,7 +51,7 @@ async function del<T>(url: string): Promise<T> {
 
 // Status
 export const fetchStatus = () => get<StatusData>('/api/status');
-export const fetchNetworks = () => get<{ networks: string[]; active: string }>('/api/networks');
+export const fetchNetworks = () => get<{ available: string[]; active: string }>('/api/networks');
 
 // Assets
 export const fetchAssets = () => get<AssetData[]>('/api/assets');
