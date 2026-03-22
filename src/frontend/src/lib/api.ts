@@ -11,7 +11,11 @@ import type {
 
 async function get<T>(url: string): Promise<T> {
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    console.error(`API GET ${url} failed: ${res.status} ${res.statusText}`, text);
+    throw new Error(`${res.status} ${res.statusText}`);
+  }
   return res.json();
 }
 
