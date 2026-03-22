@@ -73,7 +73,10 @@
     quietEnd = String(s['TELEGRAM_QUIET_END'] ?? '');
   }
 
-  onMount(() => loadSettings());
+  onMount(() => {
+    console.log('SettingsModal mounted, loading settings...');
+    loadSettings().catch(e => console.error('Settings load failed in modal', e));
+  });
 
   const unsub = settings.subscribe(s => {
     if (s) populateFromSettings(s);

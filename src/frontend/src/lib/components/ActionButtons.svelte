@@ -8,8 +8,14 @@
   let resumeLoading = false;
 
   async function handlePause() {
+    console.log('PAUSE clicked');
     pauseLoading = true;
-    try { await executeControl('pause'); } catch {}
+    try {
+      const res = await executeControl('pause');
+      console.log('Pause result:', res);
+    } catch (e) {
+      console.error('Pause failed:', e);
+    }
     pauseLoading = false;
   }
 
