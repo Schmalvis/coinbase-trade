@@ -24,9 +24,6 @@ COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
 
-# Copy static assets (not handled by tsc)
-RUN cp -r src/web/public dist/web/public
-
 # Prune devDependencies — only production deps go to the runtime image
 RUN npm prune --omit=dev
 

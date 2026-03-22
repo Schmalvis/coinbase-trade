@@ -106,7 +106,20 @@ src/
     bot.ts           # Telegraf bot: /status /pause /resume /trades /buy /sell /scores /rotations /watchlist /risk /killswitch /optimizer
   web/
     server.ts        # Express API + static dashboard
-    public/index.html # Dashboard with dark/light themes, candlestick charts, optimizer panels
+    public/
+      index.html     # Dashboard HTML + CSS only (no inline JS)
+      js/            # Frontend TypeScript modules (bundled by esbuild into bundle.js)
+        main.ts      # Entry point — imports all modules, init, polling loop
+        state.ts     # Shared mutable state
+        api.ts       # Fetch wrappers (getAuthHeaders, postJSON, etc.)
+        theme.ts     # Dark/light theme toggle
+        charts.ts    # Chart.js candle/line charts
+        status.ts    # Status loading, wallet, trades, rotations, watchlist, trade modal
+        assets.ts    # Asset table rendering, inline config accordion
+        settings.ts  # Settings modal open/close/save
+        scores.ts    # Opportunity scores panel
+        risk.ts      # Risk monitor panel
+        performance.ts # P&L performance panel
 cli.ts               # CLI (talks to running bot via HTTP)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack
@@ -139,6 +152,7 @@ docs/
 - **Trade sanity check:** Executor rejects trades where USD value exceeds 2x portfolio value. Prevents phantom trades from MCP response parsing errors. Skipped when portfolio is 0 (fresh start).
 - **Inline asset management:** Click any asset row in the ASSETS table to expand an inline config panel with strategy selection, params, and save/disable. No separate ASSETS modal.
 - **TOTP authentication:** Dashboard is protected by TOTP (authenticator app). On first boot with no TOTP secret, redirects to `/auth/setup` showing QR code. Scan with Google Authenticator/Authy/1Password, verify code, done. Subsequent visits require 6-digit code. Sessions persist for 7 days via signed cookie. Rate limited to 5 login attempts per minute. IP allowlist optional via `ALLOWED_IPS` env var. To reset TOTP (e.g., lost authenticator): `curl -X POST http://192.168.68.139:3003/auth/reset` (LAN only — rejects non-192.168.x.x IPs). After reset, next visit shows the setup QR again.
+- **Frontend build:** Dashboard JS is split into TypeScript modules in `src/web/public/js/` and bundled by esbuild into `bundle.js`. Run `npm run build:frontend` to rebuild just the frontend. The full `npm run build` runs tsc + esbuild + copies static files. Chart.js is loaded via CDN `<script>` tags; the TS modules reference `Chart` as a global via `declare const Chart: any`. Inline `onclick` handlers in the HTML call functions exposed on `window` from `main.ts`.
 
 ---
 
