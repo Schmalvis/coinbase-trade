@@ -1,5 +1,5 @@
 import { CoinbaseTools } from '../mcp/tools.js';
-import { queries, discoveredAssetQueries, settingQueries, type DiscoveredAssetRow } from '../data/db.js';
+import { queries, discoveredAssetQueries, settingQueries, candleQueries, type DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
@@ -23,12 +23,19 @@ export async function startPortfolioTracker(
       return asset.fixedPrice ?? 1;
     }
     if (asset.priceSource === 'pyth' && asset.pythSymbol) {
-      let feedId = pythFeedIds.get(asset.pythSymbol);
-      if (!feedId) {
-        feedId = await tools.fetchPriceFeedId(asset.pythSymbol) as unknown as string;
-        pythFeedIds.set(asset.pythSymbol, feedId);
+      try {
+        let feedId = pythFeedIds.get(asset.pythSymbol);
+        if (!feedId) {
+          feedId = await tools.fetchPriceFeedId(asset.pythSymbol) as unknown as string;
+          pythFeedIds.set(asset.pythSymbol, feedId);
+        }
+        const pythPrice = await tools.fetchPrice(feedId);
+        if (pythPrice > 0) return pythPrice;
+      } catch (err) {
+        logger.warn(`Pyth price failed for ${asset.symbol}, trying candle fallback`);
       }
-      return tools.fetchPrice(feedId);
+      // Fallback: candle close price
+      return getCandleFallbackPrice(asset.symbol);
     }
     if (asset.priceSource === 'defillama') {
       const network = botState.activeNetwork;
@@ -36,7 +43,25 @@ export async function startPortfolioTracker(
       if (!addr) return 0;
       const prices = await tools.getTokenPrices([`base:${addr}`]);
       const key = `base:${addr}`;
-      return (prices[key] as any)?.usd ?? 0;
+      const defillamaPrice = (prices[key] as any)?.usd ?? 0;
+      if (defillamaPrice > 0) return defillamaPrice;
+      // Fallback: use most recent candle close price from Coinbase
+      return getCandleFallbackPrice(asset.symbol);
+    }
+    return 0;
+  }
+
+  /** Fallback price from the most recent candle close (Coinbase or synthetic). */
+  function getCandleFallbackPrice(symbol: string): number {
+    if (!candleService) return 0;
+    const network = botState.activeNetwork;
+    // Try 15m first (most recent), then 1h, then 24h
+    for (const interval of ['15m', '1h', '24h']) {
+      const rows = candleQueries.getCandles.all(symbol, network, interval, 1) as { close: number }[];
+      if (rows.length > 0 && rows[0].close > 0) {
+        logger.debug(`${symbol}: using candle ${interval} close $${rows[0].close.toFixed(2)} as price fallback`);
+        return rows[0].close;
+      }
     }
     return 0;
   }
@@ -183,7 +208,9 @@ export async function startPortfolioTracker(
           for (const row of activePending) {
             try {
               const prices = await tools.getTokenPrices([`base:${row.address}`]);
-              const price = (prices[`base:${row.address}`] as any)?.usd ?? 0;
+              let price = (prices[`base:${row.address}`] as any)?.usd ?? 0;
+              // Fallback: candle close price when DefiLlama returns nothing
+              if (price === 0) price = getCandleFallbackPrice(row.symbol);
               queries.insertAssetSnapshot.run({ symbol: row.symbol, price_usd: price, balance: 0 });
 
               // Update balance from hex balance
