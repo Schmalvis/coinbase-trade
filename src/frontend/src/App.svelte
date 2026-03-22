@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Header from './lib/components/Header.svelte';
+  import AssetsTable from './lib/components/AssetsTable.svelte';
   import NetworkSelector from './lib/components/NetworkSelector.svelte';
   import ThemeToggle from './lib/components/ThemeToggle.svelte';
   import { startPolling } from './lib/stores/polling';
@@ -25,6 +26,11 @@
 
   <!-- Status cards -->
   <Header />
+
+  <!-- Assets table with inline config -->
+  <div class="px-4">
+    <AssetsTable />
+  </div>
 
   <!-- Placeholder for remaining panels -->
   <div class="p-4 text-[var(--text-muted)] text-sm">More panels coming...</div>
