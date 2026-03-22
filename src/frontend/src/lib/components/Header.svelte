@@ -51,8 +51,8 @@
   <!-- ETH Price -->
   <div class="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)]">
     <div class="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">ETH Price</div>
-    <div class="text-lg font-semibold mt-1">{s ? fmtPrice(s.ethPrice) : '--'}</div>
-    <div class="text-xs text-[var(--text-muted)] mt-1">{s ? s.strategy : '--'}</div>
+    <div class="text-lg font-semibold mt-1">{s ? fmtPrice(s.lastPrice) : '--'}</div>
+    <div class="text-xs text-[var(--text-muted)] mt-1">Strategy: {s ? (s.ethStrategy || s.strategy) : '--'}</div>
   </div>
 
   <!-- ETH Balance -->
@@ -78,6 +78,6 @@
   <div class="bg-[var(--bg-card)] rounded-xl p-4 border border-[var(--border)]">
     <div class="text-xs font-medium uppercase tracking-wide text-[var(--text-secondary)]">Wallet</div>
     <div class="text-lg font-semibold mt-1 font-mono">{s ? fmtWallet(s.walletAddress) : '--'}</div>
-    <div class="text-xs text-[var(--text-muted)] mt-1">{s ? s.network : '--'}</div>
+    <div class="text-xs text-[var(--text-muted)] mt-1">{s?.dryRun ? 'DRY RUN' : ''}</div>
   </div>
 </div>

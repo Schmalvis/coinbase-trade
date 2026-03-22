@@ -1,16 +1,17 @@
 export interface StatusData {
   status: string;
-  ethPrice: number | null;
+  lastPrice: number | null;
   ethBalance: number;
   usdcBalance: number;
   portfolioUsd: number;
   walletAddress: string | null;
-  network: string;
   strategy: string;
+  ethStrategy: string;
   mcpHealthy: boolean;
   optimizerEnabled: boolean;
   optimizerMode: string;
   lastTradeAt: string | null;
+  dryRun: boolean;
 }
 
 export interface AssetData {

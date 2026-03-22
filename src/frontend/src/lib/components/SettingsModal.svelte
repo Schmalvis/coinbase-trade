@@ -47,8 +47,8 @@
 
   function populateFromSettings(s: Record<string, any>) {
     strategy = String(s['STRATEGY'] ?? 'threshold');
-    dropPct = Number(s['DROP_PCT'] ?? 3);
-    risePct = Number(s['RISE_PCT'] ?? 3);
+    dropPct = Number(s['PRICE_DROP_THRESHOLD_PCT'] ?? 3);
+    risePct = Number(s['PRICE_RISE_TARGET_PCT'] ?? 3);
     smaShort = Number(s['SMA_SHORT_WINDOW'] ?? 5);
     smaLong = Number(s['SMA_LONG_WINDOW'] ?? 20);
     tradeInterval = Number(s['TRADE_INTERVAL_SECONDS'] ?? 60);
@@ -67,11 +67,13 @@
     rotationSellThreshold = Number(s['ROTATION_SELL_THRESHOLD'] ?? -20);
     rotationBuyThreshold = Number(s['ROTATION_BUY_THRESHOLD'] ?? 30);
     minRotationScoreDelta = Number(s['MIN_ROTATION_SCORE_DELTA'] ?? 40);
-    telegramMode = String(s['TELEGRAM_NOTIFY_MODE'] ?? 'all');
+    telegramMode = String(s['TELEGRAM_MODE'] ?? 'all');
     digestTimes = String(s['TELEGRAM_DIGEST_TIMES'] ?? '');
     quietStart = String(s['TELEGRAM_QUIET_START'] ?? '');
     quietEnd = String(s['TELEGRAM_QUIET_END'] ?? '');
   }
+
+  onMount(() => loadSettings());
 
   const unsub = settings.subscribe(s => {
     if (s) populateFromSettings(s);
@@ -88,8 +90,8 @@
     errorMsg = '';
     const payload: Record<string, any> = {
       STRATEGY: strategy,
-      DROP_PCT: dropPct,
-      RISE_PCT: risePct,
+      PRICE_DROP_THRESHOLD_PCT: dropPct,
+      PRICE_RISE_TARGET_PCT: risePct,
       SMA_SHORT_WINDOW: smaShort,
       SMA_LONG_WINDOW: smaLong,
       TRADE_INTERVAL_SECONDS: tradeInterval,
@@ -107,7 +109,7 @@
       ROTATION_SELL_THRESHOLD: rotationSellThreshold,
       ROTATION_BUY_THRESHOLD: rotationBuyThreshold,
       MIN_ROTATION_SCORE_DELTA: minRotationScoreDelta,
-      TELEGRAM_NOTIFY_MODE: telegramMode,
+      TELEGRAM_MODE: telegramMode,
       TELEGRAM_DIGEST_TIMES: digestTimes,
       TELEGRAM_QUIET_START: quietStart,
       TELEGRAM_QUIET_END: quietEnd,
