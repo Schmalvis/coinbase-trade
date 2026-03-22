@@ -81,11 +81,11 @@ export const fetchTrades = (limit = 20) => get<TradeData[]>(`/api/trades?limit=$
 // Settings
 export const fetchSettings = () => get<SettingsData>('/api/settings');
 export const saveSettings = (settings: Record<string, any>) =>
-  post<{ ok: boolean; error?: string; field?: string }>('/api/settings', settings);
+  post<{ ok: boolean; error?: string; field?: string }>('/api/settings', { changes: settings });
 
 // Trading
-export const executeTrade = (action: string, from?: string, to?: string, amount?: string) =>
-  post<{ ok: boolean; txHash?: string; dryRun?: boolean }>('/api/trade', { action, from, to, amount });
+export const executeTrade = (from: string, to: string, fromAmount: string) =>
+  post<{ ok: boolean; txHash?: string; dryRun?: boolean; dry_run?: boolean }>('/api/trade', { from, to, fromAmount });
 export const executeControl = (action: string) => post<{ ok: boolean }>(`/api/control/${action}`);
 
 // Network

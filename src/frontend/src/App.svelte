@@ -40,7 +40,7 @@
       <ThemeToggle />
       <button
         class="px-3 py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-        on:click={() => { console.log('Settings clicked, opening modal'); settingsOpen = true; }}
+        on:click={() => { settingsOpen = true; }}
       >Settings</button>
       <button
         class="px-3 py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-red-400 transition-colors"

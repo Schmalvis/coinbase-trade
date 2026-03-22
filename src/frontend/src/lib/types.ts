@@ -12,20 +12,25 @@ export interface StatusData {
   optimizerMode: string;
   lastTradeAt: string | null;
   dryRun: boolean;
+  activeNetwork: string;
+  availableNetworks: string[];
+  assetBalances: Record<string, number>;
+  pendingTokenCount: number;
 }
 
 export interface AssetData {
   address: string;
   symbol: string;
   name: string;
+  decimals: number;
   status: 'pending' | 'active' | 'dismissed';
-  strategy: string;
-  price: number;
-  balance: number;
-  value: number;
-  weight: number;
-  score: number | null;
+  price: number | null;
+  balance: number | null;
   change24h: number | null;
+  isNative: boolean;
+  tradeMethod: string;
+  priceSource: string;
+  source: 'registry' | 'discovered';
   strategyConfig: {
     type: string;
     dropPct: number;
@@ -36,9 +41,6 @@ export interface AssetData {
     gridUpperBound: number | null;
     gridLowerBound: number | null;
   };
-  sma_use_ema: number;
-  sma_volume_filter: number;
-  sma_rsi_filter: number;
 }
 
 export interface CandleData {
@@ -53,24 +55,40 @@ export interface CandleData {
 export interface ScoreData {
   symbol: string;
   score: number;
-  signals: Record<string, { signal: string; strength: number }>;
+  confidence: number;
+  signals: {
+    candle15m: { signal: string; strength: number; reason: string };
+    candle1h: { signal: string; strength: number; reason: string };
+    candle24h: { signal: string; strength: number; reason: string };
+  };
+  currentWeight: number;
+  isHeld: boolean;
 }
 
 export interface RiskData {
-  dailyPnl: { value: number; limit: number } | null;
-  rotationsToday: { count: number; limit: number } | null;
-  maxPosition: { symbol: string; pct: number; limit: number } | null;
-  portfolioFloor: { value: number; floor: number } | null;
-  optimizerStatus: string;
+  daily_pnl: number;
+  daily_pnl_pct: number;
+  daily_pnl_limit: number;
+  rotations_today: number;
+  max_daily_rotations: number;
+  max_position_pct: number;
+  max_position_limit: number;
+  portfolio_floor: number;
+  portfolio_usd: number;
+  optimizer_enabled: boolean;
+  optimizer_status: string;
+  has_data: boolean;
 }
 
 export interface PerformanceData {
-  today: { pnl: number; pct: number };
-  week: { pnl: number; pct: number };
-  month: { pnl: number; pct: number };
-  total: { pnl: number; pct: number };
-  portfolioHistory: { timestamp: string; value: number }[];
-  priceHistory: { timestamp: string; price: number }[];
+  current_usd: number;
+  today: { change: number; change_pct: number; rotations: number };
+  week: { change: number; change_pct: number };
+  month: { change: number; change_pct: number };
+  total: { change: number; change_pct: number; since: string | null };
+  rotations: { total: number; recent_profitable: number; recent_total: number };
+  portfolio_history: Array<{ timestamp: string; portfolio_usd: number }>;
+  daily_pnl: Array<{ date: string; high_water: number; current_usd: number; rotations: number; realized_pnl: number }>;
 }
 
 export interface TradeData {
@@ -86,5 +104,5 @@ export interface TradeData {
 }
 
 export interface SettingsData {
-  [key: string]: string | number | boolean;
+  [key: string]: string | number | boolean | number[] | undefined;
 }

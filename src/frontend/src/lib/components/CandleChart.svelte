@@ -140,19 +140,19 @@
   {#if lastCandle}
     <div class="mt-3 flex gap-4 flex-wrap text-xs text-[var(--text-secondary)]">
       <span>
-        O <span class="text-[var(--text-primary)] font-mono">{lastCandle.open.toFixed(2)}</span>
+        O <span class="text-[var(--text-primary)] font-mono">{(lastCandle.open ?? 0).toFixed(2)}</span>
       </span>
       <span>
-        H <span class="text-[var(--text-primary)] font-mono">{lastCandle.high.toFixed(2)}</span>
+        H <span class="text-[var(--text-primary)] font-mono">{(lastCandle.high ?? 0).toFixed(2)}</span>
       </span>
       <span>
-        L <span class="text-[var(--text-primary)] font-mono">{lastCandle.low.toFixed(2)}</span>
+        L <span class="text-[var(--text-primary)] font-mono">{(lastCandle.low ?? 0).toFixed(2)}</span>
       </span>
       <span>
-        C <span class="text-[var(--text-primary)] font-mono">{lastCandle.close.toFixed(2)}</span>
+        C <span class="text-[var(--text-primary)] font-mono">{(lastCandle.close ?? 0).toFixed(2)}</span>
       </span>
       <span>
-        Vol <span class="text-[var(--text-primary)] font-mono">{lastCandle.volume.toFixed(4)}</span>
+        Vol <span class="text-[var(--text-primary)] font-mono">{(lastCandle.volume ?? 0).toFixed(4)}</span>
       </span>
       {#if priceChange !== null}
         <span>

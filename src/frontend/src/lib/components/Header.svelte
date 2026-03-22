@@ -6,19 +6,19 @@
     return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function fmtEth(v: number): string {
+  function fmtEth(v: number | null | undefined): string {
     if (v == null) return '--';
-    return v.toFixed(6) + ' ETH';
+    return (v ?? 0).toFixed(6) + ' ETH';
   }
 
-  function fmtUsdc(v: number): string {
+  function fmtUsdc(v: number | null | undefined): string {
     if (v == null) return '--';
-    return v.toFixed(2) + ' USDC';
+    return (v ?? 0).toFixed(2) + ' USDC';
   }
 
-  function fmtPortfolio(v: number): string {
+  function fmtPortfolio(v: number | null | undefined): string {
     if (v == null) return '--';
-    return '$' + v.toFixed(2);
+    return '$' + (v ?? 0).toFixed(2);
   }
 
   function fmtWallet(addr: string | null): string {

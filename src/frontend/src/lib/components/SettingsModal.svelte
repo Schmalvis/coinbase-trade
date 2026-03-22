@@ -74,8 +74,7 @@
   }
 
   onMount(() => {
-    console.log('SettingsModal mounted, loading settings...');
-    loadSettings().catch(e => console.error('Settings load failed in modal', e));
+    loadSettings().catch(() => {});
   });
 
   const unsub = settings.subscribe(s => {

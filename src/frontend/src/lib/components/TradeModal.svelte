@@ -35,10 +35,9 @@
     errorMsg = null;
     result = null;
     try {
-      const action = fromToken === 'ETH' ? 'buy' : 'sell';
-      const res = await executeTrade(action, fromToken, toToken, amount);
+      const res = await executeTrade(fromToken, toToken, amount);
       if (res.ok) {
-        if (res.dryRun) {
+        if (res.dryRun || res.dry_run) {
           result = 'Dry run — no real trade executed.';
         } else {
           result = res.txHash ? `Tx: ${res.txHash}` : 'Trade submitted.';

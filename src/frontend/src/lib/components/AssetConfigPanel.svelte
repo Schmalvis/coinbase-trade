@@ -8,14 +8,14 @@
 
   const dispatch = createEventDispatcher();
 
-  let selectedStrategy = asset.strategyConfig?.type || asset.strategy || 'threshold';
+  let selectedStrategy = asset.strategyConfig?.type || 'threshold';
   let dropPct = String(asset.strategyConfig?.dropPct ?? 5);
   let risePct = String(asset.strategyConfig?.risePct ?? 5);
   let smaShort = String(asset.strategyConfig?.smaShort ?? 5);
   let smaLong = String(asset.strategyConfig?.smaLong ?? 20);
-  let useEma = !!asset.sma_use_ema;
-  let volumeFilter = !!asset.sma_volume_filter;
-  let rsiFilter = !!asset.sma_rsi_filter;
+  let useEma = true;  // default to true — API doesn't return these flags
+  let volumeFilter = true;
+  let rsiFilter = true;
   let gridLevels = String(asset.strategyConfig?.gridLevels ?? 10);
   let gridUpper = asset.strategyConfig?.gridUpperBound != null ? String(asset.strategyConfig.gridUpperBound) : '';
   let gridLower = asset.strategyConfig?.gridLowerBound != null ? String(asset.strategyConfig.gridLowerBound) : '';

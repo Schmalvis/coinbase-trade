@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
-  import { executeControl, executeTrade } from '../api';
+  import { executeControl } from '../api';
 
   const dispatch = createEventDispatcher();
 
@@ -8,13 +8,11 @@
   let resumeLoading = false;
 
   async function handlePause() {
-    console.log('PAUSE clicked');
     pauseLoading = true;
     try {
-      const res = await executeControl('pause');
-      console.log('Pause result:', res);
+      await executeControl('pause');
     } catch (e) {
-      console.error('Pause failed:', e);
+      console.warn('Pause failed:', e);
     }
     pauseLoading = false;
   }
@@ -24,14 +22,6 @@
     try { await executeControl('resume'); } catch {}
     resumeLoading = false;
   }
-
-  async function handleBuy() {
-    try { await executeTrade('buy'); } catch {}
-  }
-
-  async function handleSell() {
-    try { await executeTrade('sell'); } catch {}
-  }
 </script>
 
 <div class="flex gap-2 flex-wrap">
@@ -39,23 +29,13 @@
     class="px-4 py-1.5 rounded-lg text-sm font-semibold border border-red-500/60 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
     on:click={handlePause}
     disabled={pauseLoading}
-  >{pauseLoading ? '…' : 'PAUSE'}</button>
+  >{pauseLoading ? '...' : 'PAUSE'}</button>
 
   <button
     class="px-4 py-1.5 rounded-lg text-sm font-semibold border border-green-500/60 text-green-400 hover:bg-green-500/10 transition-colors disabled:opacity-50"
     on:click={handleResume}
     disabled={resumeLoading}
-  >{resumeLoading ? '…' : 'RESUME'}</button>
-
-  <button
-    class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white border border-transparent transition-colors"
-    on:click={handleBuy}
-  >BUY</button>
-
-  <button
-    class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-red-500 hover:bg-red-600 text-white border border-transparent transition-colors"
-    on:click={handleSell}
-  >SELL</button>
+  >{resumeLoading ? '...' : 'RESUME'}</button>
 
   <button
     class="px-4 py-1.5 rounded-lg text-sm font-semibold border border-[var(--border-hi)] text-[var(--text-primary)] hover:bg-[var(--bg-card-hover)] transition-colors"

@@ -2,7 +2,7 @@
   import { scores } from '../stores/scores';
   import type { ScoreData } from '../types';
 
-  $: sorted = ($scores || []).slice().sort((a: ScoreData, b: ScoreData) => b.score - a.score);
+  $: sorted = ($scores || []).slice().sort((a: ScoreData, b: ScoreData) => (b.score ?? 0) - (a.score ?? 0));
 
   function signalClass(signal: string): string {
     if (signal === 'buy') return 'bg-green-500/20 text-green-400';
@@ -19,8 +19,17 @@
   }
 
   function scoreBar(score: number): number {
-    // Clamp to [-100, 100], map to [0, 100]%
     return Math.round((Math.max(-100, Math.min(100, score)) + 100) / 2);
+  }
+
+  // Extract signals as [label, signal] pairs from the candle signals object
+  function getSignalEntries(item: ScoreData): Array<[string, { signal: string; strength: number }]> {
+    if (!item.signals) return [];
+    const entries: Array<[string, { signal: string; strength: number }]> = [];
+    if (item.signals.candle15m) entries.push(['15m', item.signals.candle15m]);
+    if (item.signals.candle1h) entries.push(['1h', item.signals.candle1h]);
+    if (item.signals.candle24h) entries.push(['24h', item.signals.candle24h]);
+    return entries;
   }
 </script>
 
@@ -38,25 +47,25 @@
           <!-- Symbol + score row -->
           <div class="flex items-center gap-3 mb-1.5">
             <span class="font-semibold text-sm w-14 text-[var(--text-primary)]">{item.symbol}</span>
-            <span class="font-bold text-sm w-12 text-right font-mono {scoreColor(item.score)}">
-              {item.score > 0 ? '+' : ''}{item.score.toFixed(1)}
+            <span class="font-bold text-sm w-12 text-right font-mono {scoreColor(item.score ?? 0)}">
+              {(item.score ?? 0) > 0 ? '+' : ''}{(item.score ?? 0).toFixed(1)}
             </span>
             <!-- Mini score bar -->
             <div class="flex-1 h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden">
               <div
                 class="h-full rounded-full transition-all duration-500"
-                class:bg-green-400={item.score >= 0}
-                class:bg-red-400={item.score < 0}
-                style="width: {scoreBar(item.score)}%; margin-left: {item.score < 0 ? scoreBar(item.score) + '%' : '50%'}; {item.score < 0 ? 'margin-left:' + scoreBar(item.score) + '%; width:' + (50 - scoreBar(item.score)) + '%' : 'margin-left:50%; width:' + (scoreBar(item.score) - 50) + '%'}"
+                class:bg-green-400={(item.score ?? 0) >= 0}
+                class:bg-red-400={(item.score ?? 0) < 0}
+                style="width: {scoreBar(item.score ?? 0)}%; margin-left: {(item.score ?? 0) < 0 ? scoreBar(item.score ?? 0) + '%' : '50%'}; {(item.score ?? 0) < 0 ? 'margin-left:' + scoreBar(item.score ?? 0) + '%; width:' + (50 - scoreBar(item.score ?? 0)) + '%' : 'margin-left:50%; width:' + (scoreBar(item.score ?? 0) - 50) + '%'}"
               ></div>
             </div>
           </div>
 
           <!-- Signal pills -->
           <div class="flex gap-1 flex-wrap ml-0">
-            {#each Object.entries(item.signals || {}) as [tf, sig]}
+            {#each getSignalEntries(item) as [tf, sig]}
               <span class="text-[10px] font-bold px-1.5 py-0.5 rounded {signalClass(sig.signal)}">
-                {tf} {sig.signal.toUpperCase()}
+                {tf} {(sig.signal ?? 'hold').toUpperCase()}
               </span>
             {/each}
           </div>

@@ -9,7 +9,7 @@
   onMount(async () => {
     try {
       const data = await fetchNetworks();
-      networks = data.available ?? data.networks ?? [];
+      networks = data.available ?? [];
       active = data.active ?? '';
     } catch (e) {
       console.warn('fetchNetworks failed', e);
