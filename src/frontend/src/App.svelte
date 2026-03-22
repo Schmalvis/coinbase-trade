@@ -1,8 +1,31 @@
 <script lang="ts">
-  let message = 'Trade Bot Dashboard';
+  import { onMount } from 'svelte';
+  import Header from './lib/components/Header.svelte';
+  import NetworkSelector from './lib/components/NetworkSelector.svelte';
+  import ThemeToggle from './lib/components/ThemeToggle.svelte';
+  import { startPolling } from './lib/stores/polling';
+
+  onMount(() => {
+    startPolling(5000);
+  });
 </script>
 
-<main class="min-h-screen bg-[var(--bg-primary)] text-[var(--text-primary)] p-6">
-  <h1 class="text-xl font-semibold text-accent-green">{message}</h1>
-  <p class="text-sm text-[var(--text-secondary)] mt-2">Svelte + Tailwind frontend loading successfully.</p>
-</main>
+<div class="min-h-screen">
+  <!-- Top bar -->
+  <header class="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+    <div>
+      <span class="text-lg font-semibold">Trade Bot</span>
+      <span class="text-sm font-normal text-[var(--text-secondary)] ml-1">/ autonomous</span>
+    </div>
+    <div class="flex items-center gap-3">
+      <NetworkSelector />
+      <ThemeToggle />
+    </div>
+  </header>
+
+  <!-- Status cards -->
+  <Header />
+
+  <!-- Placeholder for remaining panels -->
+  <div class="p-4 text-[var(--text-muted)] text-sm">More panels coming...</div>
+</div>
