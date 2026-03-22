@@ -10,8 +10,13 @@ import type {
 } from './types';
 
 async function get<T>(url: string): Promise<T> {
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: 'same-origin' });
   if (!res.ok) {
+    if (res.status === 401) {
+      // Session expired — redirect to login
+      window.location.href = '/auth/login';
+      throw new Error('Session expired');
+    }
     const text = await res.text().catch(() => '');
     console.error(`API GET ${url} failed: ${res.status} ${res.statusText}`, text);
     throw new Error(`${res.status} ${res.statusText}`);
@@ -22,6 +27,7 @@ async function get<T>(url: string): Promise<T> {
 async function post<T>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'POST',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -31,6 +37,7 @@ async function post<T>(url: string, body?: unknown): Promise<T> {
 async function put<T>(url: string, body: unknown): Promise<T> {
   const res = await fetch(url, {
     method: 'PUT',
+    credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
@@ -38,7 +45,7 @@ async function put<T>(url: string, body: unknown): Promise<T> {
 }
 
 async function del<T>(url: string): Promise<T> {
-  const res = await fetch(url, { method: 'DELETE' });
+  const res = await fetch(url, { method: 'DELETE', credentials: 'same-origin' });
   return res.json();
 }
 
