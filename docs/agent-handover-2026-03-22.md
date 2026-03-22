@@ -2,6 +2,8 @@
 
 Review of trading activity, config, bugs, and improvement opportunities. Intended for the next agent picking up this project.
 
+> **Note on codebase version:** This review was conducted against the source code visible in the repo. The `CLAUDE.md` was updated during the session to reflect Phases 4.5, 5, and 5.5 as complete. The running container may be on an older image — verify deployed version against source before assuming Phase 5.5 changes are live. Key Phase 5.5 change: registry assets (ETH, CBBTC, CBETH) are now seeded into `discovered_assets` on boot, and the separate global ETH-only strategy loop has been removed.
+
 ---
 
 ## Current Runtime State
@@ -13,12 +15,12 @@ Live env (from `docker inspect coinbase-trade`):
 |-----|-------|-------|
 | `NETWORK_ID` | `base-sepolia,base-mainnet` | Both networks available; UI has mainnet selected as active |
 | `DRY_RUN` | `FALSE` | Real trades executing (see bug below) |
-| `STRATEGY` | `threshold` | Buy on 2% drop, sell on 3% rise from entry |
+| `STRATEGY` | `threshold` | Sets default for newly added assets only (per Phase 5.5) |
 | `PRICE_DROP_THRESHOLD_PCT` | `2.0` | Too high for stable/ranging market — see below |
 | `MCP_SERVER_URL` | `http://192.168.68.139:3002/mcp` | Coinbase AgentKit MCP on RPi5 |
 
 The live `.env` is at `/home/pi/docker/coinbase-trade/.env` on RPi5 (not in repo).
-The `stack.env` in the repo root is the Portainer deployment template.
+The `stack.env.example` in the repo root is the Portainer deployment template.
 
 ---
 
@@ -30,15 +32,17 @@ The threshold strategy requires a **2% single-swing drop** from the 10-candle ro
 
 **Fix:** Lower `PRICE_DROP_THRESHOLD_PCT` to `0.5`–`1.0` and `PRICE_RISE_TARGET_PCT` to `1.5`–`2.0` for active trading in normal conditions. Alternatively switch to `STRATEGY=sma` which catches micro-trends via crossover and fires more frequently in ranging markets.
 
-### CBBTC and CBETH are not actively traded
+### CBBTC and CBETH strategy loop status (version-dependent)
 
-The asset registry includes ETH, USDC, CBBTC, and CBETH, but the main strategy loop (`TradingEngine.tick()`) is **ETH-only** — `executor.ts` hardcodes `ETH ↔ USDC` as the only pair. CBBTC and CBETH only participate in **optimizer rotations** (Phase 4), not in independent threshold/SMA loops.
+**If running Phase 5.5+ image:** Registry assets (ETH, CBBTC, CBETH) are automatically seeded into `discovered_assets` on boot. All three get independent per-asset strategy loops (threshold/SMA/grid) configurable via the Asset Management modal. The global ETH-only strategy loop no longer exists. ✅
 
-Independent strategy loops only start for assets in the `discovered_assets` DB table with `status='active'` (populated via Alchemy ERC20 discovery or manual DB insert). Neither CBBTC nor CBETH is in this table by default.
+**If running a pre-Phase-5.5 image:** The main strategy loop is ETH-only, hardcoded as `ETH ↔ USDC`. CBBTC and CBETH only participate in optimizer rotations, not independent loops. To fix: add them to the watchlist via Telegram (`/watch CBBTC <address>`) or manually insert into `discovered_assets` via the Asset Management modal.
 
-**Fix options:**
-1. Add CBBTC and CBETH to the optimizer watchlist via Telegram (`/watch CBBTC <address>`) so they're actively scored and can trigger rotations.
-2. Or add them to `discovered_assets` via the dashboard Asset Management modal so they get independent threshold/SMA loops.
+**Check:** Dashboard header strategy badge shows ETH's per-asset strategy in Phase 5.5+. If it still shows the global `STRATEGY` env value, the container is running an older image.
+
+Base mainnet addresses for reference:
+- CBBTC: `0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`
+- cbETH: `0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22`
 
 ### Portfolio optimizer has a 6.5-hour warmup gap
 
@@ -120,23 +124,25 @@ The `as any` casts bypass the `TokenSymbol` type check. If a discovered asset's 
 ## What's Working Well
 
 - Multi-network support (sepolia + mainnet) with runtime switching via UI/Telegram
-- Phase 4 optimizer architecture is solid — RSI, MACD, volume, candle pattern scoring across three timeframes
-- Risk guards are well-structured (position limits, daily loss cap, portfolio floor kill switch)
-- Telegram bot covers all major commands including `/scores`, `/rotations`, `/risk`, `/killswitch`
-- Per-asset strategy parameter injection works correctly for discovered assets
+- Optimizer architecture solid — RSI, MACD, volume, Bollinger Bands, candle pattern scoring across three timeframes (Phase 4/5)
+- Grid strategy available for ranging markets — auto-calculates bounds from 24hr candle data (Phase 5)
+- Risk guards well-structured (position limits, daily loss cap, portfolio floor kill switch)
+- Telegram bot comprehensive — `/scores`, `/rotations`, `/risk`, `/killswitch`, `/pnl`, `/notify` (Phase 4.5)
+- P&L dashboard panel — today/7d/30d/total with portfolio value chart (Phase 4.5)
+- Per-asset strategy parameter injection working for all assets including registry assets (Phase 5.5)
+- SMA strategy enhanced with EMA, volume filter, RSI filter (Phase 5)
+- TOTP authentication on dashboard (Phase 5)
 - MCP circuit breaker auto-pauses on server failure and resumes when healthy
 
 ---
 
 ## Recommended Next Actions (Priority Order)
 
-1. **Fix `DRY_RUN` parsing** — `src/config.ts` line 28, one-line fix, zero risk
-2. **Lower trade thresholds** in live `.env` on RPi5: `PRICE_DROP_THRESHOLD_PCT=1.0`, `PRICE_RISE_TARGET_PCT=1.5`
-3. **Add CBBTC and CBETH to watchlist** via Telegram so optimizer scores and can rotate into them:
-   - Base mainnet CBBTC: `0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf`
-   - Base mainnet cbETH: `0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22`
-4. **Fix rotation leg 2 USDC sizing** — `src/trading/executor.ts` `executeRotation()` — pass explicit buy amount from optimizer
-5. **Tune optimizer thresholds** via dashboard Settings: lower `ROTATION_BUY_THRESHOLD` to 20, `MIN_ROTATION_SCORE_DELTA` to 25
+1. **Verify deployed image version** — confirm the running container includes Phase 5.5 changes. Check dashboard Asset Management: if ETH, CBBTC, CBETH appear with individual strategy controls, Phase 5.5 is live. If not, rebuild and redeploy from latest image.
+2. **Fix `DRY_RUN` parsing** — `src/config.ts` line 28, one-line fix, zero risk
+3. **Lower trade thresholds** in live `.env` on RPi5: `PRICE_DROP_THRESHOLD_PCT=1.0`, `PRICE_RISE_TARGET_PCT=1.5` — or switch to grid strategy for ETH in ranging conditions
+4. **Fix rotation leg 2 USDC sizing** — `src/trading/executor.ts` `executeRotation()` — pass explicit buy amount from optimizer rather than re-reading full USDC balance
+5. **Tune optimizer thresholds** via dashboard Settings (no restart needed): lower `ROTATION_BUY_THRESHOLD` to 20, `MIN_ROTATION_SCORE_DELTA` to 25
 6. **Consider candle warmup pre-population** — on startup, synthesise historical candles from the existing `snapshots` table to eliminate the 6.5-hour optimizer blind spot after restarts
 
 ---
@@ -147,9 +153,11 @@ The `as any` casts bypass the `TokenSymbol` type check. If a discovered asset's 
 |------|---------|
 | `src/config.ts` | Zod env parsing — `DRY_RUN` bug is here |
 | `src/trading/executor.ts` | Trade execution — leg 2 USDC bug + `as any` cast |
-| `src/trading/engine.ts` | Strategy loops — ETH-only main loop, asset loops for discovered tokens |
+| `src/trading/engine.ts` | Strategy loops — per-asset loops for all assets (Phase 5.5+); global ETH loop removed |
 | `src/trading/optimizer.ts` | Portfolio rotation — scoring, risk checks, rotation detection |
 | `src/strategy/threshold.ts` | Threshold strategy — `dropPct`/`risePct` logic |
-| `src/strategy/candle.ts` | RSI, MACD, volume scoring — needs 26 candles to warm up |
+| `src/strategy/sma.ts` | SMA/EMA strategy with volume + RSI filters (Phase 5) |
+| `src/strategy/candle.ts` | RSI, MACD, Bollinger Bands, volume scoring — needs 26 candles to warm up |
+| `src/strategy/grid.ts` | Grid trading — auto-bounds from 24hr candles (Phase 5) |
 | `src/assets/registry.ts` | Static asset list (ETH, USDC, CBBTC, CBETH) |
-| `stack.env` | Portainer deployment template (not the live env) |
+| `stack.env.example` | Portainer deployment template (not the live env) |
