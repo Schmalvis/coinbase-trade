@@ -1,5 +1,5 @@
 import { logger } from '../core/logger.js';
-import { candleQueries } from '../data/db.js';
+import { candleQueries, queries } from '../data/db.js';
 
 export interface Candle {
   symbol: string;
@@ -214,6 +214,50 @@ export class CandleService {
       clearInterval(this.pollingIntervalId);
       this.pollingIntervalId = undefined;
       logger.info('CandleService polling stopped');
+    }
+  }
+
+  warmupFromSnapshots(symbols: string[], network: string): void {
+    for (const symbol of symbols) {
+      // Skip if candles already exist
+      const existing = candleQueries.getCandles.all(symbol, network, '15m', 1);
+      if ((existing as any[]).length > 0) continue;
+
+      // Get last 500 snapshots (~8hrs at 60s poll)
+      const snaps = (queries.recentAssetSnapshots.all(symbol, 500) as {
+        price_usd: number; balance: number; timestamp: string;
+      }[]).reverse(); // oldest first
+
+      if (snaps.length < 2) continue;
+
+      const windowMs = 15 * 60 * 1000;
+      let windowStart = new Date(snaps[0].timestamp).getTime();
+      let open = snaps[0].price_usd, high = open, low = open, close = open, count = 0;
+
+      for (const snap of snaps) {
+        const t = new Date(snap.timestamp).getTime();
+        if (t >= windowStart + windowMs && count > 0) {
+          candleQueries.insertCandle.run({
+            symbol, network, interval: '15m',
+            open_time: new Date(windowStart).toISOString(),
+            open, high, low, close, volume: 0, source: 'synthetic',
+          });
+          windowStart += windowMs;
+          open = snap.price_usd; high = open; low = open; close = open; count = 0;
+        }
+        high = Math.max(high, snap.price_usd);
+        low = Math.min(low, snap.price_usd);
+        close = snap.price_usd;
+        count++;
+      }
+      if (count > 0) {
+        candleQueries.insertCandle.run({
+          symbol, network, interval: '15m',
+          open_time: new Date(windowStart).toISOString(),
+          open, high, low, close, volume: 0, source: 'synthetic',
+        });
+      }
+      logger.info(`Warmup: synthesised ${symbol} candles from ${snaps.length} snapshots`);
     }
   }
 

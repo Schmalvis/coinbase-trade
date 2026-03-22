@@ -54,6 +54,11 @@ async function main() {
 
   // Portfolio optimizer dependencies — created after network restore
   let candleService = new CandleService(botState.activeNetwork);
+
+  // Pre-populate candles from snapshot history (eliminates 6.5hr warmup gap)
+  const warmupSymbols = ASSET_REGISTRY.filter(a => a.symbol !== 'USDC').map(a => a.symbol);
+  candleService.warmupFromSnapshots(warmupSymbols, botState.activeNetwork);
+
   const candleStrategy = new CandleStrategy();
   const riskGuard = new RiskGuard(runtimeConfig);
   const watchlistManager = new WatchlistManager();
