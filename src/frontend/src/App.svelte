@@ -7,6 +7,8 @@
   import { startPolling } from './lib/stores/polling';
   import CandleChart from './lib/components/CandleChart.svelte';
   import ScoresPanel from './lib/components/ScoresPanel.svelte';
+  import RiskMonitor from './lib/components/RiskMonitor.svelte';
+  import PerformancePanel from './lib/components/PerformancePanel.svelte';
 
   onMount(() => {
     startPolling(5000);
@@ -39,4 +41,8 @@
     <div class="flex-[2]"><CandleChart /></div>
     <div class="flex-1"><ScoresPanel /></div>
   </div>
+
+  <!-- Performance and risk panels -->
+  <div class="px-4 mt-4"><PerformancePanel /></div>
+  <div class="px-4 mt-4"><RiskMonitor /></div>
 </div>
