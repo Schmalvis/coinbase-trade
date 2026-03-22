@@ -21,6 +21,11 @@ try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_lower_bound REAL`);
 try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_levels INTEGER NOT NULL DEFAULT 10`); } catch { /* exists */ }
 try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_amount_pct REAL NOT NULL DEFAULT 5.0`); } catch { /* exists */ }
 
+// Migrations: discovered_assets SMA toggle columns
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_use_ema INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_volume_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
+try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_rsi_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
+
 // Migration: allow 'grid' as strategy value in discovered_assets
 try {
   db.exec(`INSERT INTO discovered_assets (address, network, symbol, strategy) VALUES ('__grid_test__', '__test__', '__test__', 'grid')`);
@@ -246,6 +251,9 @@ export interface DiscoveredAssetRow {
   grid_lower_bound: number | null;
   grid_levels:  number;
   grid_amount_pct: number;
+  sma_use_ema: number;
+  sma_volume_filter: number;
+  sma_rsi_filter: number;
 }
 
 export const discoveredAssetQueries = {
@@ -274,9 +282,11 @@ export const discoveredAssetQueries = {
   updateAssetStrategyConfig: db.prepare(`
     UPDATE discovered_assets
     SET drop_pct = @drop_pct, rise_pct = @rise_pct,
-        sma_short = @sma_short, sma_long = @sma_long, strategy = @strategy
+        sma_short = @sma_short, sma_long = @sma_long, strategy = @strategy,
+        sma_use_ema = @sma_use_ema, sma_volume_filter = @sma_volume_filter,
+        sma_rsi_filter = @sma_rsi_filter
     WHERE address = @address AND network = @network
-  `) as Statement<{ drop_pct: number; rise_pct: number; sma_short: number; sma_long: number; strategy: string; address: string; network: string }>,
+  `) as Statement<{ drop_pct: number; rise_pct: number; sma_short: number; sma_long: number; strategy: string; sma_use_ema: number; sma_volume_filter: number; sma_rsi_filter: number; address: string; network: string }>,
 
   updateGridConfig: db.prepare(`
     UPDATE discovered_assets
