@@ -144,7 +144,14 @@ export class TradeExecutor {
 
     // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
     const portfolioUsdAsset = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0) + (botState.lastUsdcBalance ?? 0);
-    const tradeValueUsdAsset = amount * (price || 0);
+    // For buy: amount is USDC (already USD-denominated). For sell: use asset's own price, not ETH price.
+    let tradeValueUsdAsset: number;
+    if (signal === 'buy') {
+      tradeValueUsdAsset = amount; // spending USDC — already in USD
+    } else {
+      const assetSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
+      tradeValueUsdAsset = amount * (assetSnap?.price_usd ?? (price || 0));
+    }
     if (portfolioUsdAsset > 0 && tradeValueUsdAsset > portfolioUsdAsset * 2) {
       logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${portfolioUsdAsset.toFixed(2)}`);
       return;
