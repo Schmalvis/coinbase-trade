@@ -1,4 +1,5 @@
 import type { MCPClient } from './client.js';
+import { ASSET_REGISTRY } from '../assets/registry.js';
 
 const TOKEN_ADDRESSES_BY_NETWORK: Record<string, Record<string, string>> = {
   'base-sepolia': {
@@ -46,7 +47,11 @@ export class CoinbaseTools {
 
   getTokenAddress(symbol: string): string {
     const net = this.mcp.network;
-    return (TOKEN_ADDRESSES_BY_NETWORK[net] ?? TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'])[symbol];
+    const fromMap = (TOKEN_ADDRESSES_BY_NETWORK[net] ?? TOKEN_ADDRESSES_BY_NETWORK['base-sepolia'])[symbol];
+    if (fromMap) return fromMap;
+    // Fall back to ASSET_REGISTRY for tokens like CBBTC, CBETH
+    const asset = ASSET_REGISTRY.find(a => a.symbol === symbol);
+    return asset?.addresses?.[net as 'base-mainnet' | 'base-sepolia'] ?? asset?.addresses?.['base-mainnet'] ?? '';
   }
 
   async getWalletDetails(): Promise<WalletDetails> {
