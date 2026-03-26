@@ -1,7 +1,7 @@
 import type { Telegraf } from 'telegraf';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
-import { rotationQueries, dailyPnlQueries } from '../data/db.js';
+import { rotationQueries, dailyPnlQueries, queries } from '../data/db.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 
 export type TelegramMode = 'all' | 'important_only' | 'digest' | 'off';
@@ -76,7 +76,7 @@ export function flushDigest(): string | null {
   const executed = todayRotations.filter(r => r.status === 'executed');
   const failed = todayRotations.filter(r => r.status === 'failed' || r.status === 'vetoed');
 
-  // Summarise buys and sells
+  // Summarise rotation buys and sells
   const bought = new Map<string, number>();
   const sold = new Map<string, number>();
   for (const r of executed) {
@@ -85,6 +85,16 @@ export function flushDigest(): string | null {
   }
   const boughtStr = [...bought.entries()].map(([s, n]) => `${n}x ${s}`).join(', ') || 'none';
   const soldStr = [...sold.entries()].map(([s, n]) => `${n}x ${s}`).join(', ') || 'none';
+
+  // Regular asset trades (threshold/SMA/grid strategy buys and sells)
+  const recentTrades = queries.recentTrades.all(200) as Array<{
+    action: string; status: string; dry_run: number; timestamp: string;
+  }>;
+  const todayTrades = recentTrades.filter(t =>
+    t.timestamp?.startsWith(todayStr) && t.dry_run === 0 && t.status === 'executed',
+  );
+  const assetBuys = todayTrades.filter(t => t.action === 'buy').length;
+  const assetSells = todayTrades.filter(t => t.action === 'sell').length;
 
   // Portfolio value and P&L
   const portfolioUsd = (todayPnl as any)?.current_usd ?? (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0);
@@ -99,11 +109,17 @@ export function flushDigest(): string | null {
   lines.push(`📋 *Trading Summary*`);
   lines.push('');
 
-  if (executed.length === 0 && failed.length === 0) {
+  const totalActivity = executed.length + failed.length + assetBuys + assetSells;
+  if (totalActivity === 0) {
     lines.push(`No trades were executed since the last digest.`);
   } else {
-    const tradeWord = executed.length === 1 ? 'trade was' : 'trades were';
-    lines.push(`${executed.length} ${tradeWord} executed today, purchasing ${boughtStr} and selling ${soldStr}.`);
+    if (assetBuys + assetSells > 0) {
+      lines.push(`${assetBuys + assetSells} strategy trade${assetBuys + assetSells > 1 ? 's' : ''} executed (${assetBuys} buy, ${assetSells} sell).`);
+    }
+    if (executed.length > 0) {
+      const rotWord = executed.length === 1 ? 'rotation' : 'rotations';
+      lines.push(`${executed.length} ${rotWord} executed, purchasing ${boughtStr} and selling ${soldStr}.`);
+    }
     if (failed.length > 0) {
       lines.push(`${failed.length} rotation${failed.length > 1 ? 's were' : ' was'} vetoed or failed.`);
     }

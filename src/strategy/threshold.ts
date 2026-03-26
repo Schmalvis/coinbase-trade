@@ -40,11 +40,12 @@ export class ThresholdStrategy implements Strategy {
     }
 
     if (gainPct >= riseTarget) {
+      const prevEntry = this.entryPrice;
       this.entryPrice = current;
       this.consecutiveBuys = 0;
       return {
         signal: 'sell',
-        reason: `Price up ${gainPct.toFixed(2)}% from entry ($${this.entryPrice.toFixed(2)} → $${current.toFixed(2)})`,
+        reason: `Price up ${gainPct.toFixed(2)}% from entry ($${prevEntry.toFixed(2)} → $${current.toFixed(2)})`,
       };
     }
 

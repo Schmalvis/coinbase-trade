@@ -124,6 +124,8 @@ export class TradeExecutor {
       logger.debug(`Cooldown active for ${symbol}, skipping`);
       return;
     }
+    // Claim cooldown upfront to prevent concurrent calls bypassing the check
+    this._assetCooldowns.set(symbol, new Date());
 
     // For BUY: we spend USDC, so check USDC balance
     // For SELL: we spend the token, so check token balance
@@ -179,7 +181,6 @@ export class TradeExecutor {
       status = 'failed';
     }
 
-    this._assetCooldowns.set(symbol, new Date());
     this.recordTrade({
       signal: signal as 'buy' | 'sell', amountEth: amount, price, txHash,
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
