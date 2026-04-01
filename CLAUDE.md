@@ -1,3 +1,9 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
 # coinbase-trade
 
 Autonomous trading bot for Base network (sepolia testnet / mainnet) using Coinbase AgentKit via MCP.
@@ -66,6 +72,14 @@ npx tsx cli.ts status
 npx tsx cli.ts pause
 npx tsx cli.ts resume
 npx tsx cli.ts trades
+
+# Tests (vitest — no bot running required)
+npm test                          # run all tests once
+npm run test:watch                # watch mode
+npx vitest run tests/optimizer.test.ts  # single test file
+
+# Type check without building
+npx tsc --noEmit
 ```
 
 **Note:** tsx/esm cold-start takes ~15 seconds on the Pi — this is normal, not a hang.
@@ -125,6 +139,7 @@ src/frontend/        # Svelte + Vite + Tailwind dashboard (builds to dist/web/pu
       stores/        # Svelte writable stores (status, assets, candles, scores, risk, performance, settings, polling)
       components/    # Svelte components (Header, AssetsTable, CandleChart, OpportunityScores, etc.)
 cli.ts               # CLI (talks to running bot via HTTP)
+tests/               # Vitest test suite (supertest for Express endpoints, mocked MCP client)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack
 stack.env.example    # Environment variable template for Portainer deployment

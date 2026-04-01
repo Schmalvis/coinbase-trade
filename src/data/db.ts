@@ -1,10 +1,8 @@
 // DB connection — import this to get the shared Database instance.
-// Schema is initialised as a side-effect when this module is first imported.
+// Schema is initialised as a side-effect when schema.js is imported — migrations
+// run before any query module evaluates its db.prepare() calls.
 export { db } from './connection.js';
-import { db } from './connection.js';
-import { initSchema } from './schema.js';
-
-initSchema(db);
+import './schema.js';
 
 export { queries, runTransaction, portfolioSnapshotQueries } from './queries/core.js';
 export { settingQueries } from './queries/settings.js';

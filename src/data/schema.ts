@@ -1,4 +1,5 @@
 import type { Database as DB } from 'better-sqlite3';
+import { db } from './connection.js';
 
 export function initSchema(db: DB): void {
   // Migration: add network column to existing DBs that predate this field
@@ -215,3 +216,9 @@ export function initSchema(db: DB): void {
     );
   `);
 }
+
+// Auto-run on import: ensures migrations execute before any query module
+// evaluates db.prepare() calls (ES module re-exports resolve before the
+// importing module's body runs, so an explicit initSchema(db) call in db.ts
+// fires too late for queries/core.ts to see the migrated schema).
+initSchema(db);
