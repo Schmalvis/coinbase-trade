@@ -84,7 +84,7 @@ export class TradeExecutor {
     return true;
   }
 
-  async executeForAsset(symbol: string, signal: Signal, reason: string): Promise<void> {
+  async executeForAsset(symbol: string, signal: Signal, reason: string, priority?: 'stop-loss' | 'normal'): Promise<void> {
     if (signal === 'hold') return;
 
     // Safety: respect pause state (C3)
@@ -122,7 +122,7 @@ export class TradeExecutor {
 
     const cooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
     const last = this._assetCooldowns.get(symbol);
-    if (last && (Date.now() - last.getTime()) < cooldownSecs * 1000) {
+    if (priority !== 'stop-loss' && last && (Date.now() - last.getTime()) < cooldownSecs * 1000) {
       logger.debug(`Cooldown active for ${symbol}, skipping`);
       return;
     }

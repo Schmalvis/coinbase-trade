@@ -1,14 +1,15 @@
 import { Router } from 'express';
 import { botState } from '../../core/state.js';
-import { queries, discoveredAssetQueries } from '../../data/db.js';
+import { queries, discoveredAssetQueries, candleQueries } from '../../data/db.js';
 import type { DiscoveredAssetRow } from '../../data/db.js';
+import { TCP_MIN_1H_CANDLES } from '../../strategy/constants.js';
 import { assetsForNetwork } from '../../assets/registry.js';
 import type { RouteContext } from '../route-context.js';
 
 function validateAssetParams(p: Record<string, unknown>): string[] {
   const errors: string[] = [];
-  if ('strategyType' in p && !['threshold', 'sma', 'grid'].includes(p.strategyType as string)) {
-    errors.push('strategyType must be threshold, sma, or grid');
+  if ('strategyType' in p && !['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout', 'trend-continuation'].includes(p.strategyType as string)) {
+    errors.push('strategyType must be threshold, sma, grid, momentum-burst, volatility-breakout, or trend-continuation');
   }
   for (const k of ['dropPct', 'risePct']) {
     if (k in p && (typeof p[k] !== 'number' || (p[k] as number) < 0.1)) {
@@ -22,6 +23,14 @@ function validateAssetParams(p: Record<string, unknown>): string[] {
     errors.push('smaLong must be an integer >= 3');
   }
   return errors;
+}
+
+function checkTcpCandleRequirement(symbol: string, network: string): string | null {
+  const candles = candleQueries.getCandles.all(symbol, network, '1h', TCP_MIN_1H_CANDLES) as unknown[];
+  if (candles.length < TCP_MIN_1H_CANDLES) {
+    return `trend-continuation requires ${TCP_MIN_1H_CANDLES} × 1h candles for ${symbol} — only ${candles.length} available. Wait until more price history accumulates (approximately ${Math.ceil((TCP_MIN_1H_CANDLES - candles.length) / 24)} more days).`;
+  }
+  return null;
 }
 
 export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
@@ -105,6 +114,18 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     const errors = validateAssetParams(body);
     if (errors.length) return res.status(400).json({ error: errors[0] });
 
+    if (body.strategyType === 'trend-continuation') {
+      const allForCheck = discoveredAssetQueries.getDiscoveredAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+      const rowForCheck = allForCheck.find(r =>
+        r.address.toLowerCase() === (req.params.address as string).toLowerCase() ||
+        r.symbol.toLowerCase() === (req.params.address as string).toLowerCase()
+      );
+      if (rowForCheck) {
+        const candleErr = checkTcpCandleRequirement(rowForCheck.symbol, botState.activeNetwork);
+        if (candleErr) return res.status(400).json({ error: candleErr });
+      }
+    }
+
     let row = discoveredAssetQueries.getAssetByAddress.get(address, network) as DiscoveredAssetRow | undefined;
     if (!row) {
       const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
@@ -131,7 +152,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
       network,
     });
     engine.startAssetLoop(dbAddress, row.symbol, {
-      strategyType: params.strategyType as 'threshold' | 'sma',
+      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
       dropPct: params.dropPct,
       risePct: params.risePct,
       smaShort: params.smaShort,
@@ -181,6 +202,11 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     const errors = validateAssetParams(body);
     if (errors.length) return res.status(400).json({ error: errors[0] });
 
+    if (body.strategyType === 'trend-continuation') {
+      const candleErr = checkTcpCandleRequirement(row.symbol, network);
+      if (candleErr) return res.status(400).json({ error: candleErr });
+    }
+
     const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number; smaUseEma?: boolean; smaVolumeFilter?: boolean; smaRsiFilter?: boolean };
     const dbAddress = row.address; // use the address from DB, not the request param
     discoveredAssetQueries.updateAssetStrategyConfig.run({
@@ -206,7 +232,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
       });
     }
     engine.reloadAssetConfig(dbAddress, row.symbol, {
-      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid',
+      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
       dropPct: params.dropPct,
       risePct: params.risePct,
       smaShort: params.smaShort,

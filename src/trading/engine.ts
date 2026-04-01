@@ -7,12 +7,13 @@ import { SMAStrategy } from '../strategy/sma.js';
 import { GridStrategy } from '../strategy/grid.js';
 import { MomentumBurstStrategy } from '../strategy/momentum-burst.js';
 import { VolatilityBreakoutStrategy } from '../strategy/volatility-breakout.js';
+import { TrendContinuationStrategy } from '../strategy/trend-continuation.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
 
 interface AssetStrategyParams {
-  strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout';
+  strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation';
   dropPct: number;
   risePct: number;
   smaShort: number;
@@ -33,7 +34,7 @@ const STRATEGY_KEYS = [
 
 export class TradingEngine {
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
-  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy | MomentumBurstStrategy | VolatilityBreakoutStrategy>();
+  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy | MomentumBurstStrategy | VolatilityBreakoutStrategy | TrendContinuationStrategy>();
   private optimizer: PortfolioOptimizer | null = null;
   private optimizerIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -211,6 +212,11 @@ export class TradingEngine {
         strategy = new VolatilityBreakoutStrategy(
           (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '1h', limit) as any[],
         );
+      } else if (params.strategyType === 'trend-continuation') {
+        strategy = new TrendContinuationStrategy(
+          (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '15m', limit) as any[],
+          (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '1h', limit) as any[],
+        );
       } else {
         strategy = new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });
       }
@@ -220,7 +226,7 @@ export class TradingEngine {
     const result = strategy.evaluate(snapshots);
 
     logger.debug(`[${symbol}] Strategy signal: ${result.signal} — ${result.reason}`);
-    await this.executor.executeForAsset(symbol, result.signal, 'auto');
+    await this.executor.executeForAsset(symbol, result.signal, result.reason, result.priority);
   }
 
   setOptimizer(optimizer: PortfolioOptimizer): void {
