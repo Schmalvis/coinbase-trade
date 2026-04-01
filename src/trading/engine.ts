@@ -220,7 +220,7 @@ export class TradingEngine {
     const result = strategy.evaluate(snapshots);
 
     logger.debug(`[${symbol}] Strategy signal: ${result.signal} — ${result.reason}`);
-    await this.executor.executeForAsset(symbol, result.signal, 'auto');
+    await this.executor.executeForAsset(symbol, result.signal, result.reason, result.priority);
   }
 
   setOptimizer(optimizer: PortfolioOptimizer): void {

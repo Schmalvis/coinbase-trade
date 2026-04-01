@@ -10,6 +10,8 @@ export interface Snapshot {
 export interface StrategyResult {
   signal: Signal;
   reason: string;
+  /** When 'stop-loss', the executor bypasses the per-asset cooldown check. */
+  priority?: 'stop-loss' | 'normal';
 }
 
 export interface Strategy {
