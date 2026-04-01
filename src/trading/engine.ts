@@ -12,7 +12,7 @@ import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
 
 interface AssetStrategyParams {
-  strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout';
+  strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation';
   dropPct: number;
   risePct: number;
   smaShort: number;
