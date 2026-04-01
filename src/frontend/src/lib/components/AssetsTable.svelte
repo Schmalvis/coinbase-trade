@@ -103,10 +103,10 @@
         </th>
         <th class="px-4 py-2 text-left">Asset</th>
         <th class="px-4 py-2 text-right">Price</th>
-        <th class="px-4 py-2 text-right">Balance</th>
-        <th class="px-4 py-2 text-right">Value</th>
-        <th class="px-4 py-2 text-left">Weight</th>
-        <th class="px-4 py-2 text-right">Score</th>
+        <th class="hidden sm:table-cell px-4 py-2 text-right">Balance</th>
+        <th class="hidden sm:table-cell px-4 py-2 text-right">Value</th>
+        <th class="hidden sm:table-cell px-4 py-2 text-left">Weight</th>
+        <th class="hidden sm:table-cell px-4 py-2 text-right">Score</th>
         <th class="px-4 py-2 text-right">24H</th>
         <th class="px-4 py-2 text-left">Strategy</th>
       </tr>
@@ -134,25 +134,25 @@
           </td>
           <td class="px-4 py-3 text-sm">
             <span class="font-semibold text-[var(--text-primary)]">{asset.symbol}</span>
-            <span class="text-[var(--text-muted)] ml-1 text-xs">{asset.name ?? ''}</span>
+            <span class="hidden sm:inline text-[var(--text-muted)] ml-1 text-xs">{asset.name ?? ''}</span>
           </td>
           <td class="px-4 py-3 text-sm text-right text-[var(--text-primary)]">
             {formatPrice(asset.price)}
           </td>
-          <td class="px-4 py-3 text-sm text-right text-[var(--text-primary)]">
+          <td class="hidden sm:table-cell px-4 py-3 text-sm text-right text-[var(--text-primary)]">
             {formatBalance(asset.balance)}
           </td>
-          <td class="px-4 py-3 text-sm text-right text-[var(--text-primary)]">
+          <td class="hidden sm:table-cell px-4 py-3 text-sm text-right text-[var(--text-primary)]">
             {formatValue(value)}
           </td>
-          <td class="px-4 py-3 text-sm">
+          <td class="hidden sm:table-cell px-4 py-3 text-sm">
             <span class="text-[var(--text-primary)]">{weight.toFixed(1)}%</span>
             <div class="w-16 h-1 bg-[var(--border)] rounded-full mt-1 inline-block ml-1 align-middle">
               <div class="h-full bg-accent-blue rounded-full" style="width: {Math.min(weight, 100)}%"></div>
             </div>
           </td>
           <td
-            class="px-4 py-3 text-sm text-right font-semibold"
+            class="hidden sm:table-cell px-4 py-3 text-sm text-right font-semibold"
             class:text-accent-green={score != null && score > 0}
             class:text-accent-red={score != null && score < 0}
             class:text-[var(--text-muted)]={score == null || score === 0}
