@@ -30,20 +30,20 @@
 
 <div class="min-h-screen">
   <!-- Top bar -->
-  <header class="flex items-center justify-between px-5 py-3 border-b border-[var(--border)]">
+  <header class="flex flex-col sm:flex-row sm:items-center justify-between px-4 py-3 gap-2 border-b border-[var(--border)]">
     <div>
       <span class="text-lg font-semibold">Trade Bot</span>
       <span class="text-sm font-normal text-[var(--text-secondary)] ml-1">/ autonomous</span>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="flex items-center gap-2 flex-wrap">
       <NetworkSelector />
       <ThemeToggle />
       <button
-        class="px-3 py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+        class="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
         on:click={() => { settingsOpen = true; }}
       >Settings</button>
       <button
-        class="px-3 py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-red-400 transition-colors"
+        class="px-2 py-1 sm:px-3 sm:py-1.5 rounded-lg text-sm border border-[var(--border-hi)] text-[var(--text-secondary)] hover:text-red-400 transition-colors"
         on:click={handleLogout}
       >Logout</button>
     </div>
