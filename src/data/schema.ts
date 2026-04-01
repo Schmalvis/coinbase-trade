@@ -23,8 +23,8 @@ export function initSchema(db: DB): void {
 
   // Migration: extend discovered_assets strategy CHECK constraint for new strategies
   try {
-    db.exec(`INSERT INTO discovered_assets (address, network, symbol, name, strategy) VALUES ('__mbctest__', '__test__', '__test__', '', 'momentum-burst')`);
-    db.exec(`DELETE FROM discovered_assets WHERE address = '__mbctest__'`);
+    db.exec(`INSERT INTO discovered_assets (address, network, symbol, name, strategy) VALUES ('__tcptest__', '__test__', '__test__', '', 'trend-continuation')`);
+    db.exec(`DELETE FROM discovered_assets WHERE address = '__tcptest__'`);
   } catch {
     // CHECK constraint doesn't include new strategies — rebuild table
     const rebuildDiscoveredAssets = db.transaction(() => {
@@ -39,7 +39,7 @@ export function initSchema(db: DB): void {
         rise_pct    REAL NOT NULL DEFAULT 3.0,
         sma_short   INTEGER NOT NULL DEFAULT 5,
         sma_long    INTEGER NOT NULL DEFAULT 20,
-        strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma','grid','momentum-burst','volatility-breakout')),
+        strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma','grid','momentum-burst','volatility-breakout','trend-continuation')),
         discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
         grid_manual_override INTEGER NOT NULL DEFAULT 0,
         grid_upper_bound REAL,

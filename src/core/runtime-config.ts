@@ -52,7 +52,7 @@ const isInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v);
 const isNum = (v: unknown) => typeof v === 'number' && !isNaN(v);
 
 const VALIDATORS: Record<ConfigKey, Validator> = {
-  STRATEGY:               v => ['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout'].includes(String(v)) ? null : 'must be "threshold", "sma", "grid", "momentum-burst", or "volatility-breakout"',
+  STRATEGY:               v => ['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout', 'trend-continuation'].includes(String(v)) ? null : 'must be "threshold", "sma", "grid", "momentum-burst", "volatility-breakout", or "trend-continuation"',
   TRADE_INTERVAL_SECONDS: v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   POLL_INTERVAL_SECONDS:  v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   PRICE_DROP_THRESHOLD_PCT: v => isNum(v) && (v as number) >= 0.1 && (v as number) <= 50 ? null : 'must be 0.1–50',
