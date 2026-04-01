@@ -2,8 +2,31 @@
   import { assets } from '../stores/assets';
   import { scores } from '../stores/scores';
   import AssetConfigPanel from './AssetConfigPanel.svelte';
+  import BulkActionBar from './BulkActionBar.svelte';
 
   let expandedAddress: string | null = null;
+
+  let selected = new Set<string>();
+
+  $: pendingAssets = ($assets ?? []).filter(a => a.status === 'pending');
+  $: allPendingSelected = pendingAssets.length > 0 && pendingAssets.every(a => selected.has(a.address));
+  $: somePendingSelected = !allPendingSelected && pendingAssets.some(a => selected.has(a.address));
+
+  function toggleAsset(address: string) {
+    const next = new Set(selected);
+    if (next.has(address)) next.delete(address); else next.add(address);
+    selected = next;
+  }
+
+  function toggleSelectAll() {
+    selected = allPendingSelected
+      ? new Set()
+      : new Set(pendingAssets.map(a => a.address));
+  }
+
+  function onBulkComplete() {
+    selected = new Set();
+  }
 
   function toggleRow(address: string) {
     expandedAddress = expandedAddress === address ? null : address;
@@ -68,6 +91,16 @@
   <table class="w-full">
     <thead>
       <tr class="text-xs font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
+        <th class="px-3 py-2 w-8">
+          <input
+            type="checkbox"
+            checked={allPendingSelected}
+            bind:indeterminate={somePendingSelected}
+            on:change={toggleSelectAll}
+            class="cursor-pointer accent-accent-blue"
+            title="Select all pending"
+          />
+        </th>
         <th class="px-4 py-2 text-left">Asset</th>
         <th class="px-4 py-2 text-right">Price</th>
         <th class="px-4 py-2 text-right">Balance</th>
@@ -88,6 +121,17 @@
           class="border-b border-[var(--border)] hover:bg-[var(--bg-card-hover)] cursor-pointer transition-colors"
           on:click={() => toggleRow(asset.address)}
         >
+          <td class="px-3 py-3 w-8">
+            {#if asset.status === 'pending'}
+              <input
+                type="checkbox"
+                checked={selected.has(asset.address)}
+                on:click|stopPropagation
+                on:change={() => toggleAsset(asset.address)}
+                class="cursor-pointer accent-accent-blue"
+              />
+            {/if}
+          </td>
           <td class="px-4 py-3 text-sm">
             <span class="font-semibold text-[var(--text-primary)]">{asset.symbol}</span>
             <span class="text-[var(--text-muted)] ml-1 text-xs">{asset.name ?? ''}</span>
@@ -137,7 +181,7 @@
         </tr>
         {#if expandedAddress === asset.address}
           <tr>
-            <td colspan="8" class="p-0">
+            <td colspan="9" class="p-0">
               <AssetConfigPanel {asset} on:saved={onSaved} on:dismissed={onDismissed} />
             </td>
           </tr>
@@ -149,4 +193,6 @@
   {#if ($assets ?? []).length === 0}
     <div class="p-6 text-center text-sm text-[var(--text-muted)]">No assets found</div>
   {/if}
+
+  <BulkActionBar {selected} onComplete={onBulkComplete} />
 </div>
