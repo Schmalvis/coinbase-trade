@@ -108,10 +108,11 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     const network = botState.activeNetwork;
     const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
 
+    const assetByAddress = new Map(allAssets.map(r => [r.address.toLowerCase(), r]));
     const toEnable: DiscoveredAssetRow[] = [];
     let skipped = 0;
     for (const address of addresses) {
-      const row = allAssets.find(r => r.address === address);
+      const row = assetByAddress.get(address.toLowerCase());
       if (!row || row.status !== 'pending') { skipped++; continue; }
       toEnable.push(row);
     }
@@ -146,10 +147,11 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     const network = botState.activeNetwork;
     const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
 
+    const assetByAddress = new Map(allAssets.map(r => [r.address.toLowerCase(), r]));
     const toProcess: DiscoveredAssetRow[] = [];
     let skipped = 0;
     for (const address of addresses) {
-      const row = allAssets.find(r => r.address === address);
+      const row = assetByAddress.get(address.toLowerCase());
       if (!row || row.status !== 'pending') { skipped++; continue; }
       toProcess.push(row);
     }

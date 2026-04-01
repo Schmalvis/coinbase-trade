@@ -228,6 +228,7 @@ describe('POST /api/assets/bulk-dismiss', () => {
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({ ok: true, succeeded: 1, skipped: 0 });
     expect(mockDismissAsset).toHaveBeenCalledWith('0xaaa', 'base-sepolia');
+    expect(engine.stopAssetLoop).toHaveBeenCalledWith('SPAM');
   });
 
   it('skips non-pending assets', async () => {
