@@ -18,8 +18,6 @@ import type { Candle } from './candle.js';
 import { ema, computeRSI } from './candle.js';
 import { TCP_MIN_1H_CANDLES } from './constants.js';
 
-export { TCP_MIN_1H_CANDLES };
-
 export class TrendContinuationStrategy implements Strategy {
   name = 'trend-continuation';
 
@@ -105,7 +103,7 @@ export class TrendContinuationStrategy implements Strategy {
 
     const volumes = candles15m.map(c => c.volume);
     const avgVol = volumes.slice(0, 20).reduce((a, b) => a + b, 0) / Math.min(volumes.length, 20);
-    const quietPullback = avgVol > 0 ? volumes[0] < avgVol : true;
+    const quietPullback = avgVol > 0 ? volumes[volumes.length - 1] < avgVol : true;
 
     // Entry: all conditions aligned
     if (!this.inPosition && atEma20 && rsiInZone && quietPullback) {
