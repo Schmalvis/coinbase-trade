@@ -30,14 +30,16 @@
 
 <div class="flex items-center gap-1">
   {#each networks as network}
+    {@const shortName = network.replace('base-', '').replace(/^\w/, (c) => c.toUpperCase())}
     <button
       on:click={() => select(network)}
-      class="px-3 py-1 rounded-lg border text-sm font-medium transition-colors
+      class="px-2 py-1 sm:px-3 rounded-lg border text-sm font-medium transition-colors
         {network === active
           ? 'border-accent-green text-accent-green'
           : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}"
     >
-      {network}
+      <span class="hidden sm:inline">{network}</span>
+      <span class="sm:hidden">{shortName}</span>
     </button>
   {/each}
 </div>
