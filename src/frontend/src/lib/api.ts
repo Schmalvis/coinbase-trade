@@ -59,6 +59,10 @@ export const enableAsset = (address: string, config?: any) =>
   post<{ ok: boolean; error?: string }>(`/api/assets/${encodeURIComponent(address)}/enable`, config);
 export const dismissAsset = (address: string) =>
   post<{ ok: boolean }>(`/api/assets/${encodeURIComponent(address)}/dismiss`);
+export const bulkEnableAssets = (addresses: string[]) =>
+  post<{ ok: boolean; succeeded: number; skipped: number }>('/api/assets/bulk-enable', { addresses });
+export const bulkDismissAssets = (addresses: string[]) =>
+  post<{ ok: boolean; succeeded: number; skipped: number }>('/api/assets/bulk-dismiss', { addresses });
 export const saveAssetConfig = (address: string, config: any) =>
   put<{ ok: boolean; error?: string }>(`/api/assets/${encodeURIComponent(address)}/config`, config);
 
