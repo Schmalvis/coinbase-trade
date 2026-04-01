@@ -25,7 +25,7 @@ export interface CandleSignal {
 /* ------------------------------------------------------------------ */
 
 /** Exponential moving average — returns one EMA value per input value. */
-function ema(values: number[], period: number): number[] {
+export function ema(values: number[], period: number): number[] {
   if (values.length === 0) return [];
   const k = 2 / (period + 1);
   const result: number[] = [values[0]];
