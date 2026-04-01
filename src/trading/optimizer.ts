@@ -27,6 +27,8 @@ const HOLD_SIGNAL: CandleSignal = { signal: 'hold', strength: 0, reason: 'no dat
 export class PortfolioOptimizer {
   private latestScores: OpportunityScore[] = [];
   private _riskOff = false;
+  private readonly _rotationCooldowns = new Map<string, number>();
+  private readonly SAME_PAIR_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
 
   constructor(
     private readonly candleService: CandleService,
@@ -188,10 +190,15 @@ export class PortfolioOptimizer {
       for (const buy of buyCandidates) {
         if (buy.symbol === sell.symbol) continue;
         const delta = buy.score - sell.score;
-        if (delta > minDelta && delta > bestDelta) {
-          bestDelta = delta;
-          bestPair = { sell, buy };
-        }
+        if (delta <= minDelta || delta <= bestDelta) continue;
+        // Same-pair cooldown: skip if this pair (or its reverse) was rotated recently
+        const pairKey = `${sell.symbol}->${buy.symbol}`;
+        const revKey = `${buy.symbol}->${sell.symbol}`;
+        const lastPair = this._rotationCooldowns.get(pairKey) ?? 0;
+        const lastRev = this._rotationCooldowns.get(revKey) ?? 0;
+        if (Date.now() - Math.max(lastPair, lastRev) < this.SAME_PAIR_COOLDOWN_MS) continue;
+        bestDelta = delta;
+        bestPair = { sell, buy };
       }
     }
 
@@ -263,11 +270,19 @@ export class PortfolioOptimizer {
       return;
     }
 
-    // 7. Estimate fees
-    const estimatedFeePct = this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number;
-    // Score delta to estimated percentage: 40pt delta ≈ 2% gain
+    // 7. Estimate fees — multiply by 2 to cover both rotation legs (sell + buy)
+    const estimatedFeePct = (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) * 2;
     const rawScoreDelta = candidate.buy.score - candidate.sell.score;
-    const estimatedGainPct = rawScoreDelta * 0.05;
+    // Estimate gain from buy candidate's recent price momentum (last 5 x 15m candles)
+    const buyCandles5 = this.candleService.getStoredCandles(candidate.buy.symbol, network, '15m', 6);
+    let estimatedGainPct = 0;
+    if (buyCandles5.length >= 2) {
+      const newest = buyCandles5[0].close;
+      const oldest = buyCandles5[buyCandles5.length - 1].close;
+      if (oldest > 0) estimatedGainPct = Math.max(0, ((newest - oldest) / oldest) * 100);
+    }
+    // Conservative fallback if no candle data (1pt score delta ≈ 0.01% gain)
+    if (estimatedGainPct === 0) estimatedGainPct = rawScoreDelta * 0.01;
     let sellPrice = 0;
     if (candidate.sell.symbol === 'USDC') sellPrice = 1;
     else if (candidate.sell.symbol === 'ETH') sellPrice = botState.lastPrice ?? 0;
@@ -306,6 +321,14 @@ export class PortfolioOptimizer {
 
     // 9. Execute rotation
     const actualAmount = decision.adjustedAmount ?? sellAmount;
+
+    // Record cooldown for this pair before executing (prevents double-fire if tick overlaps)
+    const cooldownKey = `${candidate.sell.symbol}->${candidate.buy.symbol}`;
+    this._rotationCooldowns.set(cooldownKey, Date.now());
+    // Prune expired cooldowns
+    for (const [k, t] of this._rotationCooldowns) {
+      if (Date.now() - t > this.SAME_PAIR_COOLDOWN_MS) this._rotationCooldowns.delete(k);
+    }
 
     if (typeof (this.executor as any).executeRotation === 'function') {
       await (this.executor as any).executeRotation(

@@ -7,6 +7,8 @@ import type { RuntimeConfig } from '../core/runtime-config.js';
 
 export class TradeExecutor {
   private readonly _assetCooldowns = new Map<string, Date>();
+  // Tracks entry price and quantity for open positions (for realized P&L calculation)
+  private readonly _openPositions = new Map<string, { entryPrice: number; qty: number }>();
 
   constructor(
     private readonly tools: CoinbaseTools,
@@ -159,11 +161,29 @@ export class TradeExecutor {
       return;
     }
 
+    // Resolve asset price for P&L tracking
+    const assetPriceSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
+    const assetPrice = assetPriceSnap?.price_usd ?? price;
+
+    // Compute realized P&L for sells
+    let entryPriceForRecord: number | undefined;
+    let realizedPnl: number | undefined;
+    if (signal === 'sell') {
+      const pos = this._openPositions.get(symbol);
+      if (pos && pos.entryPrice > 0) {
+        realizedPnl = (assetPrice - pos.entryPrice) * Math.min(amount, pos.qty);
+        entryPriceForRecord = pos.entryPrice;
+        this._openPositions.delete(symbol);
+      }
+    }
+
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
+      if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
       this.recordTrade({
-        signal: signal as 'buy' | 'sell', amountEth: amount, price,
+        signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice,
         triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
+        entryPrice: entryPriceForRecord, realizedPnl,
       });
       return;
     }
@@ -181,9 +201,14 @@ export class TradeExecutor {
       status = 'failed';
     }
 
+    if (status === 'executed' && signal === 'buy') {
+      this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+    }
+
     this.recordTrade({
-      signal: signal as 'buy' | 'sell', amountEth: amount, price, txHash,
+      signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice, txHash,
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
+      entryPrice: entryPriceForRecord, realizedPnl,
     });
     logger.info(`executeForAsset complete: ${signal} ${symbol} (${status})`);
   }
@@ -314,6 +339,7 @@ export class TradeExecutor {
   private recordTrade(t: {
     signal: 'buy' | 'sell'; amountEth: number; price: number; txHash?: string;
     triggeredBy: string; status: string; dryRun: boolean; reason: string;
+    entryPrice?: number; realizedPnl?: number; strategy?: string;
   }): void {
     queries.insertTrade.run({
       action:       t.signal,
@@ -325,6 +351,9 @@ export class TradeExecutor {
       dry_run:      t.dryRun ? 1 : 0,
       reason:       t.reason,
       network:      botState.activeNetwork,
+      entry_price:  t.entryPrice ?? null,
+      realized_pnl: t.realizedPnl ?? null,
+      strategy:     t.strategy ?? null,
     });
 
     const now = new Date();

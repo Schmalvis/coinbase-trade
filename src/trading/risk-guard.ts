@@ -74,10 +74,18 @@ export class RiskGuard {
       adjustedAmount = portfolioUsd * maxRotPct / 100;
     }
 
-    // 6. Fee check
-    if (proposal.estimatedFeePct >= proposal.estimatedGainPct) {
-      this.logDecision('risk_veto', `Fees ${proposal.estimatedFeePct}% >= gain ${proposal.estimatedGainPct}%`);
-      return { approved: false, vetoReason: `Fees (${proposal.estimatedFeePct}%) exceed gain (${proposal.estimatedGainPct}%)` };
+    // 5b. Minimum absolute USD profit check
+    const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 1.0;
+    const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
+    if (estimatedProfitUsd < minProfitUsd) {
+      this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
+      return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
+    }
+
+    // 6. Fee check: require gain of at least 1.5× fees (not just break-even)
+    if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.5) {
+      this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.5× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
+      return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.5× fee threshold (${(proposal.estimatedFeePct * 1.5).toFixed(2)}%)` };
     }
 
     this.logDecision('risk_approved', detail);

@@ -15,8 +15,8 @@ export const queries: Record<string, Statement> = {
   `),
 
   insertTrade: db.prepare(`
-    INSERT INTO trades (action, amount_eth, price_usd, tx_hash, triggered_by, status, dry_run, reason, network)
-    VALUES (@action, @amount_eth, @price_usd, @tx_hash, @triggered_by, @status, @dry_run, @reason, @network)
+    INSERT INTO trades (action, amount_eth, price_usd, tx_hash, triggered_by, status, dry_run, reason, network, entry_price, realized_pnl, strategy)
+    VALUES (@action, @amount_eth, @price_usd, @tx_hash, @triggered_by, @status, @dry_run, @reason, @network, @entry_price, @realized_pnl, @strategy)
   `),
 
   recentTrades: db.prepare(`

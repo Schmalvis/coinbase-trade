@@ -5,12 +5,14 @@ import { logger } from '../core/logger.js';
 import { ThresholdStrategy } from '../strategy/threshold.js';
 import { SMAStrategy } from '../strategy/sma.js';
 import { GridStrategy } from '../strategy/grid.js';
+import { MomentumBurstStrategy } from '../strategy/momentum-burst.js';
+import { VolatilityBreakoutStrategy } from '../strategy/volatility-breakout.js';
 import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
 
 interface AssetStrategyParams {
-  strategyType: 'threshold' | 'sma' | 'grid';
+  strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout';
   dropPct: number;
   risePct: number;
   smaShort: number;
@@ -31,7 +33,7 @@ const STRATEGY_KEYS = [
 
 export class TradingEngine {
   private readonly _assetLoops = new Map<string, NodeJS.Timeout>();
-  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy>();
+  private readonly _assetStrategies = new Map<string, ThresholdStrategy | SMAStrategy | GridStrategy | MomentumBurstStrategy | VolatilityBreakoutStrategy>();
   private optimizer: PortfolioOptimizer | null = null;
   private optimizerIntervalId: ReturnType<typeof setInterval> | null = null;
 
@@ -200,6 +202,15 @@ export class TradingEngine {
             return 100 - (100 / (1 + rs));
           } : undefined,
         });
+      } else if (params.strategyType === 'momentum-burst') {
+        strategy = new MomentumBurstStrategy(
+          (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '15m', limit) as any[],
+          (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '1h', limit) as any[],
+        );
+      } else if (params.strategyType === 'volatility-breakout') {
+        strategy = new VolatilityBreakoutStrategy(
+          (limit) => candleQueries.getCandles.all(symbol, botState.activeNetwork, '1h', limit) as any[],
+        );
       } else {
         strategy = new ThresholdStrategy({ dropPct: params.dropPct, risePct: params.risePct });
       }

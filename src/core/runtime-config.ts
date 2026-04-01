@@ -14,7 +14,8 @@ export type ConfigKey =
   | 'DASHBOARD_THEME'
   | 'TELEGRAM_MODE' | 'TELEGRAM_DIGEST_TIMES' | 'TELEGRAM_QUIET_START' | 'TELEGRAM_QUIET_END'
   | 'BB_PERIOD' | 'BB_STD_DEV' | 'GRID_LEVELS' | 'GRID_AMOUNT_PCT' | 'GRID_UPPER_BOUND' | 'GRID_LOWER_BOUND' | 'GRID_RECALC_HOURS'
-  | 'DASHBOARD_SECRET';
+  | 'DASHBOARD_SECRET'
+  | 'STOP_LOSS_PCT' | 'TRAILING_STOP_PCT' | 'MIN_ROTATION_PROFIT_USD';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -35,6 +36,7 @@ const ALL_KEYS = new Set<ConfigKey>([
   'TELEGRAM_MODE', 'TELEGRAM_DIGEST_TIMES', 'TELEGRAM_QUIET_START', 'TELEGRAM_QUIET_END',
   'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
   'DASHBOARD_SECRET',
+  'STOP_LOSS_PCT', 'TRAILING_STOP_PCT', 'MIN_ROTATION_PROFIT_USD',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
@@ -50,7 +52,7 @@ const isInt = (v: unknown) => typeof v === 'number' && Number.isInteger(v);
 const isNum = (v: unknown) => typeof v === 'number' && !isNaN(v);
 
 const VALIDATORS: Record<ConfigKey, Validator> = {
-  STRATEGY:               v => ['threshold', 'sma', 'grid'].includes(String(v)) ? null : 'must be "threshold", "sma", or "grid"',
+  STRATEGY:               v => ['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout'].includes(String(v)) ? null : 'must be "threshold", "sma", "grid", "momentum-burst", or "volatility-breakout"',
   TRADE_INTERVAL_SECONDS: v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   POLL_INTERVAL_SECONDS:  v => isNum(v) && (v as number) >= 5 ? null : 'must be a number >= 5',
   PRICE_DROP_THRESHOLD_PCT: v => isNum(v) && (v as number) >= 0.1 && (v as number) <= 50 ? null : 'must be 0.1–50',
@@ -95,6 +97,9 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   GRID_LOWER_BOUND:  v => !v || (isNum(v) && (v as number) > 0) ? null : 'must be a positive number or empty',
   GRID_RECALC_HOURS: v => isNum(v) && (v as number) >= 1 && (v as number) <= 48 ? null : 'must be 1-48',
   DASHBOARD_SECRET:  () => null, // read-only, validator not reached
+  STOP_LOSS_PCT:          v => isNum(v) && (v as number) >= 1 && (v as number) <= 50 ? null : 'must be 1–50',
+  TRAILING_STOP_PCT:      v => isNum(v) && (v as number) >= 0.5 && (v as number) <= 30 ? null : 'must be 0.5–30',
+  MIN_ROTATION_PROFIT_USD: v => isNum(v) && (v as number) >= 0 && (v as number) <= 1000 ? null : 'must be 0–1000',
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)
@@ -120,6 +125,7 @@ function coerce(key: ConfigKey, value: unknown): ConfigValue {
     'ROTATION_SELL_THRESHOLD', 'ROTATION_BUY_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
     'RISK_OFF_THRESHOLD', 'RISK_ON_THRESHOLD', 'DEFAULT_FEE_ESTIMATE_PCT',
     'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
+    'STOP_LOSS_PCT', 'TRAILING_STOP_PCT', 'MIN_ROTATION_PROFIT_USD',
   ];
   if (numericKeys.includes(key) && typeof value !== 'number') {
     const n = Number(value);
