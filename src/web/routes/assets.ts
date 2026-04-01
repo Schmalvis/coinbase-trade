@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { botState } from '../../core/state.js';
-import { queries, discoveredAssetQueries, candleQueries } from '../../data/db.js';
+import { queries, discoveredAssetQueries, candleQueries, runTransaction } from '../../data/db.js';
 import type { DiscoveredAssetRow } from '../../data/db.js';
 import { TCP_MIN_1H_CANDLES } from '../../strategy/constants.js';
 import { assetsForNetwork } from '../../assets/registry.js';
@@ -97,6 +97,76 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     });
 
     res.json(result);
+  });
+
+  // POST /api/assets/bulk-enable — must be before /:address/enable
+  router.post('/api/assets/bulk-enable', (req, res) => {
+    const { addresses } = req.body as { addresses: string[] };
+    if (!Array.isArray(addresses) || addresses.length === 0) {
+      return res.status(400).json({ error: 'addresses must be a non-empty array' });
+    }
+    const network = botState.activeNetwork;
+    const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+
+    const toEnable: DiscoveredAssetRow[] = [];
+    let skipped = 0;
+    for (const address of addresses) {
+      const row = allAssets.find(r => r.address === address);
+      if (!row || row.status !== 'pending') { skipped++; continue; }
+      toEnable.push(row);
+    }
+
+    runTransaction(() => {
+      for (const row of toEnable) {
+        discoveredAssetQueries.updateAssetStatus.run({ status: 'active', address: row.address, network });
+      }
+    });
+
+    for (const row of toEnable) {
+      engine.startAssetLoop(row.address, row.symbol, {
+        strategyType: row.strategy as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
+        dropPct: row.drop_pct,
+        risePct: row.rise_pct,
+        smaShort: row.sma_short,
+        smaLong: row.sma_long,
+      });
+    }
+
+    const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+    botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
+    return res.json({ ok: true, succeeded: toEnable.length, skipped });
+  });
+
+  // POST /api/assets/bulk-dismiss — must be before /:address/dismiss
+  router.post('/api/assets/bulk-dismiss', (req, res) => {
+    const { addresses } = req.body as { addresses: string[] };
+    if (!Array.isArray(addresses) || addresses.length === 0) {
+      return res.status(400).json({ error: 'addresses must be a non-empty array' });
+    }
+    const network = botState.activeNetwork;
+    const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+
+    const toProcess: DiscoveredAssetRow[] = [];
+    let skipped = 0;
+    for (const address of addresses) {
+      const row = allAssets.find(r => r.address === address);
+      if (!row || row.status !== 'pending') { skipped++; continue; }
+      toProcess.push(row);
+    }
+
+    runTransaction(() => {
+      for (const row of toProcess) {
+        discoveredAssetQueries.dismissAsset.run(row.address, network);
+      }
+    });
+
+    for (const row of toProcess) {
+      engine.stopAssetLoop(row.symbol);
+    }
+
+    const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
+    botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
+    return res.json({ ok: true, succeeded: toProcess.length, skipped });
   });
 
   // POST /api/assets/:address/enable
