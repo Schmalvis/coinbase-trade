@@ -3,11 +3,12 @@ import { loadAssets } from './assets';
 import { loadScores } from './scores';
 import { loadRisk } from './risk';
 import { loadPerformance } from './performance';
+import { loadTrades } from './trades';
 
 let intervalId: ReturnType<typeof setInterval> | undefined;
 
 async function tick() {
-  await Promise.all([loadStatus(), loadAssets(), loadScores(), loadRisk(), loadPerformance()]);
+  await Promise.all([loadStatus(), loadAssets(), loadScores(), loadRisk(), loadPerformance(), loadTrades()]);
 }
 
 export function startPolling(ms = 5000) {

@@ -13,6 +13,7 @@
   import ActionButtons from './lib/components/ActionButtons.svelte';
   import TradeModal from './lib/components/TradeModal.svelte';
   import HoldingsGrid from './lib/components/HoldingsGrid.svelte';
+  import TradeHistory from './lib/components/TradeHistory.svelte';
   import { logout } from './lib/api';
 
   let settingsOpen = false;
@@ -73,7 +74,10 @@
 
   <!-- Performance and risk panels -->
   <div class="px-4 mt-4"><PerformancePanel /></div>
-  <div class="px-4 mt-4 pb-8"><RiskMonitor /></div>
+  <div class="px-4 mt-4"><RiskMonitor /></div>
+
+  <!-- Trade history -->
+  <div class="px-4 mt-4 pb-8"><TradeHistory /></div>
 </div>
 
 {#if settingsOpen}

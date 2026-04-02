@@ -50,6 +50,18 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 ---
 
+## Deployment Workflow
+
+**Never build the Docker image manually or restart containers directly.**
+
+1. Push changes to GitHub (`main` branch)
+2. GitHub Actions automatically rebuilds the image → `ghcr.io/schmalvis/coinbase-trade:latest`
+3. Once the image is published, use **Portainer** to pull the new image and redeploy the stack (`coinbase-trade-bot`, stack ID 68, endpoint ID 5 on RPi5)
+
+Portainer UI: `https://192.168.68.139:9443` → Stacks → coinbase-trade-bot → Pull and redeploy.
+
+---
+
 ## Running the Bot
 
 ```bash
