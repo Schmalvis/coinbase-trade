@@ -101,6 +101,8 @@ export interface TradeData {
   network: string;
   tx_hash: string | null;
   dry_run: number;
+  symbol: string | null;
+  strategy: string | null;
 }
 
 export interface SettingsData {

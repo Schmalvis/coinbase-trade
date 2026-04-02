@@ -80,7 +80,7 @@ export class TradeExecutor {
     }
 
     const amountEth = isBuy ? amount / (price || 1) : amount;
-    this.recordTrade({ signal: signal as 'buy' | 'sell', amountEth, price, txHash, triggeredBy, status, dryRun, reason });
+    this.recordTrade({ signal: signal as 'buy' | 'sell', amountEth, price, txHash, triggeredBy, status, dryRun, reason, symbol: isBuy ? toSymbol : fromSymbol });
     return true;
   }
 
@@ -183,7 +183,7 @@ export class TradeExecutor {
       this.recordTrade({
         signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice,
         triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
-        entryPrice: entryPriceForRecord, realizedPnl,
+        entryPrice: entryPriceForRecord, realizedPnl, symbol,
       });
       return;
     }
@@ -208,7 +208,7 @@ export class TradeExecutor {
     this.recordTrade({
       signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice, txHash,
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
-      entryPrice: entryPriceForRecord, realizedPnl,
+      entryPrice: entryPriceForRecord, realizedPnl, symbol,
     });
     logger.info(`executeForAsset complete: ${signal} ${symbol} (${status})`);
   }
@@ -278,7 +278,7 @@ export class TradeExecutor {
       txHash = result.txHash;
     }
 
-    this.recordTrade({ signal, amountEth, price, txHash, triggeredBy: 'manual', status: 'executed', dryRun, reason: 'manual' });
+    this.recordTrade({ signal, amountEth, price, txHash, triggeredBy: 'manual', status: 'executed', dryRun, reason: 'manual', symbol: signal === 'sell' ? from : to });
     return { txHash, dryRun };
   }
 
@@ -339,7 +339,7 @@ export class TradeExecutor {
   private recordTrade(t: {
     signal: 'buy' | 'sell'; amountEth: number; price: number; txHash?: string;
     triggeredBy: string; status: string; dryRun: boolean; reason: string;
-    entryPrice?: number; realizedPnl?: number; strategy?: string;
+    entryPrice?: number; realizedPnl?: number; strategy?: string; symbol?: string;
   }): void {
     queries.insertTrade.run({
       action:       t.signal,
@@ -354,6 +354,7 @@ export class TradeExecutor {
       entry_price:  t.entryPrice ?? null,
       realized_pnl: t.realizedPnl ?? null,
       strategy:     t.strategy ?? null,
+      symbol:       t.symbol ?? null,
     });
 
     const now = new Date();

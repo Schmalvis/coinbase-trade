@@ -9,6 +9,7 @@ export function initSchema(db: DB): void {
   try { db.exec(`ALTER TABLE trades ADD COLUMN entry_price REAL`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE trades ADD COLUMN realized_pnl REAL`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE trades ADD COLUMN strategy TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE trades ADD COLUMN symbol TEXT`); } catch { /* exists */ }
 
   // Migrations: discovered_assets grid columns
   try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_manual_override INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }

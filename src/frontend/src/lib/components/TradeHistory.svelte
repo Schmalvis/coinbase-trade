@@ -28,6 +28,7 @@
           <tr class="text-[var(--text-secondary)] text-xs border-b border-[var(--border)]">
             <th class="text-left pb-2 pr-4">Time</th>
             <th class="text-left pb-2 pr-4">Action</th>
+            <th class="text-left pb-2 pr-4">Asset</th>
             <th class="text-right pb-2 pr-4">Amount</th>
             <th class="text-right pb-2 pr-4">Price</th>
             <th class="text-left pb-2 pr-4 hidden sm:table-cell">Reason</th>
@@ -40,10 +41,11 @@
             <tr class="border-b border-[var(--border)] last:border-0">
               <td class="py-1.5 pr-4 text-[var(--text-secondary)] whitespace-nowrap">{formatTime(t.timestamp)}</td>
               <td class="py-1.5 pr-4 font-medium uppercase {actionClass(t.action)}">{t.action}</td>
+              <td class="py-1.5 pr-4 font-medium">{t.symbol ?? '—'}</td>
               <td class="py-1.5 pr-4 text-right font-mono">{(t.amount_eth ?? 0).toFixed(6)}</td>
               <td class="py-1.5 pr-4 text-right font-mono">${(t.price_usd ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               <td class="py-1.5 pr-4 text-[var(--text-secondary)] hidden sm:table-cell max-w-[180px] truncate">{t.reason ?? '—'}</td>
-              <td class="py-1.5 pr-4 text-[var(--text-secondary)] hidden sm:table-cell">{t['strategy'] ?? '—'}</td>
+              <td class="py-1.5 pr-4 text-[var(--text-secondary)] hidden sm:table-cell">{t.strategy ?? '—'}</td>
               <td class="py-1.5 text-center">
                 {#if t.dry_run}
                   <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">dry</span>
