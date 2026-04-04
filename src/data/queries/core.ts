@@ -46,6 +46,12 @@ export const queries: Record<string, Statement> = {
   recentPortfolioSnapshots: db.prepare(
     'SELECT * FROM portfolio_snapshots ORDER BY id DESC LIMIT ?'
   ),
+
+  todayRealizedPnl: db.prepare(`
+    SELECT COALESCE(SUM(realized_pnl), 0) as total
+    FROM trades
+    WHERE date(timestamp) = date('now') AND network = ? AND status = 'executed'
+  `) as Statement<[string], { total: number }>,
 };
 
 export const portfolioSnapshotQueries = {
