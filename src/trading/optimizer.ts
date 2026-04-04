@@ -210,19 +210,12 @@ export class PortfolioOptimizer {
     const scores = this.computeScores(network);
     this.latestScores = scores;
 
-    // 2. Update daily PnL high water
-    let totalPortfolioUsd = 0;
-    for (const s of scores) {
-      const balance = botState.assetBalances.get(s.symbol) ?? 0;
-      let price = 0;
-      if (s.symbol === 'USDC') price = 1;
-      else if (s.symbol === 'ETH') price = botState.lastPrice ?? 0;
-      else {
-        const candles = this.candleService.getStoredCandles(s.symbol, network, '15m', 1);
-        price = candles.length > 0 ? candles[0].close : 0;
-      }
-      totalPortfolioUsd += balance * price;
-    }
+    // 2. Update daily PnL high water — use authoritative portfolio_snapshot value
+    const latestSnap = (queries.recentPortfolioSnapshots.all(1) as { portfolio_usd: number }[])[0];
+    const totalPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
+
+    const realizedRow = queries.todayRealizedPnl.get(network) as { total: number } | undefined;
+    const todayRealized = realizedRow?.total ?? 0;
 
     const today = new Date().toISOString().slice(0, 10);
     const countRow = rotationQueries.getTodayRotationCount.get(network) as { cnt: number } | undefined;
@@ -234,7 +227,7 @@ export class PortfolioOptimizer {
       high_water: totalPortfolioUsd,
       current_usd: totalPortfolioUsd,
       rotations: todayCount,
-      realized_pnl: 0,
+      realized_pnl: todayRealized,
     });
 
     // 3. Risk-off check: all scores < RISK_OFF_THRESHOLD
@@ -361,7 +354,7 @@ export class PortfolioOptimizer {
         high_water: totalPortfolioUsd,
         current_usd: totalPortfolioUsd,
         rotations: todayCount + 1,
-        realized_pnl: 0,
+        realized_pnl: todayRealized,
       });
     });
 

@@ -12,6 +12,8 @@ const mockGetActiveAssets = { all: vi.fn().mockReturnValue([]) };
 const mockGetWatchlist = { all: vi.fn().mockReturnValue([]) };
 const mockInsertEvent = { run: vi.fn() };
 const mockRecentAssetSnapshots = { all: vi.fn().mockReturnValue([]) };
+const mockRecentPortfolioSnapshots = { all: vi.fn().mockReturnValue([]) };
+const mockTodayRealizedPnl = { get: vi.fn().mockReturnValue(undefined) };
 const mockGetGridLevels = { all: vi.fn().mockReturnValue([]) };
 const mockUpsertGridLevel = { run: vi.fn() };
 const mockClearGridLevels = { run: vi.fn() };
@@ -20,6 +22,8 @@ vi.mock('../src/data/db.js', () => ({
   queries: {
     insertEvent: mockInsertEvent,
     recentAssetSnapshots: mockRecentAssetSnapshots,
+    recentPortfolioSnapshots: mockRecentPortfolioSnapshots,
+    todayRealizedPnl: mockTodayRealizedPnl,
   },
   rotationQueries: {
     insertRotation: mockInsertRotation,
@@ -226,6 +230,51 @@ describe('Audit H2: Optimizer pricing for non-ETH/USDC assets', () => {
       // Score delta of ~100 * 0.05 = ~5, not 100
       expect(proposal.estimatedGainPct).toBeLessThan(20);
     }
+  });
+});
+
+describe('Bug fixes: B1 current_usd from snapshots, B2 realized_pnl from DB', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockAssetBalances.clear();
+    mockAssetBalances.set('ETH', 1);
+    mockAssetBalances.set('USDC', 500);
+    mockAssetBalances.set('CBBTC', 0.5);
+    mockGetActiveAssets.all.mockReturnValue([]);
+    mockGetWatchlist.all.mockReturnValue([]);
+    mockGetTodayRotationCount.get.mockReturnValue({ cnt: 0 });
+    // default: no snapshot, no realized pnl
+    mockRecentPortfolioSnapshots.all.mockReturnValue([]);
+    mockTodayRealizedPnl.get.mockReturnValue(undefined);
+  });
+
+  it('B1: current_usd comes from portfolio_snapshots, not stale botState loop', async () => {
+    mockRecentPortfolioSnapshots.all.mockReturnValue([{ portfolio_usd: 121.00 }]);
+
+    const optimizer = new PortfolioOptimizer(
+      makeMockCandleService(), makeMockStrategy(), makeMockRiskGuard(false), makeMockExecutor(), makeMockConfig(),
+    );
+
+    await optimizer.tick('base-mainnet');
+
+    expect(mockUpsertDailyPnl.run).toHaveBeenCalledWith(
+      expect.objectContaining({ current_usd: 121.00 }),
+    );
+  });
+
+  it('B2: realized_pnl comes from todayRealizedPnl query, not hardcoded 0', async () => {
+    mockTodayRealizedPnl.get.mockReturnValue({ total: 0.03 });
+    mockRecentPortfolioSnapshots.all.mockReturnValue([{ portfolio_usd: 100.00 }]);
+
+    const optimizer = new PortfolioOptimizer(
+      makeMockCandleService(), makeMockStrategy(), makeMockRiskGuard(false), makeMockExecutor(), makeMockConfig(),
+    );
+
+    await optimizer.tick('base-mainnet');
+
+    expect(mockUpsertDailyPnl.run).toHaveBeenCalledWith(
+      expect.objectContaining({ realized_pnl: 0.03 }),
+    );
   });
 });
 
