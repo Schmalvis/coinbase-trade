@@ -138,6 +138,11 @@ export class TradingEngine {
 
   private async tickAsset(symbol: string, params: AssetStrategyParams): Promise<void> {
     if (botState.isPaused) return;
+    // Respect RISK_OFF mode — halt all strategy trades, not just optimizer rotations
+    if (this.optimizer?.isRiskOff) {
+      logger.debug(`[${symbol}] Skipping tick — optimizer is in RISK_OFF mode`);
+      return;
+    }
 
     const limit = params.strategyType === 'grid' ? 5 : params.smaLong + 5;
     const raw = queries.recentAssetSnapshots.all(symbol, limit) as {

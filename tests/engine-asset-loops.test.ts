@@ -60,6 +60,84 @@ describe('TradingEngine asset loops', () => {
     expect(clearInterval).toHaveBeenCalledWith(42);
   });
 
+  describe('tickAsset — RISK_OFF gate', () => {
+    it('skips executeForAsset when optimizer isRiskOff is true', async () => {
+      const mockExecutor = { executeForAsset: mockExecuteForAsset } as any;
+      const mockConfig = { get: vi.fn((k: string) => {
+        if (k === 'STRATEGY') return 'threshold';
+        if (k === 'TRADE_INTERVAL_SECONDS') return 60;
+        if (k === 'PRICE_DROP_THRESHOLD_PCT') return 2.0;
+        if (k === 'PRICE_RISE_TARGET_PCT') return 3.0;
+        return undefined;
+      }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
+
+      const { TradingEngine } = await import('../src/trading/engine.js');
+      const engine = new TradingEngine(mockExecutor, mockConfig);
+
+      const { botState } = await import('../src/core/state.js');
+      botState.setStatus('running');
+
+      mockRecentAssetSnapshots.mockReturnValue([
+        { price_usd: 97,  balance: 1, timestamp: new Date().toISOString() },
+        { price_usd: 100, balance: 1, timestamp: new Date().toISOString() },
+      ]);
+
+      const mockOptimizer = { isRiskOff: true } as any;
+      engine.setOptimizer(mockOptimizer);
+
+      const assetParams = {
+        strategyType: 'threshold' as const,
+        dropPct: 2.0,
+        risePct: 3.0,
+        smaShort: 3,
+        smaLong: 5,
+      };
+
+      await (engine as any).tickAsset('CBBTC', assetParams);
+
+      expect(mockExecuteForAsset).not.toHaveBeenCalled();
+    });
+
+    it('proceeds with executeForAsset when optimizer isRiskOff is false', async () => {
+      const mockExecutor = { executeForAsset: mockExecuteForAsset } as any;
+      const mockConfig = { get: vi.fn((k: string) => {
+        if (k === 'STRATEGY') return 'threshold';
+        if (k === 'TRADE_INTERVAL_SECONDS') return 60;
+        if (k === 'PRICE_DROP_THRESHOLD_PCT') return 2.0;
+        if (k === 'PRICE_RISE_TARGET_PCT') return 3.0;
+        return undefined;
+      }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
+
+      const { TradingEngine } = await import('../src/trading/engine.js');
+      const engine = new TradingEngine(mockExecutor, mockConfig);
+
+      const { botState } = await import('../src/core/state.js');
+      botState.setStatus('running');
+
+      mockRecentAssetSnapshots.mockReturnValue([
+        { price_usd: 97,  balance: 1, timestamp: new Date().toISOString() },
+        { price_usd: 100, balance: 1, timestamp: new Date().toISOString() },
+      ]);
+
+      const mockOptimizer = { isRiskOff: false } as any;
+      engine.setOptimizer(mockOptimizer);
+
+      const assetParams = {
+        strategyType: 'threshold' as const,
+        dropPct: 2.0,
+        risePct: 3.0,
+        smaShort: 3,
+        smaLong: 5,
+      };
+
+      // Prime entry price first tick, then fire second tick which evaluates signal
+      await (engine as any).tickAsset('CBBTC', assetParams);
+      await (engine as any).tickAsset('CBBTC', assetParams);
+
+      expect(mockExecuteForAsset).toHaveBeenCalled();
+    });
+  });
+
   it('asset loop uses per-asset dropPct (not global config)', async () => {
     vi.stubGlobal('setInterval', vi.fn().mockReturnValue(99));
     vi.stubGlobal('clearInterval', vi.fn());
