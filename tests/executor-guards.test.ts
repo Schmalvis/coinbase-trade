@@ -156,12 +156,12 @@ describe('Trade amount sanity check', () => {
 
   describe('executeForAsset() — per-asset loop', () => {
     it('rejects when trade value > 2x portfolio', async () => {
-      // Portfolio: 0.05 ETH * $2000 + $57 = $157; 2x = $314
-      (botState as any).lastBalance = 0.05;
-      (botState as any).lastPrice = 2000;
-      (botState as any).lastUsdcBalance = 57;
-      // Asset has 10 tokens; amount = 10 * 0.1 = 1; tradeValueUsd = 1 * 2000 = $2000 >> $314
+      // portfolio_snapshot = $157; 2x = $314
+      // Asset has 10 tokens; amount = 10 * 0.1 = 1; price_usd = 2000; tradeValueUsd = $2000 >> $314
       (botState.assetBalances as Map<string, number>).set('CBBTC', 10);
+      const { queries } = await import('../src/data/db.js');
+      (queries.recentPortfolioSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([{ portfolio_usd: 157 }]);
+      (queries.recentAssetSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([{ price_usd: 2000, balance: 10 }]);
 
       const mockTools = { swap: vi.fn().mockResolvedValue({ txHash: '0xabc' }) } as any;
       const rc = makeRc();
@@ -172,12 +172,12 @@ describe('Trade amount sanity check', () => {
     });
 
     it('allows trade when value < 2x portfolio', async () => {
-      // Portfolio: 5 ETH * $2000 + $5000 = $15000; 2x = $30000
-      (botState as any).lastBalance = 5;
-      (botState as any).lastPrice = 2000;
-      (botState as any).lastUsdcBalance = 5000;
-      // Asset has 0.5 tokens; amount = 0.5 * 0.1 = 0.05; tradeValueUsd = 0.05 * 2000 = $100 << $30000
+      // portfolio_snapshot = $15000; 2x = $30000
+      // Asset has 0.5 tokens; amount = 0.5 * 0.1 = 0.05; price_usd = 2000; tradeValueUsd = $100 << $30000
       (botState.assetBalances as Map<string, number>).set('CBETH', 0.5);
+      const { queries } = await import('../src/data/db.js');
+      (queries.recentPortfolioSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([{ portfolio_usd: 15000 }]);
+      (queries.recentAssetSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([{ price_usd: 2000, balance: 0.5 }]);
 
       const mockTools = { swap: vi.fn().mockResolvedValue({ txHash: '0xabc' }) } as any;
       const rc = makeRc();
@@ -187,21 +187,20 @@ describe('Trade amount sanity check', () => {
       expect(mockTools.swap).toHaveBeenCalledTimes(1);
     });
 
-    it('skips sanity check when portfolio is 0 (fresh start)', async () => {
-      (botState as any).lastBalance = 0;
-      (botState as any).lastPrice = 0;
-      (botState as any).lastUsdcBalance = 0;
-      // portfolioUsd = 0 => sanity check skipped
-      // balance = 0 => "No balance" skip
+    it('skips sanity check when portfolio snapshot is absent (fresh start)', async () => {
       (botState.assetBalances as Map<string, number>).clear();
+      const { queries } = await import('../src/data/db.js');
+      (queries.recentPortfolioSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (queries.recentAssetSnapshots.all as ReturnType<typeof vi.fn>).mockReturnValue([]);
 
       const mockTools = { swap: vi.fn().mockResolvedValue({ txHash: '0xabc' }) } as any;
       const rc = makeRc();
       const executor = new TradeExecutor(mockTools, rc as any);
 
       await executor.executeForAsset('CBBTC', 'sell', 'fresh start');
-      // Not called because no balance, but sanity check didn't block it
+      // No balance → swap not called, but sanity check did not block it
       expect(mockTools.swap).not.toHaveBeenCalled();
     });
+
   });
 });

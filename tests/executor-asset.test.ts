@@ -24,6 +24,8 @@ vi.mock('../src/core/state.js', () => {
 vi.mock('../src/data/db.js', () => ({
   queries: {
     insertTrade: { run: vi.fn() },
+    recentPortfolioSnapshots: { all: vi.fn().mockReturnValue([{ portfolio_usd: 1000 }]) },
+    recentAssetSnapshots: { all: vi.fn().mockReturnValue([{ price_usd: 10, balance: 5 }]) },
   },
 }));
 

@@ -147,7 +147,7 @@ export class TradeExecutor {
     const price = botState.lastPrice ?? 0;
 
     // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
-    const portfolioUsdAsset = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0) + (botState.lastUsdcBalance ?? 0);
+    const sanityPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
     // For buy: amount is USDC (already USD-denominated). For sell: use asset's own price, not ETH price.
     let tradeValueUsdAsset: number;
     if (signal === 'buy') {
@@ -156,8 +156,8 @@ export class TradeExecutor {
       const assetSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
       tradeValueUsdAsset = amount * (assetSnap?.price_usd ?? (price || 0));
     }
-    if (portfolioUsdAsset > 0 && tradeValueUsdAsset > portfolioUsdAsset * 2) {
-      logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${portfolioUsdAsset.toFixed(2)}`);
+    if (sanityPortfolioUsd > 0 && tradeValueUsdAsset > sanityPortfolioUsd * 2) {
+      logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${sanityPortfolioUsd.toFixed(2)}`);
       return;
     }
 
@@ -165,7 +165,7 @@ export class TradeExecutor {
     const assetPriceSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
     const assetPrice = assetPriceSnap?.price_usd ?? price;
 
-    // Compute realized P&L for sells
+    // Compute realized P&L for sells (don't delete position yet — wait for swap confirmation)
     let entryPriceForRecord: number | undefined;
     let realizedPnl: number | undefined;
     if (signal === 'sell') {
@@ -173,13 +173,13 @@ export class TradeExecutor {
       if (pos && pos.entryPrice > 0) {
         realizedPnl = (assetPrice - pos.entryPrice) * Math.min(amount, pos.qty);
         entryPriceForRecord = pos.entryPrice;
-        this._openPositions.delete(symbol);
       }
     }
 
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
       if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+      if (signal === 'sell') this._openPositions.delete(symbol);
       this.recordTrade({
         signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice,
         triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
@@ -201,14 +201,18 @@ export class TradeExecutor {
       status = 'failed';
     }
 
-    if (status === 'executed' && signal === 'buy') {
-      this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+    if (status === 'executed') {
+      if (signal === 'buy') {
+        this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+      } else {
+        this._openPositions.delete(symbol);
+      }
     }
 
     this.recordTrade({
       signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice, txHash,
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
-      entryPrice: entryPriceForRecord, realizedPnl, symbol,
+      entryPrice: entryPriceForRecord, realizedPnl: status === 'executed' ? realizedPnl : undefined, symbol,
     });
     logger.info(`executeForAsset complete: ${signal} ${symbol} (${status})`);
   }
