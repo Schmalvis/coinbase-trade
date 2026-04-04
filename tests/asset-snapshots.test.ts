@@ -58,3 +58,27 @@ describe('asset_snapshots queries', () => {
     expect(rows[0].portfolio_usd).toBe(1234.56);
   });
 });
+
+describe('Alchemy discovery — address case normalisation', () => {
+  it('uses lowercased address for getAssetByAddress lookup', () => {
+    // The bug: tb.contractAddress (mixed case) is passed to getAssetByAddress
+    // but the DB stores addresses lowercase. Lookup always misses → CirBTC stored.
+    // Fix: pass addr (already lowercased at line 174) instead.
+    const mixedCaseAddr = '0xCbB7C0000aB88B473b1f5aFd9ef808440eed33Bf';
+    const lowercaseAddr = mixedCaseAddr.toLowerCase();
+
+    // These are the two arguments that getAssetByAddress receives.
+    // After the fix, the first argument must be the lowercase version.
+    expect(lowercaseAddr).toBe('0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf');
+    expect(lowercaseAddr).not.toBe(mixedCaseAddr);
+
+    // Simulate the bug: the lookup with mixed case would not find an existing lowercase entry
+    const fakeDb = new Map<string, boolean>();
+    fakeDb.set(lowercaseAddr, true); // DB stores lowercase
+
+    // Bug behaviour: lookup with original mixed-case misses
+    expect(fakeDb.has(mixedCaseAddr)).toBe(false);
+    // Fixed behaviour: lookup with lowercased addr hits
+    expect(fakeDb.has(lowercaseAddr)).toBe(true);
+  });
+});

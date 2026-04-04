@@ -174,7 +174,7 @@ export async function startPortfolioTracker(
             const addr = tb.contractAddress.toLowerCase();
             if (registryAddresses.has(addr)) continue;
 
-            const existing = discoveredAssetQueries.getAssetByAddress.get(tb.contractAddress, network);
+            const existing = discoveredAssetQueries.getAssetByAddress.get(addr, network);
             if (!existing) {
               try {
                 const meta = await alchemyService.getTokenMetadata(tb.contractAddress, network);
