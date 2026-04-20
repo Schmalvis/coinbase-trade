@@ -140,7 +140,7 @@ vi.mock('../src/web/auth.js', () => ({
   registerAuthRoutes: () => {},
 }));
 
-vi.mock('../src/mcp/client.js', () => ({ MCPClient: vi.fn() }));
+vi.mock('../src/wallet/client.js', () => ({ CdpWalletClient: vi.fn() }));
 vi.mock('../src/portfolio/tracker.js', () => ({ PortfolioTracker: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })) }));
 vi.mock('../src/telegram/bot.js', () => ({ TelegramBot: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })) }));
 vi.mock('../src/trading/engine.js', () => ({

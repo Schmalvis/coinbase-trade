@@ -1,97 +1,78 @@
+/**
+ * Previously tested MCPClient circuit-breaker behaviour.
+ * Rewritten for v2: tests CdpWalletClient resilience — init() error handling.
+ * The MCP client and its circuit-breaker were removed in the v2 refactor.
+ */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../src/core/logger.js', () => ({
   logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
-const mockCallTool = vi.fn();
-const mockConnect = vi.fn().mockResolvedValue(undefined);
-const mockClose = vi.fn().mockResolvedValue(undefined);
+const { mockGetOrCreateAccount, mockGetAccount } = vi.hoisted(() => ({
+  mockGetOrCreateAccount: vi.fn(),
+  mockGetAccount: vi.fn(),
+}));
 
-vi.mock('@modelcontextprotocol/sdk/client/index.js', () => ({
-  Client: function MockClient() {
-    return { connect: mockConnect, callTool: mockCallTool };
+vi.mock('@coinbase/cdp-sdk', () => ({
+  CdpClient: function MockCdpClient() {
+    return {
+      evm: {
+        getAccount: mockGetAccount,
+        getOrCreateAccount: mockGetOrCreateAccount,
+      },
+    };
   },
 }));
 
-vi.mock('@modelcontextprotocol/sdk/client/streamableHttp.js', () => ({
-  StreamableHTTPClientTransport: function MockTransport() {
-    return { close: mockClose };
-  },
-}));
+import { CdpWalletClient } from '../src/wallet/client.js';
 
-const mockFetch = vi.fn();
-vi.stubGlobal('fetch', mockFetch);
-
-import { MCPClient } from '../src/mcp/client.js';
-
-describe('MCPClient resilience', () => {
-  let onHealthChange: ReturnType<typeof vi.fn>;
-  let client: MCPClient;
-
-  beforeEach(async () => {
+describe('CdpWalletClient resilience', () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    onHealthChange = vi.fn();
-    client = new MCPClient('http://mcp-server:3002/mcp', () => 'base-sepolia', onHealthChange);
-    await client.connect();
-    // Default: health check passes
-    mockFetch.mockResolvedValue({ ok: true });
   });
 
-  it('does not call onHealthChange on first success', async () => {
-    mockCallTool.mockResolvedValue({
-      isError: false,
-      content: [{ type: 'text', text: '"ok"' }],
-    });
-    await client.callTool('test_tool', {});
-    expect(onHealthChange).not.toHaveBeenCalled();
+  it('init() succeeds on first try', async () => {
+    mockGetOrCreateAccount.mockResolvedValue({ address: '0xabc' });
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia');
+    const addr = await client.init();
+    expect(addr).toBe('0xabc');
   });
 
-  it('calls onHealthChange(false) after 3 consecutive health-check failures', async () => {
-    mockFetch.mockResolvedValue({ ok: false }); // health check fails
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
-    expect(onHealthChange).toHaveBeenCalledWith(false);
+  it('init() throws when CDP SDK rejects', async () => {
+    mockGetOrCreateAccount.mockRejectedValue(new Error('CDP network error'));
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia');
+    await expect(client.init()).rejects.toThrow('CDP network error');
   });
 
-  it('calls onHealthChange(true) on recovery after failures', async () => {
-    mockFetch.mockResolvedValue({ ok: false });
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
-
-    // Recover
-    mockFetch.mockResolvedValue({ ok: true });
-    mockCallTool.mockResolvedValue({
-      isError: false,
-      content: [{ type: 'text', text: '"recovered"' }],
-    });
-    await client.callTool('test_tool', {});
-    expect(onHealthChange).toHaveBeenCalledWith(true);
+  it('init() with wrong address throws from CDP SDK', async () => {
+    mockGetAccount.mockRejectedValue(new Error('Account not found'));
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia', '0xbadaddr');
+    await expect(client.init()).rejects.toThrow('Account not found');
   });
 
-  it('does not call onHealthChange(false) twice in a row', async () => {
-    mockFetch.mockResolvedValue({ ok: false });
-    for (let i = 0; i < 6; i++) {
-      await client.callTool('test_tool', {}).catch(() => {});
-    }
-    const falseCallCount = onHealthChange.mock.calls.filter(c => c[0] === false).length;
-    expect(falseCallCount).toBe(1);
+  it('address is null before init()', () => {
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia');
+    expect(client.address).toBeNull();
   });
 
-  it('counts isError tool response as a failure', async () => {
-    // Health check passes, but tool returns isError
-    mockFetch.mockResolvedValue({ ok: true });
-    mockCallTool.mockResolvedValue({
-      isError: true,
-      content: [{ type: 'text', text: 'tool failed' }],
-    });
+  it('address is set after successful init()', async () => {
+    mockGetOrCreateAccount.mockResolvedValue({ address: '0xdeadbeef' });
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia');
+    await client.init();
+    expect(client.address).toBe('0xdeadbeef');
+  });
 
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
-    await client.callTool('test_tool', {}).catch(() => {});
+  it('multiple init() calls each resolve correctly', async () => {
+    mockGetOrCreateAccount
+      .mockResolvedValueOnce({ address: '0xfirst' })
+      .mockResolvedValueOnce({ address: '0xsecond' });
 
-    expect(onHealthChange).toHaveBeenCalledWith(false);
+    const client = new CdpWalletClient('k', 's', 'ws', 'base-sepolia');
+    await client.init();
+    expect(client.address).toBe('0xfirst');
+
+    await client.init();
+    expect(client.address).toBe('0xsecond');
   });
 });
