@@ -1,4 +1,4 @@
-import { CoinbaseTools, type TokenSymbol } from '../mcp/tools.js';
+import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
 import { queries } from '../data/db.js';
 import { logger } from '../core/logger.js';
@@ -158,6 +158,13 @@ export class TradeExecutor {
     }
     if (sanityPortfolioUsd > 0 && tradeValueUsdAsset > sanityPortfolioUsd * 2) {
       logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${sanityPortfolioUsd.toFixed(2)}`);
+      return;
+    }
+
+    // Minimum trade value guard — skip dust trades
+    const MIN_TRADE_VALUE_USD = 2;
+    if (tradeValueUsdAsset < MIN_TRADE_VALUE_USD) {
+      logger.debug(`[${symbol}] Trade skipped — value $${tradeValueUsdAsset.toFixed(2)} below minimum $${MIN_TRADE_VALUE_USD}`);
       return;
     }
 

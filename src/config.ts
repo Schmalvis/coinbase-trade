@@ -2,7 +2,11 @@ import 'dotenv/config';
 import { z } from 'zod';
 
 const schema = z.object({
-  MCP_SERVER_URL: z.string().url().default('http://192.168.68.139:3002/mcp'),
+  CDP_API_KEY_ID: z.string(),
+  CDP_API_KEY_SECRET: z.string(),
+  CDP_WALLET_SECRET: z.string(),
+  WALLET_ADDRESS: z.string().optional(),
+  ZEROX_API_KEY: z.string().optional(),
   NETWORK_ID: z.string().default('base-sepolia'),
 
   TELEGRAM_BOT_TOKEN: z.string().optional(),
@@ -10,7 +14,7 @@ const schema = z.object({
     s.split(',').map(id => parseInt(id.trim(), 10))
   ).optional(),
 
-  POLL_INTERVAL_SECONDS: z.coerce.number().default(30),
+  POLL_INTERVAL_SECONDS: z.coerce.number().default(120),
   TRADE_INTERVAL_SECONDS: z.coerce.number().default(60),
 
   STRATEGY: z.enum(['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout', 'trend-continuation']).default('threshold'),
@@ -21,7 +25,7 @@ const schema = z.object({
 
   MAX_TRADE_SIZE_ETH: z.coerce.number().default(0.01),
   MAX_TRADE_SIZE_USDC: z.coerce.number().default(10),
-  TRADE_COOLDOWN_SECONDS: z.coerce.number().default(300),
+  TRADE_COOLDOWN_SECONDS: z.coerce.number().default(600),
 
   WEB_PORT: z.coerce.number().default(8080),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -37,13 +41,13 @@ const schema = z.object({
   MAX_DAILY_LOSS_PCT: z.coerce.number().default(5),
   MAX_ROTATION_PCT: z.coerce.number().default(25),
   MAX_DAILY_ROTATIONS: z.coerce.number().default(4),
-  PORTFOLIO_FLOOR_USD: z.coerce.number().default(100),
+  PORTFOLIO_FLOOR_USD: z.coerce.number().default(90),
   MIN_ROTATION_GAIN_PCT: z.coerce.number().default(2),
   MAX_CASH_PCT: z.coerce.number().default(80),
   OPTIMIZER_INTERVAL_SECONDS: z.coerce.number().default(300),
-  ROTATION_SELL_THRESHOLD: z.coerce.number().default(-20),
-  ROTATION_BUY_THRESHOLD: z.coerce.number().default(30),
-  MIN_ROTATION_SCORE_DELTA: z.coerce.number().default(60),
+  ROTATION_SELL_THRESHOLD: z.coerce.number().default(-10),
+  ROTATION_BUY_THRESHOLD: z.coerce.number().default(15),
+  MIN_ROTATION_SCORE_DELTA: z.coerce.number().default(20),
   STOP_LOSS_PCT: z.coerce.number().default(8.0),
   TRAILING_STOP_PCT: z.coerce.number().default(5.0),
   MIN_ROTATION_PROFIT_USD: z.coerce.number().default(1.0),

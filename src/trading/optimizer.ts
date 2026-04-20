@@ -300,7 +300,7 @@ export class PortfolioOptimizer {
 
     if (!decision.approved) {
       logger.info(`PortfolioOptimizer: rotation vetoed — ${decision.vetoReason}`);
-      rotationQueries.insertRotation.run({
+      const vetoResult = rotationQueries.insertRotation.run({
         sell_symbol: candidate.sell.symbol,
         buy_symbol: candidate.buy.symbol,
         sell_amount: sellAmount,
@@ -308,6 +308,15 @@ export class PortfolioOptimizer {
         estimated_fee_pct: estimatedFeePct,
         dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
         network,
+      });
+      rotationQueries.updateRotation.run({
+        id: Number(vetoResult.lastInsertRowid),
+        status: 'vetoed',
+        buy_amount: null,
+        sell_tx_hash: null,
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: decision.vetoReason ?? null,
       });
       return;
     }
@@ -323,8 +332,21 @@ export class PortfolioOptimizer {
       if (Date.now() - t > this.SAME_PAIR_COOLDOWN_MS) this._rotationCooldowns.delete(k);
     }
 
+    // 10. Insert rotation record before executing (so we have an ID to update)
+    const insertResult = rotationQueries.insertRotation.run({
+      sell_symbol: candidate.sell.symbol,
+      buy_symbol: candidate.buy.symbol,
+      sell_amount: actualAmount,
+      estimated_gain_pct: estimatedGainPct,
+      estimated_fee_pct: estimatedFeePct,
+      dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
+      network,
+    });
+    const rotationId = Number(insertResult.lastInsertRowid);
+
+    let rotationResult: { status: string; sellTxHash?: string | null; buyTxHash?: string | null } | null = null;
     if (typeof (this.executor as any).executeRotation === 'function') {
-      await (this.executor as any).executeRotation(
+      rotationResult = await (this.executor as any).executeRotation(
         candidate.sell.symbol,
         candidate.buy.symbol,
         actualAmount,
@@ -336,18 +358,23 @@ export class PortfolioOptimizer {
       );
     }
 
-    // 10. Record rotation + update daily PnL atomically
-    runTransaction(() => {
-      rotationQueries.insertRotation.run({
-        sell_symbol: candidate.sell.symbol,
-        buy_symbol: candidate.buy.symbol,
-        sell_amount: actualAmount,
-        estimated_gain_pct: estimatedGainPct,
-        estimated_fee_pct: estimatedFeePct,
-        dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
-        network,
+    // Update rotation status based on execution result
+    if (rotationResult) {
+      rotationQueries.updateRotation.run({
+        id: rotationId,
+        status: rotationResult.status === 'executed' ? 'executed'
+          : rotationResult.status === 'leg1_done' ? 'leg1_done'
+          : 'failed',
+        buy_amount: null,
+        sell_tx_hash: rotationResult.sellTxHash ?? null,
+        buy_tx_hash: rotationResult.buyTxHash ?? null,
+        actual_gain_pct: null,
+        veto_reason: null,
       });
+    }
 
+    // Update daily PnL atomically
+    runTransaction(() => {
       dailyPnlQueries.upsertDailyPnl.run({
         date: today,
         network,

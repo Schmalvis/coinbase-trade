@@ -1,4 +1,4 @@
-import type { CoinbaseTools } from '../mcp/tools.js';
+import type { CoinbaseTools } from '../wallet/tools.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { TradeExecutor } from '../trading/executor.js';
 import type { TradingEngine } from '../trading/engine.js';

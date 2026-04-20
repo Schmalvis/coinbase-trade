@@ -35,6 +35,11 @@ const INTERVAL_SECONDS: Record<'15m' | '1h' | '24h', number> = {
   '24h': 24 * 60 * 60,
 };
 
+// Coinbase API uses BTC-USD; our asset registry uses CBBTC
+const CANDLE_SYMBOL_OVERRIDES: Record<string, string> = {
+  BTC: 'CBBTC',
+};
+
 export class CandleService {
   private pendingCandles: Map<string, PendingCandle> = new Map();
   private pollingIntervalId: ReturnType<typeof setInterval> | undefined;
@@ -74,7 +79,8 @@ export class CandleService {
 
       if (!json.candles || !Array.isArray(json.candles)) return [];
 
-      const symbol = productId.split('-')[0];
+      const rawSymbol = productId.split('-')[0];
+      const symbol = CANDLE_SYMBOL_OVERRIDES[rawSymbol] ?? rawSymbol;
       return json.candles.map((c) => ({
         symbol,
         network: this.network,

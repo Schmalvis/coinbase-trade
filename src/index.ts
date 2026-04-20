@@ -1,5 +1,5 @@
-import { MCPClient } from './mcp/client.js';
-import { CoinbaseTools } from './mcp/tools.js';
+import { CdpWalletClient } from './wallet/client.js';
+import { CoinbaseTools } from './wallet/tools.js';
 import { startPortfolioTracker } from './portfolio/tracker.js';
 import { TradeExecutor } from './trading/executor.js';
 import { TradingEngine } from './trading/engine.js';
@@ -67,30 +67,22 @@ async function main() {
   logger.info(`Strategy: ${runtimeConfig.get('STRATEGY')} | Dry run: ${runtimeConfig.get('DRY_RUN')}`);
   logger.info(`Networks: ${availableNetworks.join(', ')} (active: ${botState.activeNetwork})`);
 
-  let pausedByMcp = false;
-  const mcp = new MCPClient(config.MCP_SERVER_URL, () => botState.activeNetwork, (healthy) => {
-    botState.setMcpHealthy(healthy);
-    if (!healthy) {
-      pausedByMcp = botState.status !== 'paused'; // only flag if not already manually paused
-      botState.setStatus('paused');
-      botState.emitAlert('⚠️ MCP server unreachable — bot paused. Will resume automatically on recovery.');
-    } else {
-      if (pausedByMcp) {
-        botState.setStatus('running');
-        botState.emitAlert('✅ MCP server recovered — bot resumed.');
-      } else {
-        botState.emitAlert('✅ MCP server recovered.');
-      }
-      pausedByMcp = false;
-    }
-  });
-  await mcp.connect();
+  const walletClient = new CdpWalletClient(
+    config.CDP_API_KEY_ID,
+    config.CDP_API_KEY_SECRET,
+    config.CDP_WALLET_SECRET,
+    botState.activeNetwork,
+    config.WALLET_ADDRESS,
+  );
+  const walletAddress = await walletClient.init();
+  botState.setWalletAddress(walletAddress);
 
-  const tools = new CoinbaseTools(mcp);
+  const tools = new CoinbaseTools(walletClient);
   const pollNow = await startPortfolioTracker(tools, runtimeConfig, alchemyService, candleService);
 
   botState.onNetworkChange(network => {
     logger.info(`Network switched to ${network} — re-polling portfolio`);
+    walletClient.network = network;
     settingQueries.upsertSetting.run('ACTIVE_NETWORK', network);
     candleService.stopPolling();
     candleService = new CandleService(network);
@@ -118,7 +110,6 @@ async function main() {
     botState.setStatus('stopped');
     candleService.stopPolling();
     engine.disableOptimizer();
-    await mcp.disconnect();
     process.exit(0);
   };
 

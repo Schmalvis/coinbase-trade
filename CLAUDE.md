@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # coinbase-trade
 
-Autonomous trading bot for Base network (sepolia testnet / mainnet) using Coinbase AgentKit via MCP.
+Autonomous trading bot for Base network (sepolia testnet / mainnet) using the Coinbase CDP SDK directly (no MCP server).
 
 ---
 
@@ -30,22 +30,23 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 **Phase 5.5 (unified strategy control) complete** — Registry assets (ETH, CBBTC, CBETH) seeded into `discovered_assets` on boot. All tradeable assets now have identical per-asset strategy controls (threshold/SMA/grid) via the Asset Management modal. The separate global ETH strategy loop has been removed — all assets use the same `startAssetLoop` path. USDC remains the base currency with no strategy.
 
+**Phase 6 (SDK direct / v2) complete** — MCP server dependency removed. Bot now uses `@coinbase/cdp-sdk` directly for wallet access, balance polling, and swaps. New `src/wallet/` module replaces `src/mcp/`. Key fixes: CBBTC candle symbol mapping, rotation record persistence, portfolio floor deadlock. Strategy optimizations: EMA crossover magnitude filter, min trade value guard ($2), market regime detection (bull/bear/sideways), updated optimizer thresholds.
+
 **Next steps:**
-- Deploy and verify optimizer in DRY_RUN mode — watch scores and rotation decisions in logs/dashboard before enabling real trades
-- Tune optimizer thresholds via dashboard Settings (ROTATION_SELL_THRESHOLD, ROTATION_BUY_THRESHOLD, MIN_ROTATION_SCORE_DELTA)
-- Add assets to watchlist via Telegram (/watch SYMBOL ADDRESS) or dashboard
-- Set per-asset strategies via Asset Management modal (ETH, CBBTC, CBETH now have full strategy controls)
+- Deploy via Portainer (stack 68 on RPi5) — pull new image from GitHub Actions CI
+- Monitor in DRY_RUN mode first — watch rotation decisions and scores in logs/dashboard
+- Set WALLET_ADDRESS in Portainer stack env to restore the existing mainnet wallet
 
 ---
 
 ## Key Facts
 
-- **Testnet wallet:** `0x9123528571C6aD8fe80eb0cC82f6a388311A3104` (base-sepolia)
-- **Mainnet wallet:** `0x7dD5Acd498BCF96832f82684584734cF48c7318D` (base-mainnet)
-- **MCP server:** `http://YOUR_MCP_SERVER_IP:3002/mcp` (see [Schmalvis/coinbase-mcp-server](https://github.com/Schmalvis/coinbase-mcp-server))
-- **Network:** controlled by `NETWORK_ID` env var — injected into every MCP tool call by `mcp/client.ts`
+- **Testnet wallet:** `0x9123528571C6aD8fe80eb0cC82f6a388311A3104` (base-sepolia, AgentKit-derived)
+- **Mainnet wallet:** `0x7dD5Acd498BCF96832f82684584734cF48c7318D` (base-mainnet, active)
+- **SDK:** `@coinbase/cdp-sdk` v1.48.0 — direct API, no MCP. Set `WALLET_ADDRESS` to restore an existing wallet via `cdp.evm.getAccount({ address })`.
+- **Network:** controlled by `NETWORK_ID` env var — comma-separated for multi-network support
 - **Data dir:** must be on a POSIX filesystem (not SMB/CIFS) — SQLite WAL mode requires proper file locking
-- **Web dashboard:** `http://YOUR_MCP_SERVER_IP:3003`
+- **Web dashboard:** `http://YOUR_HOST_IP:3003`
 - **Telegram:** configured, chat ID `8423651207`
 
 ---
@@ -109,9 +110,12 @@ src/
   core/
     logger.ts        # appendFileSync logger (sync writes survive SIGTERM)
     state.ts         # Shared bot state (price, balances, pause/resume, trade events)
-  mcp/
-    client.ts        # MCPClient — injects network into every tool call
-    tools.ts         # Typed wrappers for Coinbase AgentKit tools
+  wallet/
+    client.ts        # CdpWalletClient — wraps CdpClient, supports getAccount(address) restore
+    erc20.ts         # Erc20Reader — viem publicClient for balance reads (ETH + ERC20)
+    prices.ts        # fetchPrice/getTokenPrices — Pyth Hermes REST price feeds
+    swap.ts          # SwapService — account.swap() via CDP SDK; optional 0x fallback
+    tools.ts         # CoinbaseTools — drop-in API (getEthBalance, swapEthForUsdc, etc.)
   assets/
     registry.ts      # Static asset registry (ETH, USDC, CBBTC, CBETH)
   data/
@@ -122,8 +126,9 @@ src/
   strategy/
     base.ts          # Strategy interface
     threshold.ts     # Buy on price drop %, sell on price rise %
-    sma.ts           # SMA crossover (short/long window)
+    sma.ts           # EMA crossover (short/long window) + magnitude filter + volume/RSI guards
     candle.ts        # CandleStrategy: RSI, MACD, volume, candle patterns, Bollinger Bands
+    regime.ts        # Market regime detection (uptrend/downtrend/neutral) from 50-period SMA
     grid.ts          # GridStrategy: price-level grid trading with auto-bounds
   trading/
     executor.ts      # Risk checks + trade execution + two-leg rotation (respects DRY_RUN)
@@ -151,7 +156,7 @@ src/frontend/        # Svelte + Vite + Tailwind dashboard (builds to dist/web/pu
       stores/        # Svelte writable stores (status, assets, candles, scores, risk, performance, settings, polling)
       components/    # Svelte components (Header, AssetsTable, CandleChart, OpportunityScores, etc.)
 cli.ts               # CLI (talks to running bot via HTTP)
-tests/               # Vitest test suite (supertest for Express endpoints, mocked MCP client)
+tests/               # Vitest test suite (supertest for Express endpoints, mocked CDP wallet)
 Dockerfile           # Multi-stage build (arm64)
 docker-compose.yml   # Portainer-compatible stack
 stack.env.example    # Environment variable template for Portainer deployment
@@ -167,7 +172,7 @@ docs/
 - **MCP tool responses:** wallet details and ERC20 balances return as plain text (parsed with regex in `mcp/tools.ts`); prices may be double-JSON-encoded (handled in `mcp/client.ts`). This is AgentKit behaviour — not a bug.
 - **Network injection:** `MCPClient` automatically appends `network: NETWORK_ID` to every tool call. Never pass `network` manually in `tools.ts`.
 - **Wallet is deterministic:** the MCP server derives wallet addresses from `CDP_WALLET_SECRET`. Same secret = same address on every boot.
-- **Faucet:** call `CdpApiActionProvider_request_faucet_funds` via MCP to top up testnet ETH.
+- **Faucet:** call `tools.requestFaucetFunds()` to top up testnet ETH (base-sepolia only — throws on mainnet).
 - **Strategy signals require history:** threshold needs 2+ snapshots, SMA needs `SMA_LONG_WINDOW` (default 20) snapshots before it fires.
 - **Per-asset strategy params:** discovered-asset loops now use per-asset `drop_pct`/`rise_pct`/`sma_short`/`sma_long` from the `discovered_assets` DB table, falling back to global config if not set.
 - **Candle data warmup:** On startup, CandleService synthesises 15m candles from existing `asset_snapshots` history, eliminating most of the warmup gap. CandleStrategy still needs 26+ candles per timeframe for full signals — but with warmup, this is available immediately if the bot has been running previously.
@@ -180,7 +185,9 @@ docs/
 - **Asset address lookup must be fuzzy:** Registry assets seeded with addresses from `registry.ts` (e.g., `0xeeee...` for ETH). All asset management endpoints use case-insensitive + symbol fallback lookup because frontend address may not exactly match DB address.
 - **Alchemy discovers spam tokens:** Random ERC20 airdrops (common on Base) appear as discovered assets. Users should DISMISS unknown tokens.
 - **SMA strategy enhanced:** SMA now uses EMA by default (faster reaction to price changes). Crossover signals are filtered by volume (>1.5x 20-period average required) and RSI (buy blocked when RSI>70, sell blocked when RSI<30). Filters require 15m candle data — they're bypassed gracefully when candles haven't accumulated yet. All three enhancements (EMA, volume filter, RSI filter) are toggleable per-asset via the inline config panel checkboxes when SMA strategy is selected.
-- **Trade sanity check:** Executor rejects trades where USD value exceeds 2x portfolio value. Prevents phantom trades from MCP response parsing errors. Skipped when portfolio is 0 (fresh start).
+- **Trade sanity check:** Executor rejects trades where USD value exceeds 2x portfolio value or is less than $2. Prevents phantom trades. Skipped when portfolio is 0 (fresh start).
+- **Wallet restore:** The mainnet wallet was originally created by AgentKit's `CdpEvmWalletProvider.createAccount()` (non-named). Set `WALLET_ADDRESS=0x7dD5Acd498BCF96832f82684584734cF48c7318D` in env to restore it via `cdp.evm.getAccount({ address })`. Without this, the bot creates a new account named `coinbase-trade-bot` (different address).
+- **Market regime detection:** CandleStrategy applies regime multipliers when `hourlyCandles` are provided (downtrend → 0.5× buy score, 1.5× sell score). Regime uses 50-period SMA on 1h candles; returns `neutral` when fewer than 50 candles are available.
 - **Inline asset management:** Click any asset row in the ASSETS table to expand an inline config panel with strategy selection, params, and save/disable. No separate ASSETS modal.
 - **TOTP authentication:** Dashboard is protected by TOTP (authenticator app). On first boot with no TOTP secret, redirects to `/auth/setup` showing QR code. Scan with Google Authenticator/Authy/1Password, verify code, done. Subsequent visits require 6-digit code. Sessions persist for 7 days via signed cookie. Rate limited to 5 login attempts per minute. IP allowlist optional via `ALLOWED_IPS` env var. To reset TOTP (e.g., lost authenticator): `curl -X POST http://192.168.68.139:3003/auth/reset` (LAN only — rejects non-192.168.x.x IPs). After reset, next visit shows the setup QR again.
 - **Frontend build:** Dashboard JS is split into TypeScript modules in `src/web/public/js/` and bundled by esbuild into `bundle.js`. Run `npm run build:frontend` to rebuild just the frontend. The full `npm run build` runs tsc + esbuild + copies static files. Chart.js is loaded via CDN `<script>` tags; the TS modules reference `Chart` as a global via `declare const Chart: any`. Inline `onclick` handlers in the HTML call functions exposed on `window` from `main.ts`.
@@ -191,8 +198,12 @@ docs/
 
 | Key | Default | Notes |
 |-----|---------|-------|
-| `MCP_SERVER_URL` | `http://YOUR_MCP_SERVER_IP:3002/mcp` | |
-| `NETWORK_ID` | `base-sepolia` | Change to `base-mainnet` for real trading |
+| `CDP_API_KEY_ID` | (required) | Coinbase Developer Platform API key ID |
+| `CDP_API_KEY_SECRET` | (required) | CDP API key secret |
+| `CDP_WALLET_SECRET` | (required) | CDP wallet secret (deterministic wallet derivation) |
+| `WALLET_ADDRESS` | (unset) | Optional. If set, restores wallet by address via `getAccount()` instead of `getOrCreateAccount('coinbase-trade-bot')`. Set to mainnet address to use existing funds. |
+| `ZEROX_API_KEY` | (unset) | Optional. 0x API key for swap quote fallback (https://dashboard.0x.org/) |
+| `NETWORK_ID` | `base-sepolia` | Comma-separated. First entry is active. `base-sepolia,base-mainnet` for multi-network |
 | `TELEGRAM_BOT_TOKEN` | set | |
 | `TELEGRAM_ALLOWED_CHAT_IDS` | `8423651207` | |
 | `STRATEGY` | `threshold` | `threshold`, `sma`, or `grid` — sets default for new assets only |

@@ -4,15 +4,9 @@
  * score (0-100).
  */
 
-// TODO: once src/services/candles.ts lands, switch to:
-//   import type { Candle } from '../services/candles.js';
-export interface Candle {
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
-}
+import { getMarketRegime, getRegimeMultipliers } from './regime.js';
+import type { Candle } from '../services/candles.js';
+export type { Candle };
 
 export interface CandleSignal {
   signal: 'buy' | 'sell' | 'hold';
@@ -142,7 +136,7 @@ export function computeBollingerBands(
 /* ------------------------------------------------------------------ */
 
 export class CandleStrategy {
-  evaluate(candles: Candle[]): CandleSignal {
+  evaluate(candles: Candle[], hourlyCandles?: Candle[]): CandleSignal {
     if (candles.length < 26) {
       return { signal: 'hold', strength: 0, reason: 'Need at least 26 candles' };
     }
@@ -235,8 +229,14 @@ export class CandleStrategy {
       }
     }
 
+    // --- Regime adjustment ---
+    const regime = hourlyCandles ? getMarketRegime(hourlyCandles) : 'neutral';
+    const { buyMultiplier, sellMultiplier } = getRegimeMultipliers(regime);
+    const adjustedBuyScore = buyScore * buyMultiplier;
+    const adjustedSellScore = sellScore * sellMultiplier;
+
     // --- Decision ---
-    const net = buyScore - sellScore;
+    const net = adjustedBuyScore - adjustedSellScore;
 
     if (net > 20) {
       return {

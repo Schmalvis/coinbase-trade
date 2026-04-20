@@ -7,7 +7,6 @@ export interface StatusData {
   walletAddress: string | null;
   strategy: string;
   ethStrategy: string;
-  mcpHealthy: boolean;
   optimizerEnabled: boolean;
   optimizerMode: string;
   lastTradeAt: string | null;

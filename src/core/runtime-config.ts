@@ -4,7 +4,7 @@ export type ConfigKey =
   | 'SMA_SHORT_WINDOW' | 'SMA_LONG_WINDOW'
   | 'MAX_TRADE_SIZE_ETH' | 'MAX_TRADE_SIZE_USDC'
   | 'TRADE_COOLDOWN_SECONDS' | 'DRY_RUN' | 'LOG_LEVEL'
-  | 'WEB_PORT' | 'DATA_DIR' | 'MCP_SERVER_URL'
+  | 'WEB_PORT' | 'DATA_DIR'
   | 'NETWORK_ID' | 'TELEGRAM_BOT_TOKEN' | 'TELEGRAM_ALLOWED_CHAT_IDS'
   | 'MAX_POSITION_PCT' | 'MAX_DAILY_LOSS_PCT' | 'MAX_ROTATION_PCT'
   | 'MAX_DAILY_ROTATIONS' | 'PORTFOLIO_FLOOR_USD' | 'MIN_ROTATION_GAIN_PCT'
@@ -25,7 +25,7 @@ const ALL_KEYS = new Set<ConfigKey>([
   'SMA_SHORT_WINDOW', 'SMA_LONG_WINDOW',
   'MAX_TRADE_SIZE_ETH', 'MAX_TRADE_SIZE_USDC',
   'TRADE_COOLDOWN_SECONDS', 'DRY_RUN', 'LOG_LEVEL',
-  'WEB_PORT', 'DATA_DIR', 'MCP_SERVER_URL',
+  'WEB_PORT', 'DATA_DIR',
   'NETWORK_ID', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_CHAT_IDS',
   'MAX_POSITION_PCT', 'MAX_DAILY_LOSS_PCT', 'MAX_ROTATION_PCT',
   'MAX_DAILY_ROTATIONS', 'PORTFOLIO_FLOOR_USD', 'MIN_ROTATION_GAIN_PCT',
@@ -40,7 +40,7 @@ const ALL_KEYS = new Set<ConfigKey>([
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
-  'WEB_PORT', 'DATA_DIR', 'MCP_SERVER_URL',
+  'WEB_PORT', 'DATA_DIR',
   'NETWORK_ID', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_ALLOWED_CHAT_IDS',
   'DASHBOARD_SECRET', 'DRY_RUN',
 ]);
@@ -66,7 +66,6 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   LOG_LEVEL: v => ['debug', 'info', 'warn', 'error'].includes(String(v)) ? null : 'must be debug/info/warn/error',
   WEB_PORT:  () => null, // read-only, validator not reached
   DATA_DIR:  () => null,
-  MCP_SERVER_URL: () => null,
   NETWORK_ID: () => null,
   TELEGRAM_BOT_TOKEN: () => null,
   TELEGRAM_ALLOWED_CHAT_IDS: () => null,

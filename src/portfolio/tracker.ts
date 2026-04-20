@@ -1,4 +1,4 @@
-import { CoinbaseTools } from '../mcp/tools.js';
+import { CoinbaseTools } from '../wallet/tools.js';
 import { queries, discoveredAssetQueries, settingQueries, candleQueries, type DiscoveredAssetRow } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
@@ -76,31 +76,10 @@ export async function startPortfolioTracker(
       const balanceStr = (wallet as any).balance ?? (wallet as any).nativeBalance ?? '0';
       const ethBalance = parseFloat(String(balanceStr)) || 0;
 
-      // Wallet address integrity check — scoped per network since each network has its own wallet
+      // Wallet address is set once during init by CdpWalletClient and never changes.
       const walletAddress = (wallet as any).address as string | undefined;
       if (walletAddress) {
-        const settingKey = `EXPECTED_WALLET_ADDRESS_${network}`;
-        const stored = settingQueries.getSetting.get(settingKey);
-        if (!stored || !stored.value) {
-          settingQueries.upsertSetting.run(settingKey, walletAddress);
-          botState.setWalletAddress(walletAddress);
-          logger.info(`Wallet address established for ${network}: ${walletAddress}`);
-        } else if (walletAddress.toLowerCase() !== stored.value.toLowerCase()) {
-          const msg = `⚠️ WALLET ADDRESS CHANGED on ${network}: expected ${stored.value}, got ${walletAddress}`;
-          logger.error(msg);
-          botState.setStatus('paused');
-          botState.emitAlert(msg);
-          // Intentionally do NOT update stored.value — preserve expected address for next comparison
-        } else {
-          botState.setWalletAddress(walletAddress);
-        }
-      } else {
-        // walletAddress absent in response
-        const settingKey = `EXPECTED_WALLET_ADDRESS_${network}`;
-        const stored = settingQueries.getSetting.get(settingKey);
-        if (stored?.value) {
-          logger.warn(`Wallet address absent in MCP response (expected ${stored.value} on ${network})`);
-        }
+        botState.setWalletAddress(walletAddress);
       }
 
       let portfolioUsd = 0;

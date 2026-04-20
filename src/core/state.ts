@@ -21,7 +21,6 @@ class BotState {
   private _activeNetwork: string = availableNetworks[0];
   private _assetBalances: Map<string, number> = new Map();
   private _pendingTokenCount = 0;
-  private _mcpHealthy = true;
 
   private tradeListeners: ((n: TradeNotification) => void)[] = [];
   private statusListeners: ((s: BotStatus) => void)[] = [];
@@ -40,7 +39,6 @@ class BotState {
   get assetBalances(): ReadonlyMap<string, number> { return this._assetBalances; }
   get pendingTokenCount(): number { return this._pendingTokenCount; }
   get walletAddress(): string | null { return this._walletAddress; }
-  get mcpHealthy(): boolean { return this._mcpHealthy; }
 
   setNetwork(network: string) {
     if (!availableNetworks.includes(network)) {
@@ -64,8 +62,6 @@ class BotState {
   setPendingTokenCount(n: number): void {
     this._pendingTokenCount = n;
   }
-
-  setMcpHealthy(healthy: boolean): void { this._mcpHealthy = healthy; }
 
   updatePrice(price: number) { this._lastPrice = price; }
 

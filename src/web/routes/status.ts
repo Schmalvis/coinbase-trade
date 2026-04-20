@@ -48,7 +48,6 @@ export function registerStatusRoutes(router: Router, ctx: RouteContext): void {
       assetBalances:     Object.fromEntries(botState.assetBalances),
       pendingTokenCount: botState.pendingTokenCount,
       walletAddress:     botState.walletAddress,
-      mcpHealthy:        botState.mcpHealthy,
       optimizerEnabled:  engine.optimizerEnabled,
       optimizerMode:     optimizer?.isRiskOff ? 'risk-off' : 'normal',
     });
