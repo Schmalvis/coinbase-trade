@@ -18,7 +18,7 @@ const schema = z.object({
   TRADE_INTERVAL_SECONDS: z.coerce.number().default(60),
 
   STRATEGY: z.enum(['threshold', 'sma', 'grid', 'momentum-burst', 'volatility-breakout', 'trend-continuation']).default('threshold'),
-  PRICE_DROP_THRESHOLD_PCT: z.coerce.number().default(2.0),
+  PRICE_DROP_THRESHOLD_PCT: z.coerce.number().default(1.5),
   PRICE_RISE_TARGET_PCT: z.coerce.number().default(3.0),
   SMA_SHORT_WINDOW: z.coerce.number().default(5),
   SMA_LONG_WINDOW: z.coerce.number().default(20),

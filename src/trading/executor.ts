@@ -138,7 +138,8 @@ export class TradeExecutor {
       return;
     }
 
-    const amount = balance * 0.1;
+    const MIN_TRADE_VALUE_USD = 2;
+    let amount = balance * 0.1;
 
     const [fromSymbol, toSymbol] = signal === 'buy'
       ? ['USDC', symbol]
@@ -149,23 +150,31 @@ export class TradeExecutor {
     // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
     const sanityPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
     // For buy: amount is USDC (already USD-denominated). For sell: use asset's own price, not ETH price.
-    let tradeValueUsdAsset: number;
-    if (signal === 'buy') {
-      tradeValueUsdAsset = amount; // spending USDC — already in USD
-    } else {
-      const assetSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
-      tradeValueUsdAsset = amount * (assetSnap?.price_usd ?? (price || 0));
-    }
+    const assetSnapForValue = signal === 'sell'
+      ? (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0]
+      : undefined;
+    let tradeValueUsdAsset = signal === 'buy'
+      ? amount
+      : amount * (assetSnapForValue?.price_usd ?? (price || 0));
+
     if (sanityPortfolioUsd > 0 && tradeValueUsdAsset > sanityPortfolioUsd * 2) {
       logger.error(`[${symbol}] Trade sanity check BLOCKED: ${signal} value $${tradeValueUsdAsset.toFixed(2)} > 2x portfolio $${sanityPortfolioUsd.toFixed(2)}`);
       return;
     }
 
-    // Minimum trade value guard — skip dust trades
-    const MIN_TRADE_VALUE_USD = 2;
+    // Minimum trade value guard — floor up to minimum if balance allows, skip if too small
     if (tradeValueUsdAsset < MIN_TRADE_VALUE_USD) {
-      logger.debug(`[${symbol}] Trade skipped — value $${tradeValueUsdAsset.toFixed(2)} below minimum $${MIN_TRADE_VALUE_USD}`);
-      return;
+      const assetUsdPrice = signal === 'buy' ? 1 : (assetSnapForValue?.price_usd ?? (price || 1));
+      const balanceUsd = balance * assetUsdPrice;
+      if (balanceUsd >= MIN_TRADE_VALUE_USD * 2) {
+        // Floor to minimum viable trade — never more than 50% of balance
+        amount = Math.min(balance * 0.5, MIN_TRADE_VALUE_USD / (assetUsdPrice || 1));
+        tradeValueUsdAsset = amount * assetUsdPrice;
+        logger.info(`[${symbol}] Trade amount floored to $${tradeValueUsdAsset.toFixed(2)} (10% = $${(balance * 0.1 * assetUsdPrice).toFixed(2)} was below minimum)`);
+      } else {
+        logger.info(`[${symbol}] Trade skipped — $${balanceUsd.toFixed(2)} balance too small for $${MIN_TRADE_VALUE_USD} minimum trade`);
+        return;
+      }
     }
 
     // Resolve asset price for P&L tracking

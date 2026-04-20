@@ -138,9 +138,9 @@ export class TradingEngine {
 
   private async tickAsset(symbol: string, params: AssetStrategyParams): Promise<void> {
     if (botState.isPaused) return;
-    // Respect RISK_OFF mode — halt all strategy trades, not just optimizer rotations
-    if (this.optimizer?.isRiskOff) {
-      logger.debug(`[${symbol}] Skipping tick — optimizer is in RISK_OFF mode`);
+    // Grid strategies are fully halted in RISK_OFF — range trading breaks down in directional markets
+    if (this.optimizer?.isRiskOff && params.strategyType === 'grid') {
+      logger.debug(`[${symbol}] Grid strategy halted — optimizer RISK_OFF`);
       return;
     }
 
@@ -231,6 +231,11 @@ export class TradingEngine {
     const result = strategy.evaluate(snapshots);
 
     logger.debug(`[${symbol}] Strategy signal: ${result.signal} — ${result.reason}`);
+    // In RISK_OFF: block new buys — sells and stop-losses still execute
+    if (this.optimizer?.isRiskOff && result.signal === 'buy') {
+      logger.info(`[${symbol}] BUY skipped — optimizer in RISK_OFF mode`);
+      return;
+    }
     await this.executor.executeForAsset(symbol, result.signal, result.reason, result.priority);
   }
 

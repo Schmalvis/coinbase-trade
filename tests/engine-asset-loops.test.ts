@@ -61,13 +61,51 @@ describe('TradingEngine asset loops', () => {
   });
 
   describe('tickAsset — RISK_OFF gate', () => {
-    it('skips executeForAsset when optimizer isRiskOff is true', async () => {
+    it('blocks BUY signals but allows holds/sells through when optimizer isRiskOff is true', async () => {
       const mockExecutor = { executeForAsset: mockExecuteForAsset } as any;
       const mockConfig = { get: vi.fn((k: string) => {
         if (k === 'STRATEGY') return 'threshold';
         if (k === 'TRADE_INTERVAL_SECONDS') return 60;
         if (k === 'PRICE_DROP_THRESHOLD_PCT') return 2.0;
         if (k === 'PRICE_RISE_TARGET_PCT') return 3.0;
+        return undefined;
+      }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
+
+      const { TradingEngine } = await import('../src/trading/engine.js');
+      const engine = new TradingEngine(mockExecutor, mockConfig);
+
+      const { botState } = await import('../src/core/state.js');
+      botState.setStatus('running');
+
+      // Price dropped 3% from 100 → 97: triggers buy signal on second tick
+      mockRecentAssetSnapshots.mockReturnValue([
+        { price_usd: 97,  balance: 1, timestamp: new Date().toISOString() },
+        { price_usd: 100, balance: 1, timestamp: new Date().toISOString() },
+      ]);
+
+      const mockOptimizer = { isRiskOff: true } as any;
+      engine.setOptimizer(mockOptimizer);
+
+      const assetParams = {
+        strategyType: 'threshold' as const,
+        dropPct: 2.0,
+        risePct: 3.0,
+        smaShort: 3,
+        smaLong: 5,
+      };
+
+      // First tick primes entry price (returns hold), second tick generates buy signal
+      await (engine as any).tickAsset('CBBTC', assetParams);
+      await (engine as any).tickAsset('CBBTC', assetParams);
+
+      // Buy must be blocked in RISK_OFF
+      expect(mockExecuteForAsset).not.toHaveBeenCalledWith('CBBTC', 'buy', expect.any(String), expect.anything());
+    });
+
+    it('fully halts grid strategy (both buy and sell) when optimizer isRiskOff is true', async () => {
+      const mockExecutor = { executeForAsset: mockExecuteForAsset } as any;
+      const mockConfig = { get: vi.fn((k: string) => {
+        if (k === 'TRADE_INTERVAL_SECONDS') return 60;
         return undefined;
       }), subscribe: vi.fn(), subscribeMany: vi.fn() } as any;
 
@@ -86,15 +124,16 @@ describe('TradingEngine asset loops', () => {
       engine.setOptimizer(mockOptimizer);
 
       const assetParams = {
-        strategyType: 'threshold' as const,
+        strategyType: 'grid' as const,
         dropPct: 2.0,
         risePct: 3.0,
         smaShort: 3,
         smaLong: 5,
       };
 
-      await (engine as any).tickAsset('CBBTC', assetParams);
+      await (engine as any).tickAsset('ETH', assetParams);
 
+      // Grid is fully halted in RISK_OFF — no executeForAsset call at all
       expect(mockExecuteForAsset).not.toHaveBeenCalled();
     });
 
