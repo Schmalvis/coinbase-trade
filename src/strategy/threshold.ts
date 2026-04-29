@@ -19,7 +19,7 @@ export class ThresholdStrategy implements Strategy {
     if (snapshots.length < 2) return { signal: 'hold', reason: 'Not enough data' };
 
     const current = snapshots[0].eth_price;
-    const recent = snapshots.slice(0, 10).map(s => s.eth_price);
+    const recent = snapshots.slice(0, 60).map(s => s.eth_price);
     const rollingHigh = Math.max(...recent);
 
     if (this.entryPrice === null) {

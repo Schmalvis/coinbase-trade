@@ -144,7 +144,7 @@ export class TradingEngine {
       return;
     }
 
-    const limit = params.strategyType === 'grid' ? 5 : params.smaLong + 5;
+    const limit = params.strategyType === 'grid' ? 5 : params.strategyType === 'threshold' ? 65 : params.smaLong + 5;
     const raw = queries.recentAssetSnapshots.all(symbol, limit) as {
       price_usd: number; balance: number; timestamp: string;
     }[];
