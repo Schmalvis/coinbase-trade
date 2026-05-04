@@ -7,6 +7,11 @@ import type { RuntimeConfig } from '../core/runtime-config.js';
 import { SlippageCache } from './slippage-cache.js';
 import { ASSET_REGISTRY } from '../assets/registry.js';
 
+export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
+  if (!shadowUntil) return false;
+  return Date.now() < shadowUntil;
+}
+
 export class TradeExecutor {
   private readonly _assetCooldowns = new Map<string, Date>();
   // Tracks entry price and quantity for open positions (for realized P&L calculation)
@@ -164,6 +169,32 @@ export class TradeExecutor {
           queries.insertEvent.run('slippage_veto', `${symbol}: slippage > 1.5%`);
           return;
         }
+      }
+    }
+
+    // Shadow period: newly-promoted tokens dry-run for 24h before live trades
+    if (!this.isRegistryAsset(symbol)) {
+      const row = db.prepare(
+        `SELECT shadow_until FROM discovered_assets WHERE symbol = ? LIMIT 1`
+      ).get(symbol) as { shadow_until: number | null } | undefined;
+      if (isShadowPeriod(row?.shadow_until)) {
+        logger.info(`[${symbol}] Shadow period active — logging dry-run trade`);
+        queries.insertTrade.run({
+          action: signal,
+          amount_eth: 0, // placeholder since this is a shadow record
+          price_usd: 0,
+          tx_hash: null,
+          triggered_by: 'shadow-period',
+          status: 'dry_run',
+          dry_run: 1,
+          reason: 'shadow-period',
+          network: botState.activeNetwork,
+          entry_price: null,
+          realized_pnl: null,
+          strategy: 'shadow',
+          symbol,
+        });
+        return;
       }
     }
 
