@@ -6,6 +6,7 @@ import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import { SlippageCache } from './slippage-cache.js';
 import { ASSET_REGISTRY } from '../assets/registry.js';
+import { getMemecoincapVeto } from './risk-guard.js';
 
 export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
   if (!shadowUntil) return false;
@@ -200,7 +201,14 @@ export class TradeExecutor {
 
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
-    const cooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    // Fetch memecoin flag once — shared by cooldown and cap checks below
+    const memeRow2 = !this.isRegistryAsset(symbol)
+      ? db.prepare(`SELECT is_memecoin FROM discovered_assets WHERE symbol = ? LIMIT 1`).get(symbol) as { is_memecoin: number } | undefined
+      : undefined;
+
+    const baseCooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    const memeMultiplier = memeRow2?.is_memecoin ? 2 : 1;
+    const cooldownSecs = baseCooldownSecs * memeMultiplier;
     const last = this._assetCooldowns.get(symbol);
     if (priority !== 'stop-loss' && last && (Date.now() - last.getTime()) < cooldownSecs * 1000) {
       logger.debug(`Cooldown active for ${symbol}, skipping`);
@@ -208,6 +216,30 @@ export class TradeExecutor {
     }
     // Claim cooldown upfront to prevent concurrent calls bypassing the check
     this._assetCooldowns.set(symbol, new Date());
+
+    // Memecoin combined cap — per-asset buy path
+    if (signal === 'buy' && memeRow2?.is_memecoin) {
+      const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
+      const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
+      const memes = db.prepare(
+        `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
+      ).all() as { symbol: string }[];
+      const memePositions: Record<string, number> = {};
+      for (const { symbol: ms } of memes) {
+        const balance = botState.assetBalances.get(ms) ?? 0;
+        const snap = db.prepare(
+          `SELECT price_usd FROM asset_snapshots WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1`
+        ).get(ms) as { price_usd: number } | undefined;
+        memePositions[ms] = balance * (snap?.price_usd ?? 0);
+      }
+      const tradeUsd = (botState.assetBalances.get('USDC') ?? 0) * 0.1;
+      const veto = getMemecoincapVeto(symbol, tradeUsd, memePositions, portfolioUsd, memeCapPct);
+      if (veto) {
+        logger.warn(`[${symbol}] ${veto}`);
+        queries.insertEvent.run('memecoin_cap_veto', veto);
+        return;
+      }
+    }
 
     // For BUY: we spend USDC, so check USDC balance
     // For SELL: we spend the token, so check token balance
