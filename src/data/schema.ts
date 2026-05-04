@@ -223,6 +223,29 @@ export function initSchema(db: DB): void {
       label           TEXT NOT NULL DEFAULT 'default'
     );
   `);
+
+  // Seeds these defaults on first run only — manual changes via dashboard are preserved
+  const SETTINGS_DEFAULTS: Array<{ key: string; value: string }> = [
+    { key: 'ROTATION_BUY_THRESHOLD',    value: '20' },
+    { key: 'ROTATION_SELL_THRESHOLD',   value: '-15' },
+    { key: 'MIN_ROTATION_SCORE_DELTA',  value: '30' },
+    { key: 'RISK_OFF_THRESHOLD',        value: '-30' },
+    { key: 'OPTIMIZER_INTERVAL_SECONDS', value: '180' },
+    { key: 'MAX_POSITION_PCT',          value: '30' },
+    { key: 'MEMECOIN_CAP_PCT',          value: '20' },
+    { key: 'MEMECOIN_COOLDOWN_SECONDS', value: '600' },
+  ];
+
+  const seedSetting = db.prepare(
+    `INSERT OR IGNORE INTO settings (key, value) VALUES (@key, @value)`
+  );
+
+  const seedSettings = db.transaction(() => {
+    for (const s of SETTINGS_DEFAULTS) {
+      seedSetting.run(s);
+    }
+  });
+  seedSettings();
 }
 
 // Auto-run on import: ensures migrations execute before any query module
