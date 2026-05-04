@@ -7,7 +7,7 @@ const RATE_LIMIT_MS = 4000; // 4s between token requests (~15 req/min)
 export interface Candle {
   symbol: string;
   network: string;
-  interval: string;
+  interval: '15m' | '1h' | '24h';
   openTime: string; // ISO string
   open: number;
   high: number;

@@ -1,5 +1,6 @@
 import { logger } from '../core/logger.js';
-import { candleQueries, queries } from '../data/db.js';
+import { db, candleQueries, queries } from '../data/db.js';
+import { GeckoTerminalService } from './gecko.js';
 
 export interface Candle {
   symbol: string;
@@ -43,6 +44,7 @@ const CANDLE_SYMBOL_OVERRIDES: Record<string, string> = {
 export class CandleService {
   private pendingCandles: Map<string, PendingCandle> = new Map();
   private pollingIntervalId: ReturnType<typeof setInterval> | undefined;
+  private readonly gecko = new GeckoTerminalService();
 
   constructor(
     private readonly network: string,
@@ -196,6 +198,27 @@ export class CandleService {
         if (candles.length > 0) {
           this.storeCandles(candles);
           logger.debug(`Stored ${candles.length} ${pair} ${interval} candles`);
+        }
+      }
+    }
+    // Poll GeckoTerminal for non-Coinbase assets
+    await this.pollGeckoTerminalCandles(this.network);
+  }
+
+  async pollGeckoTerminalCandles(network: string): Promise<void> {
+    // Get active (non-registry) discovered assets with their addresses
+    const assets = (db.prepare(
+      `SELECT symbol, address FROM discovered_assets
+       WHERE status = 'active' AND address IS NOT NULL AND address != ''
+       AND symbol NOT IN ('ETH','USDC','CBBTC','CBETH')`
+    ).all() as { symbol: string; address: string }[]);
+
+    for (const asset of assets) {
+      for (const interval of ['15m', '1h'] as const) {
+        const candles = await this.gecko.fetchCandles(asset.address, asset.symbol, network, interval);
+        if (candles.length > 0) {
+          this.storeCandles(candles);
+          logger.debug(`GeckoTerminal: stored ${candles.length} ${asset.symbol} ${interval} candles`);
         }
       }
     }
