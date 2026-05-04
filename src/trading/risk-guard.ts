@@ -1,7 +1,38 @@
-import { queries, dailyPnlQueries, rotationQueries } from '../data/db.js';
+import { db, queries, dailyPnlQueries, rotationQueries } from '../data/db.js';
 import { botState } from '../core/state.js';
 import { logger } from '../core/logger.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+
+/**
+ * Returns a veto reason string if buying `buySymbol` for `buyAmountUsd`
+ * would breach the combined memecoin cap, otherwise null.
+ *
+ * @param buySymbol - symbol being bought
+ * @param buyAmountUsd - USD value of the intended buy
+ * @param memePositions - map of memecoin symbol → current USD holding
+ * @param portfolioUsd - total portfolio USD
+ * @param capPct - combined memecoin cap (e.g. 20 for 20%)
+ */
+export function getMemecoincapVeto(
+  buySymbol: string,
+  buyAmountUsd: number,
+  memePositions: Record<string, number>,
+  portfolioUsd: number,
+  capPct: number,
+): string | null {
+  const isMeme = Object.prototype.hasOwnProperty.call(memePositions, buySymbol);
+  if (!isMeme) return null;
+  if (portfolioUsd <= 0) return null;
+
+  const currentMemeUsd = Object.values(memePositions).reduce((s, v) => s + v, 0);
+  const afterBuyUsd = currentMemeUsd + buyAmountUsd;
+  const afterBuyPct = (afterBuyUsd / portfolioUsd) * 100;
+
+  if (afterBuyPct > capPct) {
+    return `Memecoin cap breach: ${afterBuyPct.toFixed(1)}% > ${capPct}% (current: $${currentMemeUsd.toFixed(2)}, buying: $${buyAmountUsd.toFixed(2)})`;
+  }
+  return null;
+}
 
 export interface RotationProposal {
   sellSymbol: string;
@@ -74,6 +105,15 @@ export class RiskGuard {
       adjustedAmount = portfolioUsd * maxRotPct / 100;
     }
 
+    // 4b. Memecoin combined cap
+    const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
+    const memePositions = this.getMemePositionsUsd();
+    const memeVeto = getMemecoincapVeto(proposal.buySymbol, proposal.sellAmount, memePositions, portfolioUsd, memeCapPct);
+    if (memeVeto) {
+      this.logDecision('memecoin_cap_veto', memeVeto);
+      return { approved: false, vetoReason: memeVeto };
+    }
+
     // 5b. Minimum absolute USD profit check
     const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 1.0;
     const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
@@ -90,6 +130,22 @@ export class RiskGuard {
 
     this.logDecision('risk_approved', detail);
     return { approved: true, adjustedAmount };
+  }
+
+  private getMemePositionsUsd(): Record<string, number> {
+    const memes = db.prepare(
+      `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
+    ).all() as { symbol: string }[];
+
+    const positions: Record<string, number> = {};
+    for (const { symbol } of memes) {
+      const balance = botState.assetBalances.get(symbol) ?? 0;
+      const snap = (db.prepare(
+        `SELECT price_usd FROM asset_snapshots WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1`
+      ).get(symbol) as { price_usd: number } | undefined);
+      positions[symbol] = balance * (snap?.price_usd ?? 0);
+    }
+    return positions;
   }
 
   private logDecision(event: string, detail: string): void {

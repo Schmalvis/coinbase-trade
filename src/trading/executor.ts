@@ -1,14 +1,53 @@
 import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
-import { queries } from '../data/db.js';
+import { db, queries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+import { SlippageCache } from './slippage-cache.js';
+import { ASSET_REGISTRY } from '../assets/registry.js';
+import { getMemecoincapVeto } from './risk-guard.js';
+
+export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
+  if (!shadowUntil) return false;
+  return Date.now() < shadowUntil;
+}
 
 export class TradeExecutor {
   private readonly _assetCooldowns = new Map<string, Date>();
   // Tracks entry price and quantity for open positions (for realized P&L calculation)
   private readonly _openPositions = new Map<string, { entryPrice: number; qty: number }>();
+  private readonly slippageCache = new SlippageCache();
+
+  private isRegistryAsset(symbol: string): boolean {
+    return ASSET_REGISTRY.some(a => a.symbol === symbol);
+  }
+
+  private async checkSlippage(symbol: string, address: string, amountUsd: number): Promise<boolean> {
+    if (this.isRegistryAsset(symbol)) return true; // registry assets skip check
+
+    const cached = this.slippageCache.get(symbol);
+    if (cached !== null) {
+      if (cached > 1.5) {
+        logger.warn(`[${symbol}] Slippage ${cached.toFixed(2)}% > 1.5% (cached) — trade vetoed`);
+        return false;
+      }
+      return true;
+    }
+
+    try {
+      const impact = await this.tools.getQuoteImpactPct(address, amountUsd);
+      this.slippageCache.set(symbol, impact);
+      if (impact > 1.5) {
+        logger.warn(`[${symbol}] Slippage ${impact.toFixed(2)}% > 1.5% — trade vetoed`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      logger.warn(`[${symbol}] Slippage check failed: ${err} — allowing trade (fail-open)`);
+      return true; // fail-open: don't block trades on API errors
+    }
+  }
 
   constructor(
     private readonly tools: CoinbaseTools,
@@ -118,9 +157,58 @@ export class TradeExecutor {
       }
     }
 
+    // Slippage pre-check for non-registry assets (buy only)
+    if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
+      const assetRow = db.prepare(
+        `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
+      ).get(symbol) as { address: string } | undefined;
+      if (assetRow) {
+        const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
+        const tradeUsd = portfolioUsd * 0.1; // pre-check at 10% of portfolio
+        const ok = await this.checkSlippage(symbol, assetRow.address, tradeUsd);
+        if (!ok) {
+          queries.insertEvent.run('slippage_veto', `${symbol}: slippage > 1.5%`);
+          return;
+        }
+      }
+    }
+
+    // Shadow period: newly-promoted tokens dry-run for 24h before live trades
+    if (!this.isRegistryAsset(symbol)) {
+      const row = db.prepare(
+        `SELECT shadow_until FROM discovered_assets WHERE symbol = ? LIMIT 1`
+      ).get(symbol) as { shadow_until: number | null } | undefined;
+      if (isShadowPeriod(row?.shadow_until)) {
+        logger.info(`[${symbol}] Shadow period active — logging dry-run trade`);
+        queries.insertTrade.run({
+          action: signal,
+          amount_eth: 0, // placeholder since this is a shadow record
+          price_usd: 0,
+          tx_hash: null,
+          triggered_by: 'shadow-period',
+          status: 'dry_run',
+          dry_run: 1,
+          reason: 'shadow-period',
+          network: botState.activeNetwork,
+          entry_price: null,
+          realized_pnl: null,
+          strategy: 'shadow',
+          symbol,
+        });
+        return;
+      }
+    }
+
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
-    const cooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    // Fetch memecoin flag once — shared by cooldown and cap checks below
+    const memeRow2 = !this.isRegistryAsset(symbol)
+      ? db.prepare(`SELECT is_memecoin FROM discovered_assets WHERE symbol = ? LIMIT 1`).get(symbol) as { is_memecoin: number } | undefined
+      : undefined;
+
+    const baseCooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
+    const memeMultiplier = memeRow2?.is_memecoin ? 2 : 1;
+    const cooldownSecs = baseCooldownSecs * memeMultiplier;
     const last = this._assetCooldowns.get(symbol);
     if (priority !== 'stop-loss' && last && (Date.now() - last.getTime()) < cooldownSecs * 1000) {
       logger.debug(`Cooldown active for ${symbol}, skipping`);
@@ -128,6 +216,30 @@ export class TradeExecutor {
     }
     // Claim cooldown upfront to prevent concurrent calls bypassing the check
     this._assetCooldowns.set(symbol, new Date());
+
+    // Memecoin combined cap — per-asset buy path
+    if (signal === 'buy' && memeRow2?.is_memecoin) {
+      const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
+      const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
+      const memes = db.prepare(
+        `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
+      ).all() as { symbol: string }[];
+      const memePositions: Record<string, number> = {};
+      for (const { symbol: ms } of memes) {
+        const balance = botState.assetBalances.get(ms) ?? 0;
+        const snap = db.prepare(
+          `SELECT price_usd FROM asset_snapshots WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1`
+        ).get(ms) as { price_usd: number } | undefined;
+        memePositions[ms] = balance * (snap?.price_usd ?? 0);
+      }
+      const tradeUsd = (botState.assetBalances.get('USDC') ?? 0) * 0.1;
+      const veto = getMemecoincapVeto(symbol, tradeUsd, memePositions, portfolioUsd, memeCapPct);
+      if (veto) {
+        logger.warn(`[${symbol}] ${veto}`);
+        queries.insertEvent.run('memecoin_cap_veto', veto);
+        return;
+      }
+    }
 
     // For BUY: we spend USDC, so check USDC balance
     // For SELL: we spend the token, so check token balance

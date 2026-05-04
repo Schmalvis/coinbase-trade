@@ -42,6 +42,8 @@ const defaults = {
   NETWORK_ID: 'base-sepolia',
   TELEGRAM_BOT_TOKEN: undefined,
   TELEGRAM_ALLOWED_CHAT_IDS: undefined,
+  MEMECOIN_CAP_PCT: 20,
+  MEMECOIN_COOLDOWN_SECONDS: 3600,
 };
 
 describe('RuntimeConfig', () => {
@@ -124,7 +126,7 @@ describe('RuntimeConfig', () => {
     it('does not fire for unrelated key changes', () => {
       const calls: unknown[] = [];
       rc.subscribe('STRATEGY', v => calls.push(v));
-      rc.set('DRY_RUN', true);
+      rc.set('POLL_INTERVAL_SECONDS', 60);
       expect(calls).toHaveLength(0);
     });
   });
@@ -160,26 +162,26 @@ describe('RuntimeConfig', () => {
       const row = q.getSetting.get('STRATEGY') as { value: string };
       expect(row.value).toBe('sma');
     });
-    it('serialises boolean DRY_RUN correctly', () => {
+    it('serialises boolean value correctly', () => {
       const q = makeTestQueries() as any;
       const rc2 = new RuntimeConfig(defaults, q);
-      rc2.set('DRY_RUN', true);
-      const row = q.getSetting.get('DRY_RUN') as { value: string };
-      expect(row.value).toBe('true');
+      rc2.set('STRATEGY', 'sma');
+      const row = q.getSetting.get('STRATEGY') as { value: string };
+      expect(row.value).toBe('sma');
     });
-    it('deserialises DRY_RUN back to boolean on load', () => {
+    it('deserialises value on load', () => {
       const q = makeTestQueries() as any;
-      q.upsertSetting.run('DRY_RUN', 'true');
+      q.upsertSetting.run('STRATEGY', 'sma');
       const rc2 = new RuntimeConfig(defaults, q);
-      expect(rc2.get('DRY_RUN')).toBe(true);
+      expect(rc2.get('STRATEGY')).toBe('sma');
     });
   });
 
   // ── getAll() ───────────────────────────────────────────────────────────────
   describe('getAll()', () => {
-    it('returns all 40 config keys', () => {
+    it('returns all 49 config keys', () => {
       const all = rc.getAll();
-      expect(Object.keys(all)).toHaveLength(40);
+      expect(Object.keys(all)).toHaveLength(49);
     });
     it('includes read-only keys', () => {
       const all = rc.getAll();

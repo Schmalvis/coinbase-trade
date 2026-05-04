@@ -17,6 +17,7 @@ import { CandleService } from './services/candles.js';
 import { CandleStrategy } from './strategy/candle.js';
 import { RiskGuard } from './trading/risk-guard.js';
 import { WatchlistManager } from './portfolio/watchlist.js';
+import { seedCuratedTokens } from './data/seed.js';
 
 async function main() {
   // Initialise RuntimeConfig — overlays env defaults with any saved DB settings
@@ -51,6 +52,9 @@ async function main() {
     });
   }
   logger.info('Registry assets seeded into discovered_assets');
+
+  // Seed curated token list (idempotent)
+  seedCuratedTokens();
 
   // Portfolio optimizer dependencies — created after network restore
   let candleService = new CandleService(botState.activeNetwork);

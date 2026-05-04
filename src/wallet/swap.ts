@@ -2,6 +2,7 @@ import { createPublicClient, http } from 'viem';
 import { base, baseSepolia } from 'viem/chains';
 import type { CdpWalletClient } from './client.js';
 import { logger } from '../core/logger.js';
+import { ASSET_REGISTRY } from '../assets/registry.js';
 
 export interface SwapPrice {
   fromToken: string;
@@ -24,6 +25,12 @@ const TOKEN_DECIMALS: Record<string, number> = {
   '0x036cbd53842c5426634e7929541ec2318f3dcf7e': 6,  // USDC sepolia
   '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 8,  // CBBTC mainnet
   '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 18, // CBETH mainnet
+  '0x940181a94a35a4569e4529a3cdfb74e38fd98631': 18, // AERO
+  '0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b': 18, // VIRTUAL
+  '0xbaa5cc21fd487b8fcc2f45f966f723e0191b3d8e': 18, // MORPHO
+  '0xa88594d404727625a9437c3f886c7643872296ae': 18, // WELL
+  '0x4ed4e862860bed51a9570b96d89af5e1b0efefed': 18, // DEGEN
+  '0x532f27101965dd16442e59d40670faf5ebb142e4': 18, // BRETT
 };
 
 const ERC20_DECIMALS_ABI = [
@@ -60,6 +67,13 @@ function fromWei(raw: bigint | string, decimals: number): string {
 
 export class SwapService {
   constructor(private readonly walletClient: CdpWalletClient) {}
+
+  private isRegistrySwap(fromAddress: string, toAddress: string): boolean {
+    const registryAddresses = new Set(
+      ASSET_REGISTRY.flatMap(a => Object.values(a.addresses)).map(a => a.toLowerCase())
+    );
+    return registryAddresses.has(fromAddress.toLowerCase()) && registryAddresses.has(toAddress.toLowerCase());
+  }
 
   private async getDecimals(tokenAddress: string, network: string): Promise<number> {
     const lower = tokenAddress.toLowerCase();
@@ -130,7 +144,7 @@ export class SwapService {
         fromToken:  fromTokenAddress as `0x${string}`,
         toToken:    toTokenAddress   as `0x${string}`,
         fromAmount: fromWeiAmt,
-        slippageBps: 100,
+        slippageBps: this.isRegistrySwap(fromTokenAddress, toTokenAddress) ? 100 : 150,
       });
 
       logger.info(`Swap executed: ${fromAmount} ${fromTokenAddress} → ${toTokenAddress} txHash=${transactionHash}`);
@@ -146,6 +160,36 @@ export class SwapService {
       logger.info('Falling back to 0x API swap');
       return this.swapVia0x(fromTokenAddress, toTokenAddress, fromWeiAmt, network, zeroXKey);
     }
+  }
+
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number> {
+    const network = this.walletClient.network;
+    const chainId = network === 'base-mainnet' ? 8453 : 84532;
+    const usdcAddress = network === 'base-mainnet'
+      ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+      : '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+    const usdcDecimals = 6;
+    const fromAmountWei = BigInt(Math.round(amountUsd * 10 ** usdcDecimals));
+
+    const zeroXKey = process.env.ZEROX_API_KEY;
+    if (!zeroXKey) {
+      logger.debug(`getQuoteImpactPct: no ZEROX_API_KEY — returning 0 (fail-open)`);
+      return 0;
+    }
+
+    const address = this.walletClient.address ?? '';
+    const url = `https://api.0x.org/swap/permit2/quote?chainId=${chainId}` +
+      `&sellToken=${usdcAddress}&buyToken=${tokenAddress}` +
+      `&sellAmount=${fromAmountWei.toString()}&taker=${address}`;
+
+    const res = await fetch(url, { headers: { '0x-api-key': zeroXKey, '0x-version': 'v2' } });
+    if (!res.ok) {
+      logger.warn(`getQuoteImpactPct: 0x quote failed ${res.status} — returning 0 (fail-open)`);
+      return 0;
+    }
+    const quote = await res.json() as { estimatedPriceImpact?: string };
+    // estimatedPriceImpact is a string like "0.0123" meaning 1.23%
+    return parseFloat(quote.estimatedPriceImpact ?? '0') * 100;
   }
 
   private async swapVia0x(

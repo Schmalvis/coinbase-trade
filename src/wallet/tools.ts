@@ -156,6 +156,10 @@ export class CoinbaseTools {
     return this.getSwapPrice(from, to, estimatedFrom);
   }
 
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number> {
+    return this.swapService.getQuoteImpactPct(tokenAddress, amountUsd);
+  }
+
   /**
    * Route a swap through Enso Finance — supports any ERC20 with Base liquidity.
    * Mainnet only. tokenIn/tokenOut must be contract addresses.
