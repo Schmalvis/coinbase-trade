@@ -1,14 +1,47 @@
 import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
-import { queries } from '../data/db.js';
+import { db, queries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
+import { SlippageCache } from './slippage-cache.js';
+import { ASSET_REGISTRY } from '../assets/registry.js';
 
 export class TradeExecutor {
   private readonly _assetCooldowns = new Map<string, Date>();
   // Tracks entry price and quantity for open positions (for realized P&L calculation)
   private readonly _openPositions = new Map<string, { entryPrice: number; qty: number }>();
+  private readonly slippageCache = new SlippageCache();
+
+  private isRegistryAsset(symbol: string): boolean {
+    return ASSET_REGISTRY.some(a => a.symbol === symbol);
+  }
+
+  private async checkSlippage(symbol: string, address: string, amountUsd: number): Promise<boolean> {
+    if (this.isRegistryAsset(symbol)) return true; // registry assets skip check
+
+    const cached = this.slippageCache.get(symbol);
+    if (cached !== null) {
+      if (cached > 1.5) {
+        logger.warn(`[${symbol}] Slippage ${cached.toFixed(2)}% > 1.5% (cached) — trade vetoed`);
+        return false;
+      }
+      return true;
+    }
+
+    try {
+      const impact = await this.tools.getQuoteImpactPct(address, amountUsd);
+      this.slippageCache.set(symbol, impact);
+      if (impact > 1.5) {
+        logger.warn(`[${symbol}] Slippage ${impact.toFixed(2)}% > 1.5% — trade vetoed`);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      logger.warn(`[${symbol}] Slippage check failed: ${err} — allowing trade (fail-open)`);
+      return true; // fail-open: don't block trades on API errors
+    }
+  }
 
   constructor(
     private readonly tools: CoinbaseTools,
@@ -114,6 +147,22 @@ export class TradeExecutor {
             logger.warn(`[${symbol}] Buy blocked — position ${positionPct.toFixed(1)}% >= limit ${maxPosPct}%`);
             return;
           }
+        }
+      }
+    }
+
+    // Slippage pre-check for non-registry assets (buy only)
+    if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
+      const assetRow = db.prepare(
+        `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
+      ).get(symbol) as { address: string } | undefined;
+      if (assetRow) {
+        const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
+        const tradeUsd = portfolioUsd * 0.1; // pre-check at 10% of portfolio
+        const ok = await this.checkSlippage(symbol, assetRow.address, tradeUsd);
+        if (!ok) {
+          queries.insertEvent.run('slippage_veto', `${symbol}: slippage > 1.5%`);
+          return;
         }
       }
     }

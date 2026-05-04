@@ -148,6 +148,36 @@ export class SwapService {
     }
   }
 
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number> {
+    const network = this.walletClient.network;
+    const chainId = network === 'base-mainnet' ? 8453 : 84532;
+    const usdcAddress = network === 'base-mainnet'
+      ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
+      : '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
+    const usdcDecimals = 6;
+    const fromAmountWei = BigInt(Math.round(amountUsd * 10 ** usdcDecimals));
+
+    const zeroXKey = process.env.ZEROX_API_KEY;
+    if (!zeroXKey) {
+      logger.debug(`getQuoteImpactPct: no ZEROX_API_KEY — returning 0 (fail-open)`);
+      return 0;
+    }
+
+    const address = this.walletClient.address ?? '';
+    const url = `https://api.0x.org/swap/permit2/quote?chainId=${chainId}` +
+      `&sellToken=${usdcAddress}&buyToken=${tokenAddress}` +
+      `&sellAmount=${fromAmountWei.toString()}&taker=${address}`;
+
+    const res = await fetch(url, { headers: { '0x-api-key': zeroXKey, '0x-version': 'v2' } });
+    if (!res.ok) {
+      logger.warn(`getQuoteImpactPct: 0x quote failed ${res.status} — returning 0 (fail-open)`);
+      return 0;
+    }
+    const quote = await res.json() as { estimatedPriceImpact?: string };
+    // estimatedPriceImpact is a string like "0.0123" meaning 1.23%
+    return parseFloat(quote.estimatedPriceImpact ?? '0') * 100;
+  }
+
   private async swapVia0x(
     fromToken: string,
     toToken: string,
