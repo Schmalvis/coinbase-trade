@@ -15,6 +15,7 @@ vi.mock('../src/assets/registry.js', () => ({ ASSET_REGISTRY: [] }));
 // Import after mocks
 import { SlippageCache } from '../src/trading/slippage-cache.js';
 import { isShadowPeriod } from '../src/trading/executor.js';
+import { getMemecoincapVeto } from '../src/trading/risk-guard.js';
 
 describe('SlippageCache', () => {
   let cache: SlippageCache;
@@ -56,5 +57,24 @@ describe('shadow period gate', () => {
   it('isShadowPeriod returns false when shadow_until is in the past', () => {
     const pastTs = Date.now() - 60_000;
     expect(isShadowPeriod(pastTs)).toBe(false);
+  });
+});
+
+describe('getMemecoincapVeto', () => {
+  it('returns null when buying a non-memecoin', () => {
+    const result = getMemecoincapVeto('AERO', 20, { DEGEN: 5, BRETT: 5 }, 100, 20);
+    expect(result).toBeNull();
+  });
+
+  it('returns veto reason when combined cap would be exceeded', () => {
+    // Portfolio $100, DEGEN holds $15, buying $10 BRETT = $25 > 20% cap ($20)
+    const result = getMemecoincapVeto('BRETT', 10, { DEGEN: 15, BRETT: 0 }, 100, 20);
+    expect(result).toMatch(/memecoin cap/i);
+  });
+
+  it('returns null when combined cap is within limit', () => {
+    // Portfolio $100, DEGEN holds $5, buying $10 BRETT = $15 < 20% cap ($20)
+    const result = getMemecoincapVeto('BRETT', 10, { DEGEN: 5, BRETT: 0 }, 100, 20);
+    expect(result).toBeNull();
   });
 });
