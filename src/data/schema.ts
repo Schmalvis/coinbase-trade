@@ -23,6 +23,10 @@ export function initSchema(db: DB): void {
   try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_volume_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_rsi_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
 
+  // Migrations: memecoin and shadow_until columns
+  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN is_memecoin INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN shadow_until INTEGER`); } catch { /* exists */ }
+
   // Migration: extend discovered_assets strategy CHECK constraint for new strategies
   try {
     db.exec(`INSERT INTO discovered_assets (address, network, symbol, name, strategy) VALUES ('__tcptest__', '__test__', '__test__', '', 'trend-continuation')`);
@@ -51,13 +55,16 @@ export function initSchema(db: DB): void {
         sma_use_ema INTEGER NOT NULL DEFAULT 1,
         sma_volume_filter INTEGER NOT NULL DEFAULT 1,
         sma_rsi_filter INTEGER NOT NULL DEFAULT 1,
+        is_memecoin INTEGER NOT NULL DEFAULT 0,
+        shadow_until INTEGER,
         PRIMARY KEY (address, network)
       )`);
       db.exec(`INSERT INTO discovered_assets_v2
         SELECT address, network, symbol, name, decimals, status, drop_pct, rise_pct,
                sma_short, sma_long, strategy, discovered_at, grid_manual_override,
                grid_upper_bound, grid_lower_bound, grid_levels, grid_amount_pct,
-               sma_use_ema, sma_volume_filter, sma_rsi_filter
+               sma_use_ema, sma_volume_filter, sma_rsi_filter,
+               COALESCE(is_memecoin, 0) AS is_memecoin, shadow_until
         FROM discovered_assets`);
       db.exec(`DROP TABLE discovered_assets`);
       db.exec(`ALTER TABLE discovered_assets_v2 RENAME TO discovered_assets`);
