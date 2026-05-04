@@ -64,3 +64,59 @@ describe('GeckoTerminalService.getPoolAddress', () => {
     expect(result).toBeNull();
   });
 });
+
+describe('GeckoTerminalService.fetchCandles', () => {
+  let svc: GeckoTerminalService;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    svc = new GeckoTerminalService();
+    // Pool already cached
+    (queries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue({ value: '0xpool' });
+  });
+
+  it('maps GeckoTerminal OHLCV list to Candle objects', async () => {
+    fetchMock.mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        data: {
+          attributes: {
+            ohlcv_list: [
+              [1746000000, 1.0, 1.2, 0.9, 1.1, 5000],
+              [1746003600, 1.1, 1.3, 1.0, 1.2, 6000],
+            ],
+          },
+        },
+      }),
+    });
+
+    const candles = await svc.fetchCandles('0xtoken', 'AERO', 'base-mainnet', '15m');
+    expect(candles).toHaveLength(2);
+    expect(candles[0]).toMatchObject({
+      symbol: 'AERO',
+      network: 'base-mainnet',
+      interval: '15m',
+      open: 1.0,
+      high: 1.2,
+      low: 0.9,
+      close: 1.1,
+      volume: 5000,
+      source: 'dex',
+    });
+    expect(candles[0].openTime).toBe(new Date(1746000000 * 1000).toISOString());
+  });
+
+  it('returns [] when pool not found', async () => {
+    (queries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
+
+    const candles = await svc.fetchCandles('0xunknown', 'UNKNOWN', 'base-mainnet', '1h');
+    expect(candles).toEqual([]);
+  });
+
+  it('returns [] on API error, logs warning', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 429, text: async () => 'rate limited' });
+    const candles = await svc.fetchCandles('0xtoken', 'AERO', 'base-mainnet', '15m');
+    expect(candles).toEqual([]);
+  });
+});

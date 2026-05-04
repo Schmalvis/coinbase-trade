@@ -52,4 +52,49 @@ export class GeckoTerminalService {
       return null;
     }
   }
+
+  private intervalParams(interval: '15m' | '1h'): { timeframe: string; aggregate: number } {
+    return interval === '15m'
+      ? { timeframe: 'minute', aggregate: 15 }
+      : { timeframe: 'hour', aggregate: 1 };
+  }
+
+  async fetchCandles(
+    tokenAddress: string,
+    symbol: string,
+    network: string,
+    interval: '15m' | '1h',
+  ): Promise<Candle[]> {
+    const poolAddress = await this.getPoolAddress(tokenAddress.toLowerCase());
+    if (!poolAddress) return [];
+
+    const { timeframe, aggregate } = this.intervalParams(interval);
+    const url = `${GECKO_BASE}/networks/base/pools/${poolAddress}/ohlcv/${timeframe}?aggregate=${aggregate}&limit=200`;
+
+    try {
+      const res = await this.throttledFetch(url);
+      if (!res.ok) {
+        logger.warn(`GeckoTerminal OHLCV failed: ${res.status} for ${symbol} ${interval}`);
+        return [];
+      }
+      const body = await res.json() as {
+        data: { attributes: { ohlcv_list: number[][] } };
+      };
+      return (body.data?.attributes?.ohlcv_list ?? []).map(([ts, open, high, low, close, volume]) => ({
+        symbol,
+        network,
+        interval,
+        openTime: new Date(ts * 1000).toISOString(),
+        open,
+        high,
+        low,
+        close,
+        volume,
+        source: 'dex' as const,
+      }));
+    } catch (err) {
+      logger.warn(`GeckoTerminal fetchCandles error for ${symbol}: ${err}`);
+      return [];
+    }
+  }
 }
