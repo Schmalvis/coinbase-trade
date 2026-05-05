@@ -37,6 +37,8 @@ export interface AssetRow {
   strategy: string;
   drop_pct: number;
   rise_pct: number;
+  sma_short: number;
+  sma_long: number;
   is_memecoin: number;
   shadow_until: number | null;
 }
@@ -96,7 +98,7 @@ export function generateReport(db: Database.Database): ReportData {
   for (const row of settingsRows) settings[row.key] = row.value;
 
   const assets = db.prepare(`
-    SELECT symbol, network, status, strategy, drop_pct, rise_pct, is_memecoin, shadow_until
+    SELECT symbol, network, status, strategy, drop_pct, rise_pct, sma_short, sma_long, is_memecoin, shadow_until
     FROM discovered_assets
     WHERE status != 'dismissed'
     ORDER BY symbol

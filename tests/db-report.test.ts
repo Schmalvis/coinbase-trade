@@ -135,6 +135,6 @@ describe('generateReport', () => {
     const report = generateReport(db);
     expect(report.dailyPnl).toHaveLength(7);
     // Chronological order — first entry is oldest
-    expect(report.dailyPnl[0].realized_pnl).toBeGreaterThan(report.dailyPnl[6].realized_pnl);
+    expect(report.dailyPnl[0].date < report.dailyPnl[6].date).toBe(true);
   });
 });
