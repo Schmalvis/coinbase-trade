@@ -44,7 +44,7 @@ export function applyStatus(
 
   if (newStatus === 'active') {
     const snapshotRow = db.prepare(
-      `SELECT COUNT(*) as cnt FROM asset_snapshots WHERE symbol = ? AND datetime(timestamp) <= datetime('now', '-24 hours')`
+      `SELECT COUNT(*) as cnt FROM asset_snapshots WHERE LOWER(symbol) = LOWER(?) AND datetime(timestamp) <= datetime('now', '-24 hours')`
     ).get(symbol) as { cnt: number };
 
     if (snapshotRow.cnt === 0) {

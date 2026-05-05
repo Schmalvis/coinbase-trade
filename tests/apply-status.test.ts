@@ -103,4 +103,14 @@ describe('applyStatus', () => {
     expect(r.accepted).toBe(false);
     expect(r.reason).toMatch(/invalid/i);
   });
+
+  it('promotes when snapshot is stored with different case', () => {
+    // asset_snapshots may store lowercase symbol from portfolio tracker
+    db.prepare(`INSERT INTO discovered_assets (address, network, symbol, name, status, discovered_at)
+      VALUES ('0xwell', 'base-mainnet', 'WELL', 'Moonwell', 'pending', datetime('now', '-2 days'))`).run();
+    db.prepare(`INSERT INTO asset_snapshots (symbol, timestamp, price_usd, balance)
+      VALUES ('well', datetime('now', '-25 hours'), 0.5, 0)`).run();
+    const r = applyStatus(db, 'WELL', 'base-mainnet', 'active');
+    expect(r.accepted).toBe(true);
+  });
 });
