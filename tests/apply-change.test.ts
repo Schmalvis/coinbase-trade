@@ -120,6 +120,17 @@ describe('applyChange — global settings', () => {
     expect(r.accepted).toBe(false);
     expect(r.reason).toMatch(/120.*600|range/i);
   });
+
+  it('enforces ±20% cap correctly for negative thresholds', () => {
+    // RISK_OFF_THRESHOLD = -30; ±20% window is [-36, -24]
+    // -38 is outside (more negative than -36) → reject
+    const r1 = applyChange(db, 'RISK_OFF_THRESHOLD', '-38');
+    expect(r1.accepted).toBe(false);
+    expect(r1.reason).toMatch(/20%/i);
+    // -33 is inside → accept
+    const r2 = applyChange(db, 'RISK_OFF_THRESHOLD', '-33');
+    expect(r2.accepted).toBe(true);
+  });
 });
 
 describe('applyChange — per-asset params', () => {

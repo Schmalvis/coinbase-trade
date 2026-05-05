@@ -13,7 +13,12 @@ const GLOBAL_NUMERIC_KEYS = new Set([
   'PORTFOLIO_FLOOR_USD',
 ]);
 
-const PER_ASSET_KEYS = new Set(['drop_pct', 'rise_pct', 'sma_short', 'sma_long']);
+const PER_ASSET_COLUMNS: Record<string, string> = {
+  drop_pct: 'drop_pct',
+  rise_pct: 'rise_pct',
+  sma_short: 'sma_short',
+  sma_long: 'sma_long',
+};
 
 const SESSION_DATE_KEY = 'review_session_date';
 const SESSION_COUNT_KEY = 'review_session_count';
@@ -59,7 +64,7 @@ export function applyChange(
   if (!isPerAsset && !GLOBAL_NUMERIC_KEYS.has(key)) {
     return { accepted: false, key, reason: `Unknown or non-numeric setting key: ${key}` };
   }
-  if (isPerAsset && !PER_ASSET_KEYS.has(key)) {
+  if (isPerAsset && !(key in PER_ASSET_COLUMNS)) {
     return { accepted: false, key, reason: `Unknown per-asset param: ${key}. Allowed: drop_pct, rise_pct, sma_short, sma_long` };
   }
 
@@ -92,8 +97,8 @@ export function applyChange(
     }
 
     if (oldValue !== undefined && oldValue !== 0) {
-      const lo = oldValue * 0.8;
-      const hi = oldValue * 1.2;
+      const lo = Math.min(oldValue * 0.8, oldValue * 1.2);
+      const hi = Math.max(oldValue * 0.8, oldValue * 1.2);
       if (newValue < lo || newValue > hi) {
         return {
           accepted: false, key,
@@ -110,10 +115,11 @@ export function applyChange(
     return { accepted: true, key, oldValue, newValue, reason: 'Applied' };
   }
 
-  // Per-asset change
+  // Per-asset change — use column map (not raw key) to eliminate SQL injection risk
   const net = network ?? 'base-mainnet';
+  const col = PER_ASSET_COLUMNS[key];
   const asset = db.prepare(
-    `SELECT ${key} as current_val FROM discovered_assets WHERE LOWER(symbol) = LOWER(?) AND network = ?`
+    `SELECT ${col} as current_val FROM discovered_assets WHERE LOWER(symbol) = LOWER(?) AND network = ?`
   ).get(symbol!, net) as { current_val: number } | undefined;
 
   if (!asset) {
@@ -122,8 +128,8 @@ export function applyChange(
 
   const oldValue = asset.current_val;
   if (oldValue !== 0) {
-    const lo = oldValue * 0.8;
-    const hi = oldValue * 1.2;
+    const lo = Math.min(oldValue * 0.8, oldValue * 1.2);
+    const hi = Math.max(oldValue * 0.8, oldValue * 1.2);
     if (newValue < lo || newValue > hi) {
       return {
         accepted: false, key, symbol,
@@ -133,7 +139,7 @@ export function applyChange(
   }
 
   const applyPerAsset = db.transaction(() => {
-    db.prepare(`UPDATE discovered_assets SET ${key} = ? WHERE LOWER(symbol) = LOWER(?) AND network = ?`)
+    db.prepare(`UPDATE discovered_assets SET ${col} = ? WHERE LOWER(symbol) = LOWER(?) AND network = ?`)
       .run(newValue, symbol!, net);
     incrementSessionCount(db, today, sessionCount);
   });
