@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Mock viem (used by SwapService.getDecimals for unknown tokens) ──
 vi.mock('viem', () => ({
@@ -29,13 +29,21 @@ function makeWalletClient(address = '0xWallet00000000000000000000000000000001') 
     toAmount: 3000000000n, // 3000 USDC (6 decimals) in bigint
     liquidityAvailable: true,
   });
+  const mockSendTransaction = vi.fn().mockResolvedValue({ transactionHash: '0x0xFallbackHash' });
   const account = { swap: mockSwap };
-  const sdk = { evm: { getSwapPrice: mockGetSwapPrice } };
-  return { address, account, sdk, network: 'base-mainnet', mockSwap, mockGetSwapPrice };
+  const sdk = { evm: { getSwapPrice: mockGetSwapPrice, sendTransaction: mockSendTransaction } };
+  return { address, account, sdk, network: 'base-mainnet', mockSwap, mockGetSwapPrice, mockSendTransaction };
 }
 
 describe('SwapService.swap', () => {
   beforeEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    delete process.env.NISHVAULT_PRE_SEND_GUARD;
+    delete process.env.NISHVAULT_PRE_SEND_TIMEOUT_MS;
+    delete process.env.NISHVAULT_SELLER_URL;
+    delete process.env.ZEROX_API_KEY;
+    vi.unstubAllGlobals();
+  });
 
   it('calls account.swap with correct BigInt amount and returns txHash', async () => {
     const wc = makeWalletClient();
@@ -60,6 +68,63 @@ describe('SwapService.swap', () => {
     (wc as any).account = null;
     const service = new SwapService(wc as any);
     await expect(service.swap(ETH_ADDR, USDC_ADDR, '1', 'base-mainnet')).rejects.toThrow('Wallet not initialised');
+  });
+
+  it('keeps the 0x fallback path unchanged when Nishvault guard is disabled', async () => {
+    process.env.ZEROX_API_KEY = 'test-0x-key';
+    const wc = makeWalletClient();
+    wc.mockSwap.mockRejectedValueOnce(new Error('CDP swap unavailable'));
+    const service = new SwapService(wc as any);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        transaction: {
+          to: USDC_ADDR,
+          data: '0x1234',
+          value: '0',
+        },
+      }),
+    }));
+
+    const result = await service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet');
+
+    expect(wc.mockSendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: wc.address,
+        network: 'base',
+        transaction: expect.objectContaining({
+          to: USDC_ADDR,
+          data: '0x1234',
+          value: 0n,
+        }),
+      }),
+    );
+    expect(result).toEqual({ txHash: '0x0xFallbackHash', status: 'executed_via_0x' });
+  });
+
+  it('requires an explicit Nishvault package install before guarded 0x fallback broadcasts', async () => {
+    process.env.ZEROX_API_KEY = 'test-0x-key';
+    process.env.NISHVAULT_PRE_SEND_GUARD = '1';
+    const wc = makeWalletClient();
+    wc.mockSwap.mockRejectedValueOnce(new Error('CDP swap unavailable'));
+    const service = new SwapService(wc as any);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: vi.fn().mockResolvedValue({
+        transaction: {
+          to: USDC_ADDR,
+          data: '0x1234',
+          value: '0',
+        },
+      }),
+    }));
+
+    await expect(service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet')).rejects.toThrow(
+      'requires `npm install nishvault-preflight-buy`',
+    );
+    expect(wc.mockSendTransaction).not.toHaveBeenCalled();
   });
 });
 

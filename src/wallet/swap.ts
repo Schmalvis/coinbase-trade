@@ -17,6 +17,31 @@ export interface SwapResult {
   status: string;
 }
 
+type NishvaultPreflightRequest = {
+  sellerUrl?: string;
+  transaction: {
+    from: string;
+    to: string;
+    data: string;
+    value: bigint;
+    chainId: number;
+  };
+};
+
+type NishvaultPreflightResult = {
+  ok?: boolean;
+  status?: number;
+  artifactDir?: string;
+  paymentResponse?: {
+    transaction?: string;
+    result?: { transaction?: string };
+  };
+};
+
+const NISHVAULT_PACKAGE = 'nishvault-preflight-buy';
+const NISHVAULT_DEFAULT_SELLER_URL = 'https://api.nishvault.com';
+const NISHVAULT_DEFAULT_TIMEOUT_MS = 15_000;
+
 // Known token decimals by lowercase address
 const TOKEN_DECIMALS: Record<string, number> = {
   '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee': 18, // ETH sentinel
@@ -45,6 +70,82 @@ const ERC20_DECIMALS_ABI = [
 
 function sdkNetwork(network: string): string {
   return network === 'base-mainnet' ? 'base' : network;
+}
+
+function isNishvaultGuardEnabled(): boolean {
+  return process.env.NISHVAULT_PRE_SEND_GUARD === '1';
+}
+
+function chainIdForNetwork(network: string): number {
+  if (network === 'base-mainnet' || network === 'base') return 8453;
+  if (network === 'base-sepolia') return 84532;
+  throw new Error(`Nishvault pre-send guard does not know network: ${network}`);
+}
+
+function nishvaultTimeoutMs(): number {
+  const parsed = Number(process.env.NISHVAULT_PRE_SEND_TIMEOUT_MS);
+  if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  return NISHVAULT_DEFAULT_TIMEOUT_MS;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function requireNishvaultPreSendReceipt(request: NishvaultPreflightRequest): Promise<void> {
+  if (!isNishvaultGuardEnabled()) return;
+
+  if (request.transaction.chainId !== 8453) {
+    throw new Error(
+      `NISHVAULT_PRE_SEND_GUARD=1 currently supports Base mainnet only; refusing chainId=${request.transaction.chainId}.`,
+    );
+  }
+
+  let preflightTransactionRequest: unknown;
+  try {
+    ({ preflightTransactionRequest } = await import(NISHVAULT_PACKAGE));
+  } catch {
+    throw new Error(
+      `NISHVAULT_PRE_SEND_GUARD=1 requires \`npm install ${NISHVAULT_PACKAGE}\` before broadcasting 0x fallback transactions.`,
+    );
+  }
+
+  if (typeof preflightTransactionRequest !== 'function') {
+    throw new Error(
+      `NISHVAULT_PRE_SEND_GUARD=1 requires ${NISHVAULT_PACKAGE} to export preflightTransactionRequest.`,
+    );
+  }
+
+  const receipt = await withTimeout(
+    preflightTransactionRequest({
+      sellerUrl: request.sellerUrl || process.env.NISHVAULT_SELLER_URL || NISHVAULT_DEFAULT_SELLER_URL,
+      transaction: request.transaction,
+    }) as Promise<NishvaultPreflightResult>,
+    nishvaultTimeoutMs(),
+    'Nishvault PRE_SEND_PROOF_RECEIPT',
+  );
+
+  if (!receipt?.ok) {
+    throw new Error(`Nishvault pre-send guard rejected the transaction with status ${receipt?.status ?? 'unknown'}.`);
+  }
+
+  logger.info('Nishvault PRE_SEND_PROOF_RECEIPT accepted', {
+    status: receipt.status,
+    artifactDir: receipt.artifactDir,
+    settlementTx:
+      receipt.paymentResponse?.transaction ||
+      receipt.paymentResponse?.result?.transaction,
+  });
 }
 
 function toWei(amount: string | number, decimals: number): bigint {
@@ -210,6 +311,16 @@ export class SwapService {
     const quote = await res.json() as { transaction: { to: string; data: string; value: string } };
 
     const tx = quote.transaction;
+    await requireNishvaultPreSendReceipt({
+      transaction: {
+        from: address,
+        to: tx.to,
+        data: tx.data,
+        value: BigInt(tx.value ?? '0'),
+        chainId: chainIdForNetwork(network),
+      },
+    });
+
     const { transactionHash } = await this.walletClient.sdk.evm.sendTransaction({
       address: address as `0x${string}`,
       network: sdkNetwork(network) as any,
