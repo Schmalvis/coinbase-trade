@@ -256,4 +256,47 @@ describe('CandleService', () => {
       expect(calls[2][0]).toBe('24h');
     });
   });
+
+  describe('pollCoinbaseCandles isolation from gecko failures', () => {
+    it('continues storing Coinbase candles even when GeckoTerminal throws', async () => {
+      // Mock fetch to return successful Coinbase response
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          candles: [
+            {
+              start: '1700000000',
+              low: '1900.5',
+              high: '2100.0',
+              open: '2000.0',
+              close: '2050.0',
+              volume: '1234.56',
+            },
+          ],
+        }),
+      }));
+
+      const storedCalls: unknown[] = [];
+      vi.mocked(candleQueries.insertCandle.run).mockImplementation((params) => {
+        storedCalls.push(params);
+        return { changes: 1, lastInsertRowid: 1 } as never;
+      });
+
+      const svc = new CandleService('base-mainnet', ['ETH-USD']);
+
+      // Mock pollGeckoTerminalCandles to reject with an error
+      vi.spyOn(svc as any, 'pollGeckoTerminalCandles').mockRejectedValue(
+        new Error('GeckoTerminal poll failed')
+      );
+
+      // Act: pollCoinbaseCandles should succeed despite gecko throwing
+      await svc.pollCoinbaseCandles();
+
+      // Assert: Coinbase candles were stored despite gecko failure
+      expect(storedCalls.length).toBeGreaterThan(0);
+      const storedCandle = storedCalls[0] as Record<string, unknown>;
+      expect(storedCandle.symbol).toBe('ETH');
+      expect(storedCandle.source).toBe('coinbase');
+    });
+  });
 });

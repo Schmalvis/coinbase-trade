@@ -201,8 +201,13 @@ export class CandleService {
         }
       }
     }
-    // Poll GeckoTerminal for non-Coinbase assets
-    await this.pollGeckoTerminalCandles(this.network);
+    // Poll GeckoTerminal for non-Coinbase assets — isolated so a gecko failure
+    // cannot abort the Coinbase fetch above.
+    try {
+      await this.pollGeckoTerminalCandles(this.network);
+    } catch (err) {
+      logger.warn(`GeckoTerminal poll failed (Coinbase candles unaffected): ${err}`);
+    }
   }
 
   async pollGeckoTerminalCandles(network: string): Promise<void> {
