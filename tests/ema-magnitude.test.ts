@@ -97,4 +97,37 @@ describe('SMAStrategy — EMA magnitude filter', () => {
       expect(result.signal).toBe('sell');
     });
   });
+
+  describe('magnitude threshold at 0.15%', () => {
+    it('holds on a 0.025% gap (was passing at 0.02% threshold, must now block)', () => {
+      const strategy = new SMAStrategy({ shortWindow: SHORT, longWindow: LONG, useEma: true });
+
+      // Init: short < long
+      strategy.evaluate(snap([1000, 1000, 2000]));
+
+      // Crossover with ~0.025% gap:
+      // short = (1000.5 + 1000.0) / 2 = 1000.25
+      // long  = (1000.5 + 1000.0 + 999.5) / 3 = 1000.0
+      // gap = 0.25, price ≈ 999.5, emaPct = 0.25/999.5 ≈ 0.025% < 0.15%
+      const result = strategy.evaluate(snap([1000.5, 1000.0, 999.5]));
+
+      expect(result.signal).toBe('hold');
+      expect(result.reason).toContain('EMA gap too small');
+    });
+
+    it('allows a 0.2% gap (above new 0.15% threshold)', () => {
+      const strategy = new SMAStrategy({ shortWindow: SHORT, longWindow: LONG, useEma: true });
+
+      // Init: short < long
+      strategy.evaluate(snap([1000, 1000, 2000]));
+
+      // Crossover with ~0.201% gap:
+      // short = (1004 + 1000) / 2 = 1002
+      // long  = (1004 + 1000 + 996) / 3 = 1000.0
+      // gap = 2.0, price ≈ 996, emaPct = 2.0/996 ≈ 0.201% > 0.15%
+      const result = strategy.evaluate(snap([1004, 1000, 996]));
+
+      expect(result.signal).toBe('buy');
+    });
+  });
 });
