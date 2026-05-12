@@ -295,6 +295,27 @@ export class CandleService {
     }
   }
 
+  async backfillHistoricalCandles(): Promise<void> {
+    const intervals: Array<{ interval: '15m' | '1h' | '24h'; limit: number }> = [
+      { interval: '15m', limit: 200 },
+      { interval: '1h',  limit: 100 },
+      { interval: '24h', limit: 30  },
+    ];
+    for (const pair of this.coinbasePairs) {
+      for (const { interval, limit } of intervals) {
+        try {
+          const candles = await this.fetchCoinbaseCandles(pair, interval, limit);
+          if (candles.length > 0) {
+            this.storeCandles(candles);
+            logger.info(`Backfill: stored ${candles.length} ${pair} ${interval} candles`);
+          }
+        } catch (err) {
+          logger.warn(`Backfill failed for ${pair} ${interval}: ${err}`);
+        }
+      }
+    }
+  }
+
   cleanupOldCandles(): void {
     const now = new Date();
 

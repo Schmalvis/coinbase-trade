@@ -17,7 +17,7 @@ import { CandleService } from './services/candles.js';
 import { CandleStrategy } from './strategy/candle.js';
 import { RiskGuard } from './trading/risk-guard.js';
 import { WatchlistManager } from './portfolio/watchlist.js';
-import { seedCuratedTokens } from './data/seed.js';
+import { seedCuratedTokens, repairCuratedTokenAddresses } from './data/seed.js';
 
 async function main() {
   // Initialise RuntimeConfig — overlays env defaults with any saved DB settings
@@ -55,6 +55,8 @@ async function main() {
 
   // Seed curated token list (idempotent)
   seedCuratedTokens();
+  // Fix any curated tokens that Alchemy seeded with an empty address before the curated seed ran
+  repairCuratedTokenAddresses();
 
   // Portfolio optimizer dependencies — created after network restore
   let candleService = new CandleService(botState.activeNetwork);
@@ -62,6 +64,10 @@ async function main() {
   // Pre-populate candles from snapshot history (eliminates 6.5hr warmup gap)
   const warmupSymbols = ASSET_REGISTRY.filter(a => a.symbol !== 'USDC').map(a => a.symbol);
   candleService.warmupFromSnapshots(warmupSymbols, botState.activeNetwork);
+
+  logger.info('Backfilling historical candles from Coinbase REST…');
+  await candleService.backfillHistoricalCandles();
+  logger.info('Candle backfill complete');
 
   const candleStrategy = new CandleStrategy();
   const riskGuard = new RiskGuard(runtimeConfig);
