@@ -115,6 +115,13 @@ async function main() {
   botState.setStatus('running');
   logger.info('Bot running. Dashboard: http://localhost:' + config.WEB_PORT);
 
+  // Startup rebalance check — fires immediately after first data is available
+  setTimeout(() => {
+    optimizer.tick(botState.activeNetwork).catch(err =>
+      logger.warn(`Startup optimizer tick failed: ${err}`)
+    );
+  }, 5000);
+
   const shutdown = async () => {
     logger.info('Shutting down...');
     botState.setStatus('stopped');
