@@ -142,6 +142,14 @@ export class PortfolioOptimizer {
       const usdValue = assetUsdValues.get(sym) ?? 0;
       const currentWeight = totalPortfolioUsd > 0 ? (usdValue / totalPortfolioUsd) * 100 : 0;
 
+      logger.debug(
+        `[optimizer] ${sym}: score=${score.toFixed(1)} confidence=${confidence.toFixed(2)} ` +
+        `candles=15m:${candles15m.length}/1h:${candles1h.length}/24h:${candles24h.length} ` +
+        `signals=${signal15m.signal}(${signal15m.strength})/` +
+        `${signal1h.signal}(${signal1h.strength})/` +
+        `${signal24h.signal}(${signal24h.strength})`
+      );
+
       scores.push({
         symbol: sym,
         score,
@@ -205,6 +213,37 @@ export class PortfolioOptimizer {
     return bestPair;
   }
 
+  findRebalanceCandidate(
+    scores: OpportunityScore[],
+    network: string,
+  ): { sell: OpportunityScore; buy: OpportunityScore } | null {
+    const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
+
+    const gridAssets = new Set(
+      (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
+        .filter(a => a.strategy === 'grid')
+        .map(a => a.symbol)
+    );
+
+    const overCapAssets = scores.filter(
+      s => s.isHeld && s.symbol !== 'USDC' && s.currentWeight > maxPosPct && !gridAssets.has(s.symbol)
+    );
+
+    if (overCapAssets.length === 0) return null;
+
+    const usdcScore = scores.find(s => s.symbol === 'USDC');
+    if (!usdcScore) return null;
+
+    // Pick the most over-cap asset
+    const worstOverCap = [...overCapAssets].sort((a, b) => b.currentWeight - a.currentWeight)[0];
+
+    logger.info(
+      `[optimizer] Rebalance: ${worstOverCap.symbol} at ${worstOverCap.currentWeight.toFixed(1)}% ` +
+      `> ${maxPosPct}% limit — rotating excess to USDC`
+    );
+    return { sell: worstOverCap, buy: usdcScore };
+  }
+
   async tick(network: string): Promise<void> {
     // 1. Compute scores
     const scores = this.computeScores(network);
@@ -256,8 +295,11 @@ export class PortfolioOptimizer {
       return;
     }
 
-    // 6. Find rotation candidate
-    const candidate = this.findRotationCandidate(scores, network);
+    // 6. Find rotation candidate (fall back to rebalance if over-cap with no normal candidate)
+    const candidate =
+      this.findRotationCandidate(scores, network) ??
+      this.findRebalanceCandidate(scores, network);
+
     if (!candidate) {
       logger.debug('PortfolioOptimizer: no rotation candidate found');
       return;

@@ -63,6 +63,7 @@ vi.mock('../src/assets/registry.js', () => ({
 // ── Import after mocks ──
 const { PortfolioOptimizer } = await import('../src/trading/optimizer.js');
 import type { CandleSignal } from '../src/strategy/candle.js';
+import type { OpportunityScore } from '../src/trading/optimizer.js';
 
 // ── Helpers ──
 function makeCandleArray(count: number, overrides: Partial<{ close: number; volume: number; source: string }> = {}) {
@@ -288,6 +289,75 @@ describe('PortfolioOptimizer', () => {
 
       // Risk guard should never be called when risk-off
       expect(riskGuard.checkRotation).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('findRebalanceCandidate', () => {
+    function buildTestOptimizer(configOverrides: Record<string, any> = {}) {
+      return new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy(),
+        makeMockRiskGuard(),
+        makeMockExecutor(),
+        makeMockConfig({ MAX_POSITION_PCT: 40, ...configOverrides }),
+      );
+    }
+
+    function makeScore(symbol: string, currentWeight: number, isHeld: boolean): OpportunityScore {
+      const holdSignal: CandleSignal = { signal: 'hold', strength: 0, reason: 'test' };
+      return {
+        symbol,
+        score: 0,
+        confidence: 0.4,
+        signals: { candle15m: holdSignal, candle1h: holdSignal, candle24h: holdSignal },
+        currentWeight,
+        isHeld,
+      };
+    }
+
+    it('returns null when all positions are within MAX_POSITION_PCT', () => {
+      const optimizer = buildTestOptimizer();
+      const scores: OpportunityScore[] = [
+        makeScore('ETH', 35, true),
+        makeScore('USDC', 0, true),
+      ];
+      expect(optimizer.findRebalanceCandidate(scores, 'base-mainnet')).toBeNull();
+    });
+
+    it('returns over-cap asset → USDC pair when ETH exceeds MAX_POSITION_PCT', () => {
+      const optimizer = buildTestOptimizer();
+      const scores: OpportunityScore[] = [
+        makeScore('ETH', 46, true),
+        makeScore('USDC', 0, true),
+      ];
+      const candidate = optimizer.findRebalanceCandidate(scores, 'base-mainnet');
+      expect(candidate).not.toBeNull();
+      expect(candidate!.sell.symbol).toBe('ETH');
+      expect(candidate!.buy.symbol).toBe('USDC');
+    });
+
+    it('selects the most over-cap asset when multiple exceed the limit', () => {
+      const optimizer = buildTestOptimizer();
+      const scores: OpportunityScore[] = [
+        makeScore('ETH', 45, true),
+        makeScore('CBBTC', 50, true),
+        makeScore('USDC', 0, true),
+      ];
+      const candidate = optimizer.findRebalanceCandidate(scores, 'base-mainnet');
+      expect(candidate!.sell.symbol).toBe('CBBTC');
+    });
+
+    it('ignores grid-strategy assets even when over cap', () => {
+      mockGetActiveAssets.all.mockReturnValue([
+        { symbol: 'ETH', strategy: 'grid', network: 'base-mainnet' },
+      ]);
+      const optimizer = buildTestOptimizer();
+      const scores: OpportunityScore[] = [
+        makeScore('ETH', 46, true),
+        makeScore('USDC', 0, true),
+      ];
+      const candidate = optimizer.findRebalanceCandidate(scores, 'base-mainnet');
+      expect(candidate).toBeNull();
     });
   });
 
