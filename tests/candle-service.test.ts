@@ -299,4 +299,58 @@ describe('CandleService', () => {
       expect(storedCandle.source).toBe('coinbase');
     });
   });
+
+  describe('backfillHistoricalCandles', () => {
+    const dummyCandle = {
+      symbol: 'ETH',
+      network: 'base-mainnet',
+      interval: '15m',
+      openTime: new Date(1700000000 * 1000).toISOString(),
+      open: 2000,
+      high: 2100,
+      low: 1900,
+      close: 2050,
+      volume: 100,
+      source: 'coinbase' as const,
+    };
+
+    it('calls storeCandles for each pair/interval combination on normal path', async () => {
+      const svc = new CandleService('base-mainnet', ['ETH-USD', 'BTC-USD']);
+
+      vi.spyOn(svc, 'fetchCoinbaseCandles').mockResolvedValue([dummyCandle]);
+      const storeSpy = vi.spyOn(svc as any, 'storeCandles').mockImplementation(() => {});
+
+      await svc.backfillHistoricalCandles();
+
+      // 2 pairs × 3 intervals = 6 calls
+      expect(storeSpy).toHaveBeenCalledTimes(6);
+    });
+
+    it('does not call storeCandles when fetchCoinbaseCandles returns empty array', async () => {
+      const svc = new CandleService('base-mainnet', ['ETH-USD']);
+
+      vi.spyOn(svc, 'fetchCoinbaseCandles').mockResolvedValue([]);
+      const storeSpy = vi.spyOn(svc as any, 'storeCandles').mockImplementation(() => {});
+
+      await svc.backfillHistoricalCandles();
+
+      expect(storeSpy).not.toHaveBeenCalled();
+    });
+
+    it('resolves without throwing when one pair fetch fails and still stores successful results', async () => {
+      const svc = new CandleService('base-mainnet', ['ETH-USD', 'BTC-USD']);
+
+      vi.spyOn(svc, 'fetchCoinbaseCandles').mockImplementation(async (pair) => {
+        if (pair === 'ETH-USD') throw new Error('fetch failed for ETH-USD');
+        return [dummyCandle];
+      });
+      const storeSpy = vi.spyOn(svc as any, 'storeCandles').mockImplementation(() => {});
+
+      // Should not throw
+      await expect(svc.backfillHistoricalCandles()).resolves.toBeUndefined();
+
+      // BTC-USD has 3 intervals, each returning 1 candle → 3 storeCandles calls
+      expect(storeSpy).toHaveBeenCalledTimes(3);
+    });
+  });
 });
