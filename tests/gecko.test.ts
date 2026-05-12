@@ -10,14 +10,15 @@ vi.mock('../src/core/logger.js', () => ({ logger: { info: vi.fn(), warn: vi.fn()
 // Mock db queries — pool cache stored in settings table
 vi.mock('../src/data/db.js', () => ({
   db: {},
-  queries: {
+  queries: {},
+  settingQueries: {
     getSetting: { get: vi.fn() },
     upsertSetting: { run: vi.fn() },
   },
 }));
 
 import { GeckoTerminalService } from '../src/services/gecko.js';
-import { queries } from '../src/data/db.js';
+import { settingQueries } from '../src/data/db.js';
 
 describe('GeckoTerminalService.getPoolAddress', () => {
   let svc: GeckoTerminalService;
@@ -28,7 +29,7 @@ describe('GeckoTerminalService.getPoolAddress', () => {
   });
 
   it('returns cached pool address from settings table', async () => {
-    const mockGet = queries.getSetting.get as ReturnType<typeof vi.fn>;
+    const mockGet = settingQueries.getSetting.get as ReturnType<typeof vi.fn>;
     mockGet.mockReturnValue({ value: '0xpooladdress' });
 
     const result = await svc.getPoolAddress('0xtokenaddress');
@@ -37,7 +38,7 @@ describe('GeckoTerminalService.getPoolAddress', () => {
   });
 
   it('fetches pool from API when not cached, stores result', async () => {
-    const mockGet = queries.getSetting.get as ReturnType<typeof vi.fn>;
+    const mockGet = settingQueries.getSetting.get as ReturnType<typeof vi.fn>;
     mockGet.mockReturnValue(undefined);
 
     fetchMock.mockResolvedValue({
@@ -49,14 +50,12 @@ describe('GeckoTerminalService.getPoolAddress', () => {
 
     const result = await svc.getPoolAddress('0xtoken123');
     expect(result).toBe('0xfreshpool');
-    expect(queries.getSetting.get).toHaveBeenCalledWith('gecko_pool_0xtoken123');
-    expect(queries.upsertSetting.run).toHaveBeenCalledWith(
-      expect.objectContaining({ key: 'gecko_pool_0xtoken123', value: '0xfreshpool' }),
-    );
+    expect(settingQueries.getSetting.get).toHaveBeenCalledWith('gecko_pool_0xtoken123');
+    expect(settingQueries.upsertSetting.run).toHaveBeenCalledWith('gecko_pool_0xtoken123', '0xfreshpool');
   });
 
   it('returns null when API returns no pools', async () => {
-    const mockGet = queries.getSetting.get as ReturnType<typeof vi.fn>;
+    const mockGet = settingQueries.getSetting.get as ReturnType<typeof vi.fn>;
     mockGet.mockReturnValue(undefined);
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
 
@@ -72,7 +71,7 @@ describe('GeckoTerminalService.fetchCandles', () => {
     vi.clearAllMocks();
     svc = new GeckoTerminalService();
     // Pool already cached
-    (queries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue({ value: '0xpool' });
+    (settingQueries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue({ value: '0xpool' });
   });
 
   it('maps GeckoTerminal OHLCV list to Candle objects', async () => {
@@ -107,7 +106,7 @@ describe('GeckoTerminalService.fetchCandles', () => {
   });
 
   it('returns [] when pool not found', async () => {
-    (queries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+    (settingQueries.getSetting.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
     fetchMock.mockResolvedValue({ ok: true, json: async () => ({ data: [] }) });
 
     const candles = await svc.fetchCandles('0xunknown', 'UNKNOWN', 'base-mainnet', '1h');

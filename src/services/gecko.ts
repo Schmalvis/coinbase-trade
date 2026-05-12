@@ -1,5 +1,5 @@
 import { logger } from '../core/logger.js';
-import { queries } from '../data/db.js';
+import { settingQueries } from '../data/db.js';
 
 const GECKO_BASE = 'https://api.geckoterminal.com/api/v2';
 const RATE_LIMIT_MS = 4000; // 4s between token requests (~15 req/min)
@@ -30,7 +30,7 @@ export class GeckoTerminalService {
 
   async getPoolAddress(tokenAddress: string): Promise<string | null> {
     const cacheKey = `gecko_pool_${tokenAddress.toLowerCase()}`;
-    const cached = queries.getSetting.get(cacheKey) as { value: string } | undefined;
+    const cached = settingQueries.getSetting.get(cacheKey) as { value: string } | undefined;
     if (cached) return cached.value;
 
     const url = `${GECKO_BASE}/networks/base/tokens/${tokenAddress}/pools?page=1`;
@@ -44,7 +44,7 @@ export class GeckoTerminalService {
       if (!body.data?.length) return null;
 
       const poolAddress = body.data[0].attributes.address;
-      queries.upsertSetting.run({ key: cacheKey, value: poolAddress });
+      settingQueries.upsertSetting.run(cacheKey, poolAddress);
       logger.info(`GeckoTerminal: cached pool ${poolAddress} for ${tokenAddress}`);
       return poolAddress;
     } catch (err) {
