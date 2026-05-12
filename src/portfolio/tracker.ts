@@ -185,6 +185,10 @@ export async function startPortfolioTracker(
           // Skip registry assets — they're already priced/balanced by the main poll loop above
           const activePending = allDiscovered.filter(r => r.status !== 'dismissed' && !registrySymbols.has(r.symbol.toUpperCase()));
           for (const row of activePending) {
+            if (!row.address) {
+              logger.warn(`Skipping pricing for ${row.symbol}: address is empty — run repairCuratedTokenAddresses or set address manually`);
+              continue;
+            }
             try {
               const prices = await tools.getTokenPrices([`base:${row.address}`]);
               let price = (prices[`base:${row.address}`] as any)?.usd ?? 0;

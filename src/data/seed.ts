@@ -39,3 +39,31 @@ export function seedCuratedTokens(): void {
   }
   if (seeded > 0) logger.info(`Seeded ${seeded} curated tokens into discovered_assets (pending)`);
 }
+
+/**
+ * Repairs discovered_assets rows where Alchemy seeded a curated token with an empty/null
+ * address before the curated seed ran. The correct-address row (from seedCuratedTokens) exists
+ * as 'pending' while the bad empty-address row is 'active' — we transfer the status and dismiss
+ * the bad row so GeckoTerminal and the pricing loop can operate correctly.
+ */
+export function repairCuratedTokenAddresses(): void {
+  const findBad = db.prepare(`
+    SELECT status FROM discovered_assets
+    WHERE UPPER(symbol) = UPPER(?) AND network = ? AND (address = '' OR address IS NULL) AND status != 'dismissed'
+  `);
+  const promoteCorrect = db.prepare(`
+    UPDATE discovered_assets SET status = ? WHERE address = ? AND network = ?
+  `);
+  const dismissBad = db.prepare(`
+    UPDATE discovered_assets SET status = 'dismissed'
+    WHERE (address = '' OR address IS NULL) AND UPPER(symbol) = UPPER(?) AND network = ?
+  `);
+
+  for (const token of CURATED_TOKENS) {
+    const badRow = findBad.get(token.symbol, token.network) as { status: string } | undefined;
+    if (!badRow) continue;
+    promoteCorrect.run(badRow.status, token.address, token.network);
+    dismissBad.run(token.symbol, token.network);
+    logger.info(`Repaired ${token.symbol}: transferred status '${badRow.status}' from empty-address row to ${token.address}`);
+  }
+}
