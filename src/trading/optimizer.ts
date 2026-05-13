@@ -296,9 +296,10 @@ export class PortfolioOptimizer {
     }
 
     // 6. Find rotation candidate (fall back to rebalance if over-cap with no normal candidate)
-    const candidate =
-      this.findRotationCandidate(scores, network) ??
-      this.findRebalanceCandidate(scores, network);
+    const rotationCandidate = this.findRotationCandidate(scores, network);
+    const rebalanceCandidate = rotationCandidate ? null : this.findRebalanceCandidate(scores, network);
+    const candidate = rotationCandidate ?? rebalanceCandidate;
+    const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
 
     if (!candidate) {
       logger.debug('PortfolioOptimizer: no rotation candidate found');
@@ -326,7 +327,16 @@ export class PortfolioOptimizer {
       sellPrice = snap?.price_usd ?? 0;
     }
     const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) * sellPrice;
-    const sellAmount = sellUsdValue * 0.1; // rotate 10% of held position
+    const maxPosPctForSizing = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
+    const sellAmount = isRebalance
+      ? Math.max(0, (candidate.sell.currentWeight - maxPosPctForSizing) / 100 * totalPortfolioUsd)
+      : sellUsdValue * 0.1;
+
+    // Rebalance excess too small to clear the executor's $2 min-trade floor — skip silently
+    if (isRebalance && sellAmount < 2) {
+      logger.debug(`[optimizer] Rebalance too small ($${sellAmount.toFixed(2)}) — excess below $2 min, waiting`);
+      return;
+    }
 
     // 8. Check RiskGuard
     const proposal = {
@@ -336,6 +346,7 @@ export class PortfolioOptimizer {
       estimatedGainPct,
       estimatedFeePct,
       buyTargetWeightPct: candidate.buy.currentWeight + (sellAmount / (totalPortfolioUsd || 1)) * 100,
+      isRebalance,
     };
 
     const decision = this.riskGuard.checkRotation(proposal, network, totalPortfolioUsd);

@@ -41,6 +41,7 @@ export interface RotationProposal {
   estimatedGainPct: number;
   estimatedFeePct: number;
   buyTargetWeightPct: number; // what % of portfolio the buy asset would be after
+  isRebalance?: boolean;    // true = risk-management trim, skip profit/fee gates
 }
 
 export interface RiskDecision {
@@ -86,10 +87,10 @@ export class RiskGuard {
       return { approved: false, vetoReason: `Daily rotation cap (${todayCount}/${maxRotations})` };
     }
 
-    // 4. Position size limit
+    // 4. Position size limit (skip for rebalances — buy is USDC, not subject to cap)
     const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
     let adjustedAmount = proposal.sellAmount;
-    if (proposal.buyTargetWeightPct > maxPosPct) {
+    if (!proposal.isRebalance && proposal.buyTargetWeightPct > maxPosPct) {
       const reduction = (proposal.buyTargetWeightPct - maxPosPct) / proposal.buyTargetWeightPct;
       adjustedAmount = proposal.sellAmount * (1 - reduction);
       if (adjustedAmount < portfolioUsd * 0.01) {
@@ -98,37 +99,42 @@ export class RiskGuard {
       }
     }
 
-    // 5. Single rotation size cap
+    // 5. Single rotation size cap (skip for rebalances — must clear full excess in one pass)
     const maxRotPct = this.runtimeConfig.get('MAX_ROTATION_PCT') as number;
-    const rotPct = (adjustedAmount / portfolioUsd) * 100;
-    if (rotPct > maxRotPct) {
-      adjustedAmount = portfolioUsd * maxRotPct / 100;
+    if (!proposal.isRebalance) {
+      const rotPct = (adjustedAmount / portfolioUsd) * 100;
+      if (rotPct > maxRotPct) {
+        adjustedAmount = portfolioUsd * maxRotPct / 100;
+      }
     }
 
-    // 4b. Memecoin combined cap
-    const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
-    const memePositions = this.getMemePositionsUsd();
-    const memeVeto = getMemecoincapVeto(proposal.buySymbol, proposal.sellAmount, memePositions, portfolioUsd, memeCapPct);
-    if (memeVeto) {
-      this.logDecision('memecoin_cap_veto', memeVeto);
-      return { approved: false, vetoReason: memeVeto };
+    // 4b. Memecoin combined cap (not applicable to rebalances — buy is always USDC)
+    if (!proposal.isRebalance) {
+      const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
+      const memePositions = this.getMemePositionsUsd();
+      const memeVeto = getMemecoincapVeto(proposal.buySymbol, proposal.sellAmount, memePositions, portfolioUsd, memeCapPct);
+      if (memeVeto) {
+        this.logDecision('memecoin_cap_veto', memeVeto);
+        return { approved: false, vetoReason: memeVeto };
+      }
     }
 
-    // 5b. Minimum absolute USD profit check
-    const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 1.0;
-    const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
-    if (estimatedProfitUsd < minProfitUsd) {
-      this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
-      return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
+    // 5b & 6: Profit/fee gates — skip for rebalances (risk management, not profit-seeking)
+    if (!proposal.isRebalance) {
+      const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 1.0;
+      const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
+      if (estimatedProfitUsd < minProfitUsd) {
+        this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
+        return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
+      }
+
+      if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.5) {
+        this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.5× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
+        return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.5× fee threshold (${(proposal.estimatedFeePct * 1.5).toFixed(2)}%)` };
+      }
     }
 
-    // 6. Fee check: require gain of at least 1.5× fees (not just break-even)
-    if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.5) {
-      this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.5× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
-      return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.5× fee threshold (${(proposal.estimatedFeePct * 1.5).toFixed(2)}%)` };
-    }
-
-    this.logDecision('risk_approved', detail);
+    this.logDecision(proposal.isRebalance ? 'rebalance_approved' : 'risk_approved', detail);
     return { approved: true, adjustedAmount };
   }
 
