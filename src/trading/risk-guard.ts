@@ -121,7 +121,7 @@ export class RiskGuard {
 
     // 5b & 6: Profit/fee gates — skip for rebalances (risk management, not profit-seeking)
     if (!proposal.isRebalance) {
-      const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 0.10;
+      const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 0.01;
       const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
       if (estimatedProfitUsd < minProfitUsd) {
         this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
