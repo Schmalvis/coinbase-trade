@@ -417,43 +417,70 @@ export class TradeExecutor {
   async executeRotation(
     sellSymbol: string,
     buySymbol: string,
-    sellAmount: number,
+    sellAmountUsd: number,  // USD value — converted to token units internally
     rotationId?: number,
   ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string }> {
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
-    // Leg 1: Sell → USDC (bypass cooldown between legs)
+    // Convert USD sell amount to native token units for leg 1.
+    // Previously this passed USD directly to tools.swap which expects token units,
+    // causing swaps 100-1000x larger than intended (e.g. "8.87 ETH" instead of "$8.87 of ETH").
+    let sellTokenAmount: number;
+    if (sellSymbol === 'USDC') {
+      sellTokenAmount = sellAmountUsd;
+    } else {
+      let price = 0;
+      if (sellSymbol === 'ETH') {
+        price = botState.lastPrice ?? 0;
+      } else {
+        const snap = (queries.recentAssetSnapshots.all(sellSymbol, 1) as { price_usd: number }[])[0];
+        price = snap?.price_usd ?? 0;
+      }
+      if (price <= 0) {
+        logger.error(`executeRotation: no price for ${sellSymbol}, cannot convert sell amount`);
+        return { status: 'failed' };
+      }
+      sellTokenAmount = sellAmountUsd / price;
+    }
+
+    // Leg 1: Sell → USDC
     let sellTxHash: string | undefined;
     if (!dryRun) {
       try {
-        const result = await this.tools.swap(sellSymbol, 'USDC', sellAmount.toString());
+        const result = await this.tools.swap(sellSymbol, 'USDC', sellTokenAmount.toString());
         sellTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
         return { status: 'failed' };
       }
     } else {
-      logger.info(`[DRY RUN] Rotation leg 1: sell ${sellAmount} ${sellSymbol} → USDC`);
+      logger.info(`[DRY RUN] Rotation leg 1: sell ${sellTokenAmount.toFixed(8)} ${sellSymbol} (~$${sellAmountUsd.toFixed(2)}) → USDC`);
     }
 
-    // Leg 2: USDC → Buy target
+    // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
+    if (buySymbol === 'USDC') {
+      botState.recordTrade(new Date());
+      return { status: 'executed', sellTxHash };
+    }
+
+    // Leg 2: USDC → Buy target. Spend only the proceeds from leg 1, not all USDC.
+    const leg2UsdcAmount = sellAmountUsd * 0.98; // 2% buffer for fees
     let buyTxHash: string | undefined;
     if (!dryRun) {
       try {
-        // Fetch fresh USDC balance after leg 1 (H1 — stale balance fix)
         let freshUsdcBalance: number;
         try {
           freshUsdcBalance = await this.tools.getErc20BalanceBySymbol('USDC');
         } catch {
           freshUsdcBalance = botState.lastUsdcBalance ?? 0;
         }
-        const amount = Math.max(freshUsdcBalance * 0.95, 0); // leave 5% buffer
-        if (amount <= 0) {
-          logger.warn('Rotation leg 2 skipped: no USDC balance after sell');
+        if (freshUsdcBalance < leg2UsdcAmount * 0.5) {
+          logger.warn(`Rotation leg 2 skipped: USDC $${freshUsdcBalance.toFixed(2)} insufficient for $${leg2UsdcAmount.toFixed(2)}`);
           botState.recordTrade(new Date());
           return { status: 'leg1_done', sellTxHash };
         }
-        const result = await this.tools.swap('USDC', buySymbol, amount.toString());
+        const actualLeg2 = Math.min(leg2UsdcAmount, freshUsdcBalance * 0.99);
+        const result = await this.tools.swap('USDC', buySymbol, actualLeg2.toString());
         buyTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 2 failed (buy ${buySymbol})`, err);
@@ -461,10 +488,10 @@ export class TradeExecutor {
         return { status: 'leg1_done', sellTxHash };
       }
     } else {
-      logger.info(`[DRY RUN] Rotation leg 2: buy ${buySymbol} with USDC`);
+      logger.info(`[DRY RUN] Rotation leg 2: buy ${buySymbol} with $${leg2UsdcAmount.toFixed(2)} USDC`);
     }
 
-    botState.recordTrade(new Date()); // set cooldown after full rotation
+    botState.recordTrade(new Date());
     return { status: 'executed', sellTxHash, buyTxHash };
   }
 

@@ -184,8 +184,15 @@ export class PortfolioOptimizer {
         .map(a => a.symbol)
     );
 
-    // Sell candidates: held assets with score below threshold (excluding grid assets)
-    const sellCandidates = scores.filter(s => s.isHeld && s.score < sellThreshold && !gridAssets.has(s.symbol));
+    // Sell candidates: held assets with score below threshold (excluding grid assets).
+    // USDC is also a valid sell candidate when a non-USDC asset scores above buy threshold —
+    // this enables USDC → strong-asset rotations when the market turns bullish.
+    const hasStrongBuyCandidate = scores.some(s => s.symbol !== 'USDC' && s.score > buyThreshold);
+    const sellCandidates = scores.filter(s =>
+      s.isHeld &&
+      !gridAssets.has(s.symbol) &&
+      (s.score < sellThreshold || (s.symbol === 'USDC' && hasStrongBuyCandidate))
+    );
 
     // Buy candidates: any asset with score above threshold, OR USDC (always valid defensive rotation target)
     const buyCandidates = scores.filter(s => s.score > buyThreshold || s.symbol === 'USDC');
