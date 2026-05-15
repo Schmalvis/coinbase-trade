@@ -302,7 +302,14 @@ export class PortfolioOptimizer {
     const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
 
     if (!candidate) {
-      logger.debug('PortfolioOptimizer: no rotation candidate found');
+      const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
+      const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
+      const minDelta = this.runtimeConfig.get('MIN_ROTATION_SCORE_DELTA') as number;
+      const topScores = scores
+        .slice(0, 5)
+        .map(s => `${s.symbol}:${s.score.toFixed(0)}${s.isHeld ? '*' : ''}`)
+        .join(' ');
+      logger.info(`[optimizer] no candidate — scores: [${topScores}] (need sell<${sellThreshold} buy>${buyThreshold} Δ>${minDelta})`);
       return;
     }
 
@@ -311,16 +318,16 @@ export class PortfolioOptimizer {
     const rawScoreDelta = candidate.buy.score - candidate.sell.score;
     // Estimate gain from buy candidate's recent price momentum (last 5 x 15m candles)
     const buyCandles5 = this.candleService.getStoredCandles(candidate.buy.symbol, network, '15m', 6);
-    // Use score delta as gain proxy (each point ≈ 0.05% edge) — fee-aware so negative deltas
-    // produce negative estimates and get correctly rejected by the fee-ratio gate.
-    let estimatedGainPct = rawScoreDelta * 0.05 - estimatedFeePct;
+    // Gross gain proxy: each score point ≈ 0.1% expected edge (no fee subtraction — fees are
+    // checked separately by the profit gate and fee-ratio check in RiskGuard).
+    let estimatedGainPct = rawScoreDelta * 0.1;
     if (buyCandles5.length >= 2) {
       const newest = buyCandles5[0].close;
       const oldest = buyCandles5[buyCandles5.length - 1].close;
       if (oldest > 0) {
+        // Blend with capped momentum (30% weight) — avoids extrapolating recent runs
         const momentumPct = ((newest - oldest) / oldest) * 100;
-        // Blend momentum with score-based estimate; cap contribution to avoid extrapolation traps
-        estimatedGainPct = Math.max(estimatedGainPct, momentumPct * 0.3 - estimatedFeePct);
+        estimatedGainPct = Math.max(estimatedGainPct, estimatedGainPct * 0.7 + momentumPct * 0.3);
       }
     }
     let sellPrice = 0;

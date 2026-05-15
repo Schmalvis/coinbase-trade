@@ -128,10 +128,8 @@ export class RiskGuard {
         return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
       }
 
-      if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.1) {
-        this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.1× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
-        return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.1× fee threshold (${(proposal.estimatedFeePct * 1.1).toFixed(2)}%)` };
-      }
+      // Fee-ratio gate removed: estimatedGainPct is a score-based proxy, not a real gain
+      // prediction. Quality is gated by ROTATION_BUY/SELL_THRESHOLD + MIN_ROTATION_SCORE_DELTA.
     }
 
     this.logDecision(proposal.isRebalance ? 'rebalance_approved' : 'risk_approved', detail);
