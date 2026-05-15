@@ -141,6 +141,8 @@ export class PortfolioOptimizer {
       const balance = botState.assetBalances.get(sym) ?? 0;
       const usdValue = assetUsdValues.get(sym) ?? 0;
       const currentWeight = totalPortfolioUsd > 0 ? (usdValue / totalPortfolioUsd) * 100 : 0;
+      // Require >$2 USD value to be considered "held" — avoids dust triggering sell candidates
+      const isHeld = usdValue >= 2;
 
       logger.debug(
         `[optimizer] ${sym}: score=${score.toFixed(1)} confidence=${confidence.toFixed(2)} ` +
@@ -160,7 +162,7 @@ export class PortfolioOptimizer {
           candle24h: signal24h,
         },
         currentWeight,
-        isHeld: balance > 0,
+        isHeld,
       });
     }
 
@@ -185,8 +187,8 @@ export class PortfolioOptimizer {
     // Sell candidates: held assets with score below threshold (excluding grid assets)
     const sellCandidates = scores.filter(s => s.isHeld && s.score < sellThreshold && !gridAssets.has(s.symbol));
 
-    // Buy candidates: any asset with score above threshold
-    const buyCandidates = scores.filter(s => s.score > buyThreshold);
+    // Buy candidates: any asset with score above threshold, OR USDC (always valid defensive rotation target)
+    const buyCandidates = scores.filter(s => s.score > buyThreshold || s.symbol === 'USDC');
 
     if (sellCandidates.length === 0 || buyCandidates.length === 0) return null;
 
@@ -306,7 +308,6 @@ export class PortfolioOptimizer {
       const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
       const minDelta = this.runtimeConfig.get('MIN_ROTATION_SCORE_DELTA') as number;
       const topScores = scores
-        .slice(0, 5)
         .map(s => `${s.symbol}:${s.score.toFixed(0)}${s.isHeld ? '*' : ''}`)
         .join(' ');
       logger.info(`[optimizer] no candidate — scores: [${topScores}] (need sell<${sellThreshold} buy>${buyThreshold} Δ>${minDelta})`);
