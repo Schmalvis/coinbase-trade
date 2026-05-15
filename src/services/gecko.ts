@@ -20,12 +20,18 @@ export interface Candle {
 export class GeckoTerminalService {
   private lastRequestAt = 0;
 
-  private async throttledFetch(url: string): Promise<Response> {
+  private async throttledFetch(url: string, retries = 3): Promise<Response> {
     const now = Date.now();
     const wait = RATE_LIMIT_MS - (now - this.lastRequestAt);
     if (wait > 0) await new Promise(r => setTimeout(r, wait));
     this.lastRequestAt = Date.now();
-    return fetch(url, { headers: { Accept: 'application/json;version=20230302' } });
+    const res = await fetch(url, { headers: { Accept: 'application/json;version=20230302' } });
+    if (res.status === 429 && retries > 0) {
+      const backoff = RATE_LIMIT_MS * (4 - retries); // 4s, 8s, 12s
+      await new Promise(r => setTimeout(r, backoff));
+      return this.throttledFetch(url, retries - 1);
+    }
+    return res;
   }
 
   async getPoolAddress(tokenAddress: string): Promise<string | null> {

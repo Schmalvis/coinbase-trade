@@ -311,14 +311,18 @@ export class PortfolioOptimizer {
     const rawScoreDelta = candidate.buy.score - candidate.sell.score;
     // Estimate gain from buy candidate's recent price momentum (last 5 x 15m candles)
     const buyCandles5 = this.candleService.getStoredCandles(candidate.buy.symbol, network, '15m', 6);
-    let estimatedGainPct = 0;
+    // Use score delta as gain proxy (each point ≈ 0.05% edge) — fee-aware so negative deltas
+    // produce negative estimates and get correctly rejected by the fee-ratio gate.
+    let estimatedGainPct = rawScoreDelta * 0.05 - estimatedFeePct;
     if (buyCandles5.length >= 2) {
       const newest = buyCandles5[0].close;
       const oldest = buyCandles5[buyCandles5.length - 1].close;
-      if (oldest > 0) estimatedGainPct = Math.max(0, ((newest - oldest) / oldest) * 100);
+      if (oldest > 0) {
+        const momentumPct = ((newest - oldest) / oldest) * 100;
+        // Blend momentum with score-based estimate; cap contribution to avoid extrapolation traps
+        estimatedGainPct = Math.max(estimatedGainPct, momentumPct * 0.3 - estimatedFeePct);
+      }
     }
-    // Conservative fallback if no candle data (1pt score delta ≈ 0.01% gain)
-    if (estimatedGainPct === 0) estimatedGainPct = rawScoreDelta * 0.01;
     let sellPrice = 0;
     if (candidate.sell.symbol === 'USDC') sellPrice = 1;
     else if (candidate.sell.symbol === 'ETH') sellPrice = botState.lastPrice ?? 0;

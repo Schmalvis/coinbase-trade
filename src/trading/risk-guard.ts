@@ -121,16 +121,16 @@ export class RiskGuard {
 
     // 5b & 6: Profit/fee gates — skip for rebalances (risk management, not profit-seeking)
     if (!proposal.isRebalance) {
-      const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 1.0;
+      const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 0.10;
       const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
       if (estimatedProfitUsd < minProfitUsd) {
         this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
         return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
       }
 
-      if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.5) {
-        this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.5× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
-        return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.5× fee threshold (${(proposal.estimatedFeePct * 1.5).toFixed(2)}%)` };
+      if (proposal.estimatedGainPct < proposal.estimatedFeePct * 1.1) {
+        this.logDecision('risk_veto', `Gain ${proposal.estimatedGainPct.toFixed(2)}% < 1.1× fees ${proposal.estimatedFeePct.toFixed(2)}%`);
+        return { approved: false, vetoReason: `Gain (${proposal.estimatedGainPct.toFixed(2)}%) below 1.1× fee threshold (${(proposal.estimatedFeePct * 1.1).toFixed(2)}%)` };
       }
     }
 
