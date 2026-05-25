@@ -88,7 +88,7 @@ export function generateReport(db: Database.Database): ReportData {
     FROM trades
     WHERE dry_run = 0
       AND action = 'sell'
-      AND realized_pnl IS NOT NULL
+      AND symbol IS NOT NULL
       AND datetime(timestamp) >= datetime('now', '-7 days')
     GROUP BY symbol, network
   `).all() as TokenMetric[];

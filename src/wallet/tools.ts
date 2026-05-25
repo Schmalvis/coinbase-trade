@@ -86,19 +86,19 @@ export class CoinbaseTools {
     return this.getErc20Balance(this.getTokenAddress(symbol));
   }
 
-  async getSwapPrice(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapPrice> {
+  async getSwapPrice(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string, fromAddress?: string, toAddress?: string): Promise<SwapPrice> {
     return this.swapService.getSwapPrice(
-      this.getTokenAddress(fromSymbol),
-      this.getTokenAddress(toSymbol),
+      fromAddress ?? this.getTokenAddress(fromSymbol),
+      toAddress ?? this.getTokenAddress(toSymbol),
       amount,
       this.walletClient.network,
     );
   }
 
-  async swap(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string): Promise<SwapResult> {
+  async swap(fromSymbol: TokenSymbol, toSymbol: TokenSymbol, amount: string, fromAddress?: string, toAddress?: string): Promise<SwapResult> {
     return this.swapService.swap(
-      this.getTokenAddress(fromSymbol),
-      this.getTokenAddress(toSymbol),
+      fromAddress ?? this.getTokenAddress(fromSymbol),
+      toAddress ?? this.getTokenAddress(toSymbol),
       amount,
       this.walletClient.network,
     );

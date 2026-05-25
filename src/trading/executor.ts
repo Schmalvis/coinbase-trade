@@ -8,8 +8,11 @@ import { SlippageCache } from './slippage-cache.js';
 import { ASSET_REGISTRY } from '../assets/registry.js';
 import { getMemecoincapVeto } from './risk-guard.js';
 
+const MAX_SHADOW_PERIOD_MS = 48 * 60 * 60 * 1000; // sanity cap — stale/corrupt values beyond 48h are ignored
+
 export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
   if (!shadowUntil) return false;
+  if (shadowUntil > Date.now() + MAX_SHADOW_PERIOD_MS) return false; // value is stale or was set incorrectly
   return Date.now() < shadowUntil;
 }
 
@@ -322,7 +325,15 @@ export class TradeExecutor {
     let status = 'executed';
 
     try {
-      const result = await this.tools.swap(fromSymbol, toSymbol, amount.toString());
+      // Resolve contract address for discovered tokens — registry/ETH/USDC resolve via getTokenAddress()
+      const tokenAddr = !this.isRegistryAsset(symbol)
+        ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(symbol) as { address: string } | undefined)?.address
+        : undefined;
+      const result = await this.tools.swap(
+        fromSymbol, toSymbol, amount.toString(),
+        signal === 'sell' ? tokenAddr : undefined,
+        signal === 'buy'  ? tokenAddr : undefined,
+      );
       txHash = result.txHash;
     } catch (err) {
       logger.error(`[${symbol}] Swap failed for ${signal}`, err);
@@ -443,11 +454,20 @@ export class TradeExecutor {
       sellTokenAmount = sellAmountUsd / price;
     }
 
+    // Resolve contract addresses for discovered tokens upfront
+    const sellAddr = !this.isRegistryAsset(sellSymbol)
+      ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(sellSymbol) as { address: string } | undefined)?.address
+      : undefined;
+    const buyAddr = !this.isRegistryAsset(buySymbol)
+      ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(buySymbol) as { address: string } | undefined)?.address
+      : undefined;
+
     // Leg 1: Sell → USDC
     let sellTxHash: string | undefined;
+    let leg1Status = 'executed';
     if (!dryRun) {
       try {
-        const result = await this.tools.swap(sellSymbol, 'USDC', sellTokenAmount.toString());
+        const result = await this.tools.swap(sellSymbol, 'USDC', sellTokenAmount.toString(), sellAddr);
         sellTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
@@ -455,7 +475,20 @@ export class TradeExecutor {
       }
     } else {
       logger.info(`[DRY RUN] Rotation leg 1: sell ${sellTokenAmount.toFixed(8)} ${sellSymbol} (~$${sellAmountUsd.toFixed(2)}) → USDC`);
+      leg1Status = 'dry_run';
     }
+
+    // Record leg 1 sell trade
+    const sellPos = this._openPositions.get(sellSymbol);
+    const sellRealizedPnl = sellPos && price > 0
+      ? (price - sellPos.entryPrice) * Math.min(sellTokenAmount, sellPos.qty)
+      : undefined;
+    this._openPositions.delete(sellSymbol);
+    this.recordTrade({
+      signal: 'sell', amountEth: sellTokenAmount, price, txHash: sellTxHash,
+      triggeredBy: 'rotation', status: leg1Status, dryRun,
+      reason: `rotation → ${buySymbol}`, realizedPnl: sellRealizedPnl, symbol: sellSymbol,
+    });
 
     // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
     if (buySymbol === 'USDC') {
@@ -480,7 +513,7 @@ export class TradeExecutor {
           return { status: 'leg1_done', sellTxHash };
         }
         const actualLeg2 = Math.min(leg2UsdcAmount, freshUsdcBalance * 0.99);
-        const result = await this.tools.swap('USDC', buySymbol, actualLeg2.toString());
+        const result = await this.tools.swap('USDC', buySymbol, actualLeg2.toString(), undefined, buyAddr);
         buyTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 2 failed (buy ${buySymbol})`, err);
@@ -490,6 +523,17 @@ export class TradeExecutor {
     } else {
       logger.info(`[DRY RUN] Rotation leg 2: buy ${buySymbol} with $${leg2UsdcAmount.toFixed(2)} USDC`);
     }
+
+    // Record leg 2 buy trade
+    const buySnapPrice = buySymbol === 'ETH' ? (botState.lastPrice ?? 0)
+      : (queries.recentAssetSnapshots.all(buySymbol, 1) as { price_usd: number }[])[0]?.price_usd ?? 0;
+    const buyTokenAmount = buySnapPrice > 0 ? leg2UsdcAmount / buySnapPrice : 0;
+    this._openPositions.set(buySymbol, { entryPrice: buySnapPrice, qty: buyTokenAmount });
+    this.recordTrade({
+      signal: 'buy', amountEth: buyTokenAmount, price: buySnapPrice, txHash: buyTxHash,
+      triggeredBy: 'rotation', status: dryRun ? 'dry_run' : 'executed', dryRun,
+      reason: `rotation from ${sellSymbol}`, symbol: buySymbol,
+    });
 
     botState.recordTrade(new Date());
     return { status: 'executed', sellTxHash, buyTxHash };

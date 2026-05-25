@@ -51,6 +51,7 @@ const schema = z.object({
   STOP_LOSS_PCT: z.coerce.number().default(8.0),
   TRAILING_STOP_PCT: z.coerce.number().default(5.0),
   MIN_ROTATION_PROFIT_USD: z.coerce.number().default(1.0),
+  ROTATION_SIZE_PCT: z.coerce.number().default(10),
   RISK_OFF_THRESHOLD: z.coerce.number().default(-10),
   RISK_ON_THRESHOLD: z.coerce.number().default(15),
   DEFAULT_FEE_ESTIMATE_PCT: z.coerce.number().default(2.0),

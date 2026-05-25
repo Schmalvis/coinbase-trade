@@ -172,6 +172,7 @@ export class PortfolioOptimizer {
   findRotationCandidate(
     scores: OpportunityScore[],
     network: string,
+    totalPortfolioUsd: number,
   ): { sell: OpportunityScore; buy: OpportunityScore } | null {
     const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
     const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
@@ -187,10 +188,13 @@ export class PortfolioOptimizer {
     // Sell candidates: held assets with score below threshold (excluding grid assets).
     // USDC is also a valid sell candidate when a non-USDC asset scores above buy threshold —
     // this enables USDC → strong-asset rotations when the market turns bullish.
+    // Skip dust positions (< $2) — too small to route and cause phantom position-limit vetoes.
+    const MIN_ROTATION_SELL_USD = 2;
     const hasStrongBuyCandidate = scores.some(s => s.symbol !== 'USDC' && s.score > buyThreshold);
     const sellCandidates = scores.filter(s =>
       s.isHeld &&
       !gridAssets.has(s.symbol) &&
+      (s.currentWeight / 100 * totalPortfolioUsd) >= MIN_ROTATION_SELL_USD &&
       (s.score < sellThreshold || (s.symbol === 'USDC' && hasStrongBuyCandidate))
     );
 
@@ -305,7 +309,7 @@ export class PortfolioOptimizer {
     }
 
     // 6. Find rotation candidate (fall back to rebalance if over-cap with no normal candidate)
-    const rotationCandidate = this.findRotationCandidate(scores, network);
+    const rotationCandidate = this.findRotationCandidate(scores, network, totalPortfolioUsd);
     const rebalanceCandidate = rotationCandidate ? null : this.findRebalanceCandidate(scores, network);
     const candidate = rotationCandidate ?? rebalanceCandidate;
     const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
@@ -349,7 +353,7 @@ export class PortfolioOptimizer {
     const maxPosPctForSizing = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
     const sellAmount = isRebalance
       ? Math.max(0, (candidate.sell.currentWeight - maxPosPctForSizing) / 100 * totalPortfolioUsd)
-      : sellUsdValue * 0.1;
+      : sellUsdValue * ((this.runtimeConfig.get('ROTATION_SIZE_PCT') as number) / 100);
 
     // Rebalance excess too small to clear the executor's $2 min-trade floor — skip silently
     if (isRebalance && sellAmount < 2) {

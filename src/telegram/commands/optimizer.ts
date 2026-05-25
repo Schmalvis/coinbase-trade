@@ -1,6 +1,6 @@
 import type { Telegraf } from 'telegraf';
 import { botState } from '../../core/state.js';
-import { queries, rotationQueries, dailyPnlQueries } from '../../data/db.js';
+import { db, queries, rotationQueries, dailyPnlQueries } from '../../data/db.js';
 import type { TradingEngine } from '../../trading/engine.js';
 import type { PortfolioOptimizer } from '../../trading/optimizer.js';
 import type { WatchlistManager } from '../../portfolio/watchlist.js';
@@ -93,6 +93,16 @@ Optimizer: ${engine.optimizerEnabled ? 'active' : 'disabled'} (${mode})`);
     botState.emitAlert('KILL SWITCH activated via Telegram');
     queries.insertEvent.run('killswitch', `Activated by ${tgCtx.from?.username ?? tgCtx.from?.id}`);
     tgCtx.reply('🚨 All trading halted. Optimizer disabled. Use /resume to restart.');
+  });
+
+  bot.command('unshadow', tgCtx => {
+    const symbol = tgCtx.message.text.split(/\s+/)[1]?.toUpperCase();
+    if (!symbol) return tgCtx.reply('Usage: /unshadow SYMBOL');
+    const result = db.prepare(
+      `UPDATE discovered_assets SET shadow_until = NULL WHERE UPPER(symbol) = UPPER(?) AND network = ?`
+    ).run(symbol, botState.activeNetwork);
+    if (result.changes === 0) return tgCtx.reply(`No active asset found for ${symbol}.`);
+    tgCtx.reply(`Shadow period cleared for ${symbol} — eligible for rotation immediately.`);
   });
 
   bot.command('optimizer', tgCtx => {

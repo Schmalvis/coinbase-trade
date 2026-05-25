@@ -16,7 +16,8 @@ export type ConfigKey =
   | 'BB_PERIOD' | 'BB_STD_DEV' | 'GRID_LEVELS' | 'GRID_AMOUNT_PCT' | 'GRID_UPPER_BOUND' | 'GRID_LOWER_BOUND' | 'GRID_RECALC_HOURS'
   | 'DASHBOARD_SECRET'
   | 'STOP_LOSS_PCT' | 'TRAILING_STOP_PCT' | 'MIN_ROTATION_PROFIT_USD'
-  | 'MEMECOIN_CAP_PCT' | 'MEMECOIN_COOLDOWN_SECONDS';
+  | 'MEMECOIN_CAP_PCT' | 'MEMECOIN_COOLDOWN_SECONDS'
+  | 'ROTATION_SIZE_PCT';
 
 export type ConfigValue = string | number | boolean | number[] | undefined;
 
@@ -39,6 +40,7 @@ const ALL_KEYS = new Set<ConfigKey>([
   'DASHBOARD_SECRET',
   'STOP_LOSS_PCT', 'TRAILING_STOP_PCT', 'MIN_ROTATION_PROFIT_USD',
   'MEMECOIN_CAP_PCT', 'MEMECOIN_COOLDOWN_SECONDS',
+  'ROTATION_SIZE_PCT',
 ]);
 
 const READ_ONLY_KEYS = new Set<ConfigKey>([
@@ -103,6 +105,7 @@ const VALIDATORS: Record<ConfigKey, Validator> = {
   MIN_ROTATION_PROFIT_USD: v => isNum(v) && (v as number) >= 0 && (v as number) <= 1000 ? null : 'must be 0–1000',
   MEMECOIN_CAP_PCT:        v => isNum(v) && (v as number) >= 1 && (v as number) <= 100 ? null : 'must be 1–100',
   MEMECOIN_COOLDOWN_SECONDS: v => isNum(v) && (v as number) >= 0 ? null : 'must be >= 0',
+  ROTATION_SIZE_PCT:       v => isNum(v) && (v as number) >= 1 && (v as number) <= 100 ? null : 'must be 1–100',
 };
 
 // Coerce string input → typed value (handles numeric keys, bool, arrays)
@@ -130,6 +133,7 @@ function coerce(key: ConfigKey, value: unknown): ConfigValue {
     'BB_PERIOD', 'BB_STD_DEV', 'GRID_LEVELS', 'GRID_AMOUNT_PCT', 'GRID_UPPER_BOUND', 'GRID_LOWER_BOUND', 'GRID_RECALC_HOURS',
     'STOP_LOSS_PCT', 'TRAILING_STOP_PCT', 'MIN_ROTATION_PROFIT_USD',
     'MEMECOIN_CAP_PCT', 'MEMECOIN_COOLDOWN_SECONDS',
+    'ROTATION_SIZE_PCT',
   ];
   if (numericKeys.includes(key) && typeof value !== 'number') {
     const n = Number(value);
