@@ -437,10 +437,11 @@ export class TradeExecutor {
     // Previously this passed USD directly to tools.swap which expects token units,
     // causing swaps 100-1000x larger than intended (e.g. "8.87 ETH" instead of "$8.87 of ETH").
     let sellTokenAmount: number;
+    let price = 0;
     if (sellSymbol === 'USDC') {
       sellTokenAmount = sellAmountUsd;
+      price = 1;
     } else {
-      let price = 0;
       if (sellSymbol === 'ETH') {
         price = botState.lastPrice ?? 0;
       } else {
