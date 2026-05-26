@@ -36,6 +36,12 @@ const mockTools = {
 // Minimal mock for queries
 const mockQueries = {
   insertTrade: { run: vi.fn() },
+  recentAssetSnapshots: { all: vi.fn().mockReturnValue([{ price_usd: 1.5 }]) },
+};
+
+// Minimal mock for discoveredAssetQueries
+const mockDiscoveredAssetQueries = {
+  getAddressBySymbol: { get: vi.fn().mockReturnValue(undefined) },
 };
 
 vi.mock('../src/core/state.js', () => ({
@@ -53,6 +59,10 @@ vi.mock('../src/core/state.js', () => ({
 vi.mock('../src/data/db.js', () => ({
   queries: {
     insertTrade: { run: (...args: unknown[]) => mockQueries.insertTrade.run(...args) },
+    recentAssetSnapshots: { all: (...args: unknown[]) => mockQueries.recentAssetSnapshots.all(...args) },
+  },
+  discoveredAssetQueries: {
+    getAddressBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getAddressBySymbol.get(...args) },
   },
 }));
 
@@ -65,6 +75,7 @@ describe('TradeExecutor.executeRotation()', () => {
     mockState.lastPrice = 3000;
     mockState.lastUsdcBalance = 50;
     mockTools.swap.mockResolvedValue({ txHash: '0xabc', status: 'success' });
+    mockDiscoveredAssetQueries.getAddressBySymbol.get.mockReturnValue(undefined);
   });
 
   it('executes both legs and returns executed with tx hashes', async () => {
@@ -80,8 +91,10 @@ describe('TradeExecutor.executeRotation()', () => {
     expect(result.sellTxHash).toBe('0xsell');
     expect(result.buyTxHash).toBe('0xbuy');
     expect(mockTools.swap).toHaveBeenCalledTimes(2);
-    expect(mockTools.swap).toHaveBeenNthCalledWith(1, 'ETH', 'USDC', '0.05');
-    expect(mockTools.swap).toHaveBeenNthCalledWith(2, 'USDC', 'CBBTC', expect.any(String));
+    // Leg 1: swap(sellSymbol, 'USDC', sellTokenAmount, sellAddr)
+    expect(mockTools.swap).toHaveBeenNthCalledWith(1, 'ETH', 'USDC', expect.any(String), undefined);
+    // Leg 2: swap('USDC', buySymbol, leg2Amount, undefined, buyAddr)
+    expect(mockTools.swap).toHaveBeenNthCalledWith(2, 'USDC', 'CBBTC', expect.any(String), undefined, undefined);
   });
 
   it('returns leg1_done when sell succeeds but buy fails', async () => {
@@ -143,5 +156,19 @@ describe('TradeExecutor.executeRotation()', () => {
     expect(result.status).toBe('leg1_done');
     expect(result.sellTxHash).toBe('0xsell');
     expect(mockState.recordTrade).toHaveBeenCalled();
+  });
+
+  it('passes discovered-token address to swap for non-registry symbols', async () => {
+    mockDiscoveredAssetQueries.getAddressBySymbol.get.mockReturnValue({ address: '0xtoken456' });
+    mockTools.swap
+      .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+      .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('MYTOKEN', 'USDC', 3);
+
+    expect(result.status).toBe('executed');
+    expect(mockTools.swap).toHaveBeenNthCalledWith(1, 'MYTOKEN', 'USDC', expect.any(String), '0xtoken456');
   });
 });

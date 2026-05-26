@@ -1,6 +1,6 @@
 import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
-import { db, queries } from '../data/db.js';
+import { db, queries, discoveredAssetQueries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
@@ -162,9 +162,7 @@ export class TradeExecutor {
 
     // Slippage pre-check for non-registry assets (buy only)
     if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
-      const assetRow = db.prepare(
-        `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
-      ).get(symbol) as { address: string } | undefined;
+      const assetRow = discoveredAssetQueries.getAddressBySymbol.get(symbol) as { address: string } | undefined;
       if (assetRow) {
         const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
         const tradeUsd = portfolioUsd * 0.1; // pre-check at 10% of portfolio
@@ -178,9 +176,7 @@ export class TradeExecutor {
 
     // Shadow period: newly-promoted tokens dry-run for 24h before live trades
     if (!this.isRegistryAsset(symbol)) {
-      const row = db.prepare(
-        `SELECT shadow_until FROM discovered_assets WHERE symbol = ? LIMIT 1`
-      ).get(symbol) as { shadow_until: number | null } | undefined;
+      const row = discoveredAssetQueries.getAssetBySymbol.get(symbol, botState.activeNetwork) as { shadow_until: number | null } | undefined;
       if (isShadowPeriod(row?.shadow_until)) {
         logger.info(`[${symbol}] Shadow period active — logging dry-run trade`);
         queries.insertTrade.run({
@@ -327,7 +323,7 @@ export class TradeExecutor {
     try {
       // Resolve contract address for discovered tokens — registry/ETH/USDC resolve via getTokenAddress()
       const tokenAddr = !this.isRegistryAsset(symbol)
-        ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(symbol) as { address: string } | undefined)?.address
+        ? (discoveredAssetQueries.getAddressBySymbol.get(symbol) as { address: string } | undefined)?.address
         : undefined;
       const result = await this.tools.swap(
         fromSymbol, toSymbol, amount.toString(),
@@ -457,10 +453,10 @@ export class TradeExecutor {
 
     // Resolve contract addresses for discovered tokens upfront
     const sellAddr = !this.isRegistryAsset(sellSymbol)
-      ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(sellSymbol) as { address: string } | undefined)?.address
+      ? (discoveredAssetQueries.getAddressBySymbol.get(sellSymbol) as { address: string } | undefined)?.address
       : undefined;
     const buyAddr = !this.isRegistryAsset(buySymbol)
-      ? (db.prepare('SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1').get(buySymbol) as { address: string } | undefined)?.address
+      ? (discoveredAssetQueries.getAddressBySymbol.get(buySymbol) as { address: string } | undefined)?.address
       : undefined;
 
     // Leg 1: Sell → USDC

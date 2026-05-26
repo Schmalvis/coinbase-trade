@@ -74,4 +74,8 @@ export const discoveredAssetQueries = {
   getAssetBySymbol: db.prepare(
     `SELECT * FROM discovered_assets WHERE UPPER(symbol) = UPPER(?) AND network = ? LIMIT 1`
   ) as Statement<[string, string], DiscoveredAssetRow>,
+
+  getAddressBySymbol: db.prepare(
+    `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
+  ) as Statement<[string], { address: string }>,
 };
