@@ -1,6 +1,6 @@
 import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
-import { db, queries, discoveredAssetQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
@@ -202,7 +202,7 @@ export class TradeExecutor {
 
     // Fetch memecoin flag once — shared by cooldown and cap checks below
     const memeRow2 = !this.isRegistryAsset(symbol)
-      ? db.prepare(`SELECT is_memecoin FROM discovered_assets WHERE symbol = ? LIMIT 1`).get(symbol) as { is_memecoin: number } | undefined
+      ? discoveredAssetQueries.getMemecoinflagBySymbol.get(symbol)
       : undefined;
 
     const baseCooldownSecs = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
@@ -220,15 +220,11 @@ export class TradeExecutor {
     if (signal === 'buy' && memeRow2?.is_memecoin) {
       const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
       const memeCapPct = (this.runtimeConfig.get('MEMECOIN_CAP_PCT') as number | undefined) ?? 20;
-      const memes = db.prepare(
-        `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
-      ).all() as { symbol: string }[];
+      const memes = discoveredAssetQueries.getActiveMemecoins.all();
       const memePositions: Record<string, number> = {};
       for (const { symbol: ms } of memes) {
         const balance = botState.assetBalances.get(ms) ?? 0;
-        const snap = db.prepare(
-          `SELECT price_usd FROM asset_snapshots WHERE symbol = ? ORDER BY timestamp DESC LIMIT 1`
-        ).get(ms) as { price_usd: number } | undefined;
+        const snap = queries.getLatestAssetSnapshot.get(ms) as { price_usd: number } | undefined;
         memePositions[ms] = balance * (snap?.price_usd ?? 0);
       }
       const tradeUsd = (botState.assetBalances.get('USDC') ?? 0) * 0.1;

@@ -42,6 +42,8 @@ const mockQueries = {
 // Minimal mock for discoveredAssetQueries
 const mockDiscoveredAssetQueries = {
   getAddressBySymbol: { get: vi.fn().mockReturnValue(undefined) },
+  getMemecoinflagBySymbol: { get: vi.fn().mockReturnValue(undefined) },
+  getActiveMemecoins: { all: vi.fn().mockReturnValue([]) },
 };
 
 vi.mock('../src/core/state.js', () => ({
@@ -60,9 +62,12 @@ vi.mock('../src/data/db.js', () => ({
   queries: {
     insertTrade: { run: (...args: unknown[]) => mockQueries.insertTrade.run(...args) },
     recentAssetSnapshots: { all: (...args: unknown[]) => mockQueries.recentAssetSnapshots.all(...args) },
+    getLatestAssetSnapshot: { get: vi.fn().mockReturnValue(undefined) },
   },
   discoveredAssetQueries: {
     getAddressBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getAddressBySymbol.get(...args) },
+    getMemecoinflagBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getMemecoinflagBySymbol.get(...args) },
+    getActiveMemecoins: { all: (...args: unknown[]) => mockDiscoveredAssetQueries.getActiveMemecoins.all(...args) },
   },
 }));
 

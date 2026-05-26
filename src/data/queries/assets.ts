@@ -78,4 +78,12 @@ export const discoveredAssetQueries = {
   getAddressBySymbol: db.prepare(
     `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
   ) as Statement<[string], { address: string }>,
+
+  getMemecoinflagBySymbol: db.prepare(
+    `SELECT is_memecoin FROM discovered_assets WHERE symbol = ? LIMIT 1`
+  ) as Statement<[string], { is_memecoin: number }>,
+
+  getActiveMemecoins: db.prepare(
+    `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
+  ) as Statement<[], { symbol: string }>,
 };
