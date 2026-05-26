@@ -105,7 +105,10 @@ const MIGRATIONS: Migration[] = [
           db.exec(`DROP TABLE discovered_assets`);
           db.exec(`ALTER TABLE discovered_assets_v2 RENAME TO discovered_assets`);
         });
-        try { rebuildDiscoveredAssets(); } catch { /* non-fatal — existing data preserved */ }
+        try { rebuildDiscoveredAssets(); } catch (err) {
+          // Rebuild failed — existing data preserved, but new strategies won't be available via CHECK constraint
+          console.error('[migrations] migration 6 rebuild failed (non-fatal):', err);
+        }
       }
     },
   },
@@ -129,13 +132,15 @@ export function runMigrations(db: DB): void {
     )
   `);
 
-  const currentVersion = getSchemaVersion(db);
+  const applied = new Set(
+    (db.prepare('SELECT version FROM schema_version').all() as { version: number }[]).map(r => r.version)
+  );
   const record = db.prepare(
     `INSERT OR IGNORE INTO schema_version (version, description) VALUES (?, ?)`
   );
 
   for (const migration of MIGRATIONS) {
-    if (migration.version <= currentVersion) continue;
+    if (applied.has(migration.version)) continue;
     db.transaction(() => {
       migration.run(db);
       record.run(migration.version, migration.description);
