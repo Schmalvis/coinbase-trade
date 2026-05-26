@@ -1,76 +1,9 @@
 import type { Database as DB } from 'better-sqlite3';
 import { db } from './connection.js';
+import { runMigrations } from './migrations.js';
 
 export function initSchema(db: DB): void {
-  // Migration: add network column to existing DBs that predate this field
-  try { db.exec(`ALTER TABLE trades ADD COLUMN network TEXT NOT NULL DEFAULT 'unknown'`); } catch { /* already exists */ }
-
-  // Migrations: trades P&L and strategy columns
-  try { db.exec(`ALTER TABLE trades ADD COLUMN entry_price REAL`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE trades ADD COLUMN realized_pnl REAL`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE trades ADD COLUMN strategy TEXT`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE trades ADD COLUMN symbol TEXT`); } catch { /* exists */ }
-
-  // Migrations: discovered_assets grid columns
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_manual_override INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_upper_bound REAL`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_lower_bound REAL`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_levels INTEGER NOT NULL DEFAULT 10`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN grid_amount_pct REAL NOT NULL DEFAULT 5.0`); } catch { /* exists */ }
-
-  // Migrations: discovered_assets SMA toggle columns
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_use_ema INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_volume_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN sma_rsi_filter INTEGER NOT NULL DEFAULT 1`); } catch { /* exists */ }
-
-  // Migrations: memecoin and shadow_until columns
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN is_memecoin INTEGER NOT NULL DEFAULT 0`); } catch { /* exists */ }
-  try { db.exec(`ALTER TABLE discovered_assets ADD COLUMN shadow_until INTEGER`); } catch { /* exists */ }
-
-  // Migration: extend discovered_assets strategy CHECK constraint for new strategies
-  try {
-    db.exec(`INSERT INTO discovered_assets (address, network, symbol, name, strategy) VALUES ('__tcptest__', '__test__', '__test__', '', 'trend-continuation')`);
-    db.exec(`DELETE FROM discovered_assets WHERE address = '__tcptest__'`);
-  } catch {
-    // CHECK constraint doesn't include new strategies — rebuild table
-    const rebuildDiscoveredAssets = db.transaction(() => {
-      db.exec(`CREATE TABLE IF NOT EXISTS discovered_assets_v2 (
-        address     TEXT NOT NULL,
-        network     TEXT NOT NULL,
-        symbol      TEXT NOT NULL,
-        name        TEXT NOT NULL DEFAULT '',
-        decimals    INTEGER NOT NULL DEFAULT 18,
-        status      TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','active','dismissed')),
-        drop_pct    REAL NOT NULL DEFAULT 2.0,
-        rise_pct    REAL NOT NULL DEFAULT 3.0,
-        sma_short   INTEGER NOT NULL DEFAULT 5,
-        sma_long    INTEGER NOT NULL DEFAULT 20,
-        strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma','grid','momentum-burst','volatility-breakout','trend-continuation')),
-        discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
-        grid_manual_override INTEGER NOT NULL DEFAULT 0,
-        grid_upper_bound REAL,
-        grid_lower_bound REAL,
-        grid_levels INTEGER NOT NULL DEFAULT 10,
-        grid_amount_pct REAL NOT NULL DEFAULT 5.0,
-        sma_use_ema INTEGER NOT NULL DEFAULT 1,
-        sma_volume_filter INTEGER NOT NULL DEFAULT 1,
-        sma_rsi_filter INTEGER NOT NULL DEFAULT 1,
-        is_memecoin INTEGER NOT NULL DEFAULT 0,
-        shadow_until INTEGER,
-        PRIMARY KEY (address, network)
-      )`);
-      db.exec(`INSERT INTO discovered_assets_v2
-        SELECT address, network, symbol, name, decimals, status, drop_pct, rise_pct,
-               sma_short, sma_long, strategy, discovered_at, grid_manual_override,
-               grid_upper_bound, grid_lower_bound, grid_levels, grid_amount_pct,
-               sma_use_ema, sma_volume_filter, sma_rsi_filter,
-               COALESCE(is_memecoin, 0) AS is_memecoin, shadow_until
-        FROM discovered_assets`);
-      db.exec(`DROP TABLE discovered_assets`);
-      db.exec(`ALTER TABLE discovered_assets_v2 RENAME TO discovered_assets`);
-    });
-    try { rebuildDiscoveredAssets(); } catch { /* non-fatal — new strategies unavailable via UI but existing data preserved */ }
-  }
+  runMigrations(db);
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS price_snapshots (
