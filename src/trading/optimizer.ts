@@ -22,6 +22,12 @@ export interface OpportunityScore {
   isHeld: boolean;
 }
 
+export interface ScoreInputs {
+  symbols: Iterable<string>;
+  balances: Map<string, number>;
+  prices: Map<string, number>;
+}
+
 const HOLD_SIGNAL: CandleSignal = { signal: 'hold', strength: 0, reason: 'no data' };
 
 export class PortfolioOptimizer {
@@ -46,47 +52,51 @@ export class PortfolioOptimizer {
     return this._riskOff;
   }
 
-  computeScores(network: string): OpportunityScore[] {
-    // Collect all symbols to score
-    const symbols = new Set<string>();
+  private fetchScoreInputs(network: string): ScoreInputs {
+    const symbolSet = new Set<string>();
 
     // 1. Static registry assets
     for (const asset of assetsForNetwork(network)) {
-      symbols.add(asset.symbol);
+      symbolSet.add(asset.symbol);
     }
 
     // 2. Discovered active assets
     const activeAssets = discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[];
-    for (const a of activeAssets) {
-      symbols.add(a.symbol);
-    }
+    for (const a of activeAssets) { symbolSet.add(a.symbol); }
 
     // 3. Watchlist
     const watchlist = watchlistQueries.getWatchlist.all(network);
-    for (const w of watchlist) {
-      symbols.add(w.symbol);
+    for (const w of watchlist) { symbolSet.add(w.symbol); }
+
+    const balances = new Map<string, number>();
+    const prices   = new Map<string, number>();
+
+    for (const sym of symbolSet) {
+      balances.set(sym, botState.assetBalances.get(sym) ?? 0);
+      let price = 0;
+      if (sym === 'USDC') {
+        price = 1;
+      } else if (sym === 'ETH') {
+        price = botState.lastPrice ?? 0;
+      } else {
+        const candles = this.candleService.getStoredCandles(sym, network, '15m', 1);
+        price = candles.length > 0 ? candles[0].close : 0;
+      }
+      prices.set(sym, price);
     }
+
+    return { symbols: symbolSet, balances, prices };
+  }
+
+  computeScores(network: string, inputs?: ScoreInputs): OpportunityScore[] {
+    const { symbols, balances, prices } = inputs ?? this.fetchScoreInputs(network);
 
     // Compute total portfolio USD for weight calculation
     let totalPortfolioUsd = 0;
     const assetUsdValues = new Map<string, number>();
 
     for (const sym of symbols) {
-      const balance = botState.assetBalances.get(sym) ?? 0;
-      // Use ETH price as proxy for asset price from botState, or look at asset snapshots
-      // For a proper implementation we'd track per-asset prices; for now use balance * last known price
-      // USDC is ~1:1, ETH uses lastPrice
-      let priceEstimate = 0;
-      if (sym === 'USDC') {
-        priceEstimate = 1;
-      } else if (sym === 'ETH') {
-        priceEstimate = botState.lastPrice ?? 0;
-      } else {
-        // For other assets, look at the latest candle close price
-        const candles = this.candleService.getStoredCandles(sym, network, '15m', 1);
-        priceEstimate = candles.length > 0 ? candles[0].close : 0;
-      }
-      const usdValue = balance * priceEstimate;
+      const usdValue = (balances.get(sym) ?? 0) * (prices.get(sym) ?? 0);
       assetUsdValues.set(sym, usdValue);
       totalPortfolioUsd += usdValue;
     }
@@ -108,11 +118,10 @@ export class PortfolioOptimizer {
       const direction = (sig: CandleSignal) =>
         sig.signal === 'buy' ? 1 : sig.signal === 'sell' ? -1 : 0;
 
-      const component15m = direction(signal15m) * signal15m.strength;
-      const component1h = direction(signal1h) * signal1h.strength;
-      const component24h = direction(signal24h) * signal24h.strength;
-
-      const raw = component15m * 0.5 + component1h * 0.3 + component24h * 0.2;
+      const raw =
+        direction(signal15m) * signal15m.strength * 0.5 +
+        direction(signal1h)  * signal1h.strength  * 0.3 +
+        direction(signal24h) * signal24h.strength * 0.2;
 
       // Determine confidence from candle source
       let confidence = 0.4; // default: synthetic
@@ -129,7 +138,7 @@ export class PortfolioOptimizer {
       if (candles15m.length > 0) {
         const latestVolume = candles15m[0].volume;
         const volWindow = candles15m.slice(0, 20);
-        const avgVolume = volWindow.reduce((sum, c) => sum + c.volume, 0) / volWindow.length;
+        const avgVolume = volWindow.reduce((s, c) => s + c.volume, 0) / volWindow.length;
         if (avgVolume > 0 && latestVolume > 1.5 * avgVolume) {
           score += score >= 0 ? 10 : -10;
         }
@@ -138,7 +147,6 @@ export class PortfolioOptimizer {
       // Clamp to [-100, 100]
       score = Math.max(-100, Math.min(100, score));
 
-      const balance = botState.assetBalances.get(sym) ?? 0;
       const usdValue = assetUsdValues.get(sym) ?? 0;
       const currentWeight = totalPortfolioUsd > 0 ? (usdValue / totalPortfolioUsd) * 100 : 0;
       // Require >$2 USD value to be considered "held" — avoids dust triggering sell candidates
@@ -149,7 +157,7 @@ export class PortfolioOptimizer {
         `candles=15m:${candles15m.length}/1h:${candles1h.length}/24h:${candles24h.length} ` +
         `signals=${signal15m.signal}(${signal15m.strength})/` +
         `${signal1h.signal}(${signal1h.strength})/` +
-        `${signal24h.signal}(${signal24h.strength})`
+        `${signal24h.signal}(${signal24h.strength})`,
       );
 
       scores.push({
