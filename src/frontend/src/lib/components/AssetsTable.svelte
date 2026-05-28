@@ -88,7 +88,8 @@
     Assets
   </div>
 
-  <table class="w-full">
+  <div class="overflow-x-auto">
+  <table class="w-full min-w-[480px]">
     <thead>
       <tr class="text-xs font-medium text-[var(--text-secondary)] border-b border-[var(--border)]">
         <th class="px-3 py-2 w-8">
@@ -189,6 +190,7 @@
       {/each}
     </tbody>
   </table>
+  </div>
 
   {#if ($assets ?? []).length === 0}
     <div class="p-6 text-center text-sm text-[var(--text-muted)]">No assets found</div>

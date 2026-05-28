@@ -422,7 +422,7 @@ export class TradeExecutor {
     buySymbol: string,
     sellAmountUsd: number,  // USD value — converted to token units internally
     rotationId?: number,
-  ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string }> {
+  ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string; actualBuyUsd?: number }> {
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
     // Convert USD sell amount to native token units for leg 1.
@@ -486,7 +486,7 @@ export class TradeExecutor {
     // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
     if (buySymbol === 'USDC') {
       botState.recordTrade(new Date());
-      return { status: 'executed', sellTxHash };
+      return { status: 'executed', sellTxHash, actualBuyUsd: sellAmountUsd };
     }
 
     // Leg 2: USDC → Buy target. Spend only the proceeds from leg 1, not all USDC.
@@ -529,7 +529,7 @@ export class TradeExecutor {
     });
 
     botState.recordTrade(new Date());
-    return { status: 'executed', sellTxHash, buyTxHash };
+    return { status: 'executed', sellTxHash, buyTxHash, actualBuyUsd: leg2UsdcAmount };
   }
 
   private recordTrade(t: {
