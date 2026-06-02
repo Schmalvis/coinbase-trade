@@ -33,9 +33,9 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 **Phase 6 (SDK direct / v2) complete** — MCP server dependency removed. Bot now uses `@coinbase/cdp-sdk` directly for wallet access, balance polling, and swaps. New `src/wallet/` module replaces `src/mcp/`. Key fixes: CBBTC candle symbol mapping, rotation record persistence, portfolio floor deadlock. Strategy optimizations: EMA crossover magnitude filter, min trade value guard ($2), market regime detection (bull/bear/sideways), updated optimizer thresholds.
 
 **Next steps:**
-- Deploy via Portainer (stack 68 on RPi5) — pull new image from GitHub Actions CI
+- Deploy via QNAP Container Station (MarJenn NAS) — pull new image from GitHub Actions CI
 - Monitor in DRY_RUN mode first — watch rotation decisions and scores in logs/dashboard
-- Set WALLET_ADDRESS in Portainer stack env to restore the existing mainnet wallet
+- Set WALLET_ADDRESS in container env to restore the existing mainnet wallet
 
 ---
 
@@ -57,9 +57,10 @@ Docker support added — image published to `ghcr.io/schmalvis/coinbase-trade:la
 
 1. Push changes to GitHub (`main` branch)
 2. GitHub Actions automatically rebuilds the image → `ghcr.io/schmalvis/coinbase-trade:latest`
-3. Once the image is published, use **Portainer** to pull the new image and redeploy the stack (`coinbase-trade-bot`, stack ID 68, endpoint ID 5 on RPi5)
+3. Once the image is published, redeploy via **QNAP Container Station** on MarJenn NAS (`192.168.68.136`)
 
-Portainer UI: `https://192.168.68.139:9443` → Stacks → coinbase-trade-bot → Pull and redeploy.
+Container name: `coinbase-trade`. Docker binary: `/share/CACHEDEV2_DATA/.qpkg/container-station/usr/bin/.libs/docker`
+SSH access: `ssh admin@192.168.68.136` (key installed on myOtherPi5).
 
 ---
 

@@ -45,12 +45,16 @@ export class SMAStrategy implements Strategy {
     const prices = snapshots.map(s => s.eth_price);
     const label = useEma ? 'EMA' : 'SMA';
 
+    // prices is ASC (oldest first); prices[prices.length-1] = current price.
+    // For SMA: use the most-recent N values. For EMA: pass the full array so the
+    // EMA formula actually iterates beyond the seed period (without this, the loop
+    // never runs and EMA degenerates to a simple SMA of the oldest N values).
     const shortVal = useEma
-      ? ema(prices.slice(0, shortW), shortW)
-      : sma(prices.slice(0, shortW));
+      ? ema(prices, shortW)
+      : sma(prices.slice(-shortW));
     const longVal = useEma
-      ? ema(prices.slice(0, longW), longW)
-      : sma(prices.slice(0, longW));
+      ? ema(prices, longW)
+      : sma(prices.slice(-longW));
 
     const shortAboveLong = shortVal > longVal;
 

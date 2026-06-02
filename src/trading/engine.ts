@@ -250,10 +250,16 @@ export class TradingEngine {
     }
     if (this.optimizerIntervalId) return; // already running
     const intervalMs = (this.runtimeConfig.get('OPTIMIZER_INTERVAL_SECONDS') as number) * 1000;
+    let _tickRunning = false;
     this.optimizerIntervalId = setInterval(() => {
-      this.optimizer!.tick(botState.activeNetwork).catch((err) =>
-        logger.error('Optimizer tick failed', err),
-      );
+      if (_tickRunning) {
+        logger.debug('Optimizer tick skipped — previous tick still running');
+        return;
+      }
+      _tickRunning = true;
+      this.optimizer!.tick(botState.activeNetwork)
+        .catch((err) => logger.error('Optimizer tick failed', err))
+        .finally(() => { _tickRunning = false; });
     }, intervalMs);
     logger.info(`Portfolio optimizer enabled (interval: ${intervalMs / 1000}s)`);
   }

@@ -97,7 +97,10 @@ export function flushDigest(): string | null {
   const assetSells = todayTrades.filter(t => t.action === 'sell').length;
 
   // Portfolio value and P&L
-  const portfolioUsd = (todayPnl as any)?.current_usd ?? (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0);
+  // Fallback sums ETH + USDC — avoids showing $0 when only ETH balance is counted.
+  const _ethUsd = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0);
+  const _usdcUsd = botState.lastUsdcBalance ?? 0;
+  const portfolioUsd = (todayPnl as any)?.current_usd ?? (_ethUsd + _usdcUsd);
   const highWater = (todayPnl as any)?.high_water ?? portfolioUsd;
   const dayChange = portfolioUsd - highWater;
   const dayChangePct = highWater > 0 ? (dayChange / highWater) * 100 : 0;

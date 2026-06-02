@@ -19,8 +19,20 @@ try {
   console.warn(`[WARN] Cannot create log directory ${logDir} — logging to console only`);
 }
 
+function serializeMeta(meta: unknown): string {
+  if (meta instanceof Error) {
+    return JSON.stringify({ message: meta.message, name: meta.name, stack: meta.stack });
+  }
+  try {
+    // getOwnPropertyNames captures non-enumerable props (e.g. SDK error objects that stringify as {})
+    return JSON.stringify(meta, Object.getOwnPropertyNames(meta as object));
+  } catch {
+    return String(meta);
+  }
+}
+
 function write(level: string, msg: string, meta?: unknown) {
-  const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${msg}${meta ? ' ' + JSON.stringify(meta) : ''}`;
+  const line = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${msg}${meta !== undefined ? ' ' + serializeMeta(meta) : ''}`;
   console.log(line);
   if (logPath) {
     try { fs.appendFileSync(logPath, line + '\n'); } catch { /* volume not writable */ }
