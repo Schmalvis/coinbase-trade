@@ -144,14 +144,15 @@ export class SwapService {
         fromToken:  fromTokenAddress as `0x${string}`,
         toToken:    toTokenAddress   as `0x${string}`,
         fromAmount: fromWeiAmt,
-        slippageBps: this.isRegistrySwap(fromTokenAddress, toTokenAddress) ? 100 : 150,
+        slippageBps: this.isRegistrySwap(fromTokenAddress, toTokenAddress) ? 150 : 200,
       });
 
       logger.info(`Swap executed: ${fromAmount} ${fromTokenAddress} → ${toTokenAddress} txHash=${transactionHash}`);
       return { txHash: transactionHash, status: 'executed' };
 
     } catch (cdpErr) {
-      logger.warn(`CDP swap failed: ${cdpErr}`);
+      const msg = cdpErr instanceof Error ? cdpErr.message : String(cdpErr);
+      logger.warn(`CDP swap failed: ${msg}`);
 
       // 0x fallback — only if key is set
       const zeroXKey = process.env.ZEROX_API_KEY;

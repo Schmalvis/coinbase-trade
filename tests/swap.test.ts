@@ -61,6 +61,46 @@ describe('SwapService.swap', () => {
     const service = new SwapService(wc as any);
     await expect(service.swap(ETH_ADDR, USDC_ADDR, '1', 'base-mainnet')).rejects.toThrow('Wallet not initialised');
   });
+
+  it('uses 150bps slippage for registry swaps', async () => {
+    const mockAccount = {
+      swap: vi.fn().mockResolvedValue({ transactionHash: '0xabc' }),
+    };
+    const mockClient = { account: mockAccount, address: '0xwallet', network: 'base-mainnet', sdk: {} };
+    const service = new SwapService(mockClient as any);
+
+    // ETH→USDC is a registry swap (both in ASSET_REGISTRY)
+    await service.swap(
+      '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', // ETH
+      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', // USDC mainnet
+      '0.01',
+      'base-mainnet',
+    );
+
+    expect(mockAccount.swap).toHaveBeenCalledWith(
+      expect.objectContaining({ slippageBps: 150 }),
+    );
+  });
+
+  it('uses 200bps slippage for non-registry swaps', async () => {
+    const mockAccount = {
+      swap: vi.fn().mockResolvedValue({ transactionHash: '0xdef' }),
+    };
+    const mockClient = { account: mockAccount, address: '0xwallet', network: 'base-mainnet', sdk: {} };
+    const service = new SwapService(mockClient as any);
+
+    // Some random ERC20 token (not in registry)
+    await service.swap(
+      '0x1234000000000000000000000000000000000000',
+      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      '10',
+      'base-mainnet',
+    );
+
+    expect(mockAccount.swap).toHaveBeenCalledWith(
+      expect.objectContaining({ slippageBps: 200 }),
+    );
+  });
 });
 
 describe('SwapService.getSwapPrice', () => {
