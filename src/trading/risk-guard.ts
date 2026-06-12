@@ -87,12 +87,13 @@ export class RiskGuard {
       return { approved: false, vetoReason: `Daily rotation cap (${todayCount}/${maxRotations})` };
     }
 
-    // 4. Position size limit (skip for rebalances — buy is USDC, not subject to cap)
+    // 4. Position size limit (skip for rebalances and USDC buys — USDC is the safe haven, not subject to cap)
     const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
     let adjustedAmount = proposal.sellAmount;
-    if (!proposal.isRebalance && proposal.buyTargetWeightPct > maxPosPct) {
-      const reduction = (proposal.buyTargetWeightPct - maxPosPct) / proposal.buyTargetWeightPct;
-      adjustedAmount = proposal.sellAmount * (1 - reduction);
+    if (!proposal.isRebalance && proposal.buySymbol !== 'USDC' && proposal.buyTargetWeightPct > maxPosPct) {
+      const currentBuyWeightPct = proposal.buyTargetWeightPct - (proposal.sellAmount / portfolioUsd) * 100;
+      const maxAllowedBuyUsd = Math.max(0, (maxPosPct - currentBuyWeightPct) / 100 * portfolioUsd);
+      adjustedAmount = Math.min(proposal.sellAmount, maxAllowedBuyUsd);
       if (adjustedAmount < portfolioUsd * 0.01) {
         this.logDecision('risk_veto', `Position limit: reduced amount too small`);
         return { approved: false, vetoReason: 'Position limit reduces rotation below minimum' };
