@@ -232,6 +232,45 @@ describe('PortfolioOptimizer', () => {
       const result = optimizer.findRotationCandidate(scores);
       expect(result).toBeNull();
     });
+
+    it('blocks ETH→CBETH rotation (correlated pair blacklist)', () => {
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(), makeMockStrategy({ signal: 'sell', strength: 80, reason: 'test' }),
+        makeMockRiskGuard(), makeMockExecutor(),
+        makeMockConfig({ ROTATION_SELL_THRESHOLD: -20, ROTATION_BUY_THRESHOLD: 20, MIN_ROTATION_SCORE_DELTA: 30 }),
+      );
+
+      // ETH is weak and fully held, CBETH is strong — the only possible rotation is the
+      // correlated ETH→CBETH pair, which the blacklist must block. (USDC is dust/not held
+      // so it cannot act as an alternative sell or buy leg.)
+      const scores: any[] = [
+        { symbol: 'ETH', score: -25, confidence: 1, signals: {}, currentWeight: 100, isHeld: true },
+        { symbol: 'CBETH', score: 35, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+        { symbol: 'USDC', score: 0, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+      ];
+
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
+      expect(result).toBeNull();
+    });
+
+    it('blocks CBBTC→ETH rotation (correlated pair blacklist)', () => {
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(), makeMockStrategy({ signal: 'hold', strength: 0, reason: 'test' }),
+        makeMockRiskGuard(), makeMockExecutor(),
+        makeMockConfig({ ROTATION_SELL_THRESHOLD: -20, ROTATION_BUY_THRESHOLD: 20, MIN_ROTATION_SCORE_DELTA: 30 }),
+      );
+
+      // CBBTC weak and fully held, ETH strong — the only possible rotation is the correlated
+      // CBBTC→ETH pair, which the blacklist must block.
+      const scores: any[] = [
+        { symbol: 'CBBTC', score: -25, confidence: 1, signals: {}, currentWeight: 100, isHeld: true },
+        { symbol: 'ETH', score: 35, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+        { symbol: 'USDC', score: 0, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+      ];
+
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
+      expect(result).toBeNull();
+    });
   });
 
   describe('risk-off mode', () => {

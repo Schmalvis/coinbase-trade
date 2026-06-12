@@ -30,6 +30,14 @@ export interface ScoreInputs {
 
 const HOLD_SIGNAL: CandleSignal = { signal: 'hold', strength: 0, reason: 'no data' };
 
+// Correlated assets (ETH / staked ETH / wrapped BTC) have ~0 real edge between them
+// but incur ~2% round-trip fees. Block rotations between these pairs — see Fable audit A2.
+const CORRELATED_PAIR_BLACKLIST = new Set([
+  'ETH->CBETH', 'CBETH->ETH',
+  'ETH->CBBTC', 'CBBTC->ETH',
+  'CBETH->CBBTC', 'CBBTC->CBETH',
+]);
+
 export class PortfolioOptimizer {
   private latestScores: OpportunityScore[] = [];
   private _riskOff = false;
@@ -218,6 +226,11 @@ export class PortfolioOptimizer {
     for (const sell of sellCandidates) {
       for (const buy of buyCandidates) {
         if (buy.symbol === sell.symbol) continue;
+        const blacklistKey = `${sell.symbol}->${buy.symbol}`;
+        if (CORRELATED_PAIR_BLACKLIST.has(blacklistKey)) {
+          logger.debug(`Rotation ${blacklistKey} blocked — correlated pair blacklist`);
+          continue;
+        }
         const delta = buy.score - sell.score;
         if (delta <= minDelta || delta <= bestDelta) continue;
         // Same-pair cooldown: skip if this pair (or its reverse) was rotated recently
