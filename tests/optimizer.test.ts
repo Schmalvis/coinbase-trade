@@ -601,6 +601,158 @@ describe('PortfolioOptimizer', () => {
         expect.objectContaining({ id: 55, status: 'stuck' }),
       );
     });
+
+    it('sets both forward and reverse cooldowns after successful recovery (Bug 1)', async () => {
+      const mockExecutor = {
+        executeRotation: vi.fn().mockResolvedValue({
+          status: 'executed',
+          actualBuyUsd: 12,
+          sellTxHash: '0xsell',
+          buyTxHash: '0xbuy',
+        }),
+      };
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 77,
+        sell_symbol: 'ETH',
+        buy_symbol: 'CBBTC',
+        sell_amount: 12,
+        estimated_gain_pct: 1.5,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: new Date(Date.now() - 25 * 60 * 1000).toISOString(),
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell77',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      // Both forward and reverse keys must be set so the pair can't immediately re-rotate
+      expect((optimizer as any)._rotationCooldowns.has('ETH->CBBTC')).toBe(true);
+      expect((optimizer as any)._rotationCooldowns.has('CBBTC->ETH')).toBe(true);
+    });
+
+    it('marks row as stuck in DB when executeRotation throws (Bug 2)', async () => {
+      const mockExecutor = {
+        executeRotation: vi.fn().mockRejectedValue(new Error('network timeout')),
+      };
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 88,
+        sell_symbol: 'CBBTC',
+        buy_symbol: 'USDC',
+        sell_amount: 5,
+        estimated_gain_pct: 1.0,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell88',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      // Row must be updated to 'stuck' — not left as 'leg1_done' to be retried forever
+      expect(mockUpdateRotation.run).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 88, status: 'stuck', veto_reason: expect.stringContaining('network timeout') }),
+      );
+    });
+
+    it('parses SQLite space-separated timestamps as UTC (Bug 3 — recoverStuckRotations)', async () => {
+      const mockExecutor = { executeRotation: vi.fn() };
+
+      // Simulate a BST (UTC+1) environment: a rotation stored 61 minutes ago in SQLite
+      // format (space separator, no Z). If parsed as local time on a UTC+1 machine, it
+      // would appear only 1 minute old, skipping the ">1h mark-stuck" branch.
+      const sixtyOneMinAgoUtc = new Date(Date.now() - 61 * 60 * 1000);
+      // SQLite stores as 'YYYY-MM-DD HH:MM:SS' without timezone marker
+      const sqliteTs = sixtyOneMinAgoUtc.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 101,
+        sell_symbol: 'ETH',
+        buy_symbol: 'USDC',
+        sell_amount: 8,
+        estimated_gain_pct: 1.0,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: sqliteTs,
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell101',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      // Row is 61 min old UTC → must be marked stuck, not retried
+      expect(mockExecutor.executeRotation).not.toHaveBeenCalled();
+      expect(mockUpdateRotation.run).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 101, status: 'stuck' }),
+      );
+    });
+
+    it('parses SQLite space-separated timestamps as UTC (Bug 3 — loadCooldownsFromDb)', () => {
+      // A pair executed 2h ago in SQLite format (no Z) should still be treated as on cooldown
+      const twoHoursAgoUtc = new Date(Date.now() - 2 * 60 * 60 * 1000);
+      const sqliteTs = twoHoursAgoUtc.toISOString().replace('T', ' ').replace(/\.\d+Z$/, '');
+
+      mockGetRecentExecutedPairs.all.mockReturnValue([
+        { sell_symbol: 'ETH', buy_symbol: 'CBBTC', last_executed: sqliteTs },
+      ]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        makeMockExecutor(),
+        makeMockConfig(),
+      );
+
+      optimizer.loadCooldownsFromDb('base-sepolia');
+
+      const cooldownTs = (optimizer as any)._rotationCooldowns.get('ETH->CBBTC') as number;
+      expect(cooldownTs).toBeDefined();
+      // The stored timestamp should be within a few ms of twoHoursAgoUtc
+      expect(Math.abs(cooldownTs - twoHoursAgoUtc.getTime())).toBeLessThan(2000);
+    });
   });
 
   describe('computePriceRatioDivergence', () => {

@@ -59,7 +59,7 @@ export class PortfolioOptimizer {
   loadCooldownsFromDb(network: string): void {
     const recent = rotationQueries.getRecentExecutedPairs.all(network);
     for (const row of recent) {
-      const executedAt = new Date(row.last_executed).getTime();
+      const executedAt = new Date(/[TZ+]/.test(row.last_executed) ? row.last_executed : row.last_executed.replace(' ', 'T') + 'Z').getTime();
       const fwdKey = `${row.sell_symbol}->${row.buy_symbol}`;
       const revKey = `${row.buy_symbol}->${row.sell_symbol}`;
       if ((this._rotationCooldowns.get(fwdKey) ?? 0) < executedAt) {
@@ -80,7 +80,7 @@ export class PortfolioOptimizer {
     // Rows up to 24h old are candidates. Rows <1h get one retry; rows 1-24h
     // that survived a bot restart without being retried get marked stuck immediately.
     for (const row of stuck) {
-      const ageMs = Date.now() - new Date(row.timestamp).getTime();
+      const ageMs = Date.now() - new Date(/[TZ+]/.test(row.timestamp) ? row.timestamp : row.timestamp.replace(' ', 'T') + 'Z').getTime();
       const ageMin = Math.round(ageMs / 60_000);
 
       if (ageMs > 60 * 60 * 1000) {
@@ -118,6 +118,10 @@ export class PortfolioOptimizer {
             veto_reason: null,
           });
           logger.info(`[recovery] Rotation #${row.id} recovered — leg-2 executed`);
+          const fwdKey = `${row.sell_symbol}->${row.buy_symbol}`;
+          const revKey = `${row.buy_symbol}->${row.sell_symbol}`;
+          this._rotationCooldowns.set(fwdKey, Date.now());
+          this._rotationCooldowns.set(revKey, Date.now());
         } else {
           logger.warn(`[recovery] Rotation #${row.id} leg-2 retry returned ${result?.status} — marking stuck`);
           rotationQueries.updateRotation.run({
@@ -131,8 +135,17 @@ export class PortfolioOptimizer {
           });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = err instanceof Error ? `${err.message}\n${(err as Error).stack ?? ''}` : String(err);
         logger.error(`[recovery] Rotation #${row.id} leg-2 retry failed: ${msg}`);
+        rotationQueries.updateRotation.run({
+          id: row.id,
+          status: 'stuck',
+          buy_amount: null,
+          sell_tx_hash: row.sell_tx_hash,
+          buy_tx_hash: null,
+          actual_gain_pct: null,
+          veto_reason: `leg-2 retry threw: ${err instanceof Error ? err.message : String(err)}`,
+        });
       }
     }
   }
