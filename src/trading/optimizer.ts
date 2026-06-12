@@ -57,9 +57,7 @@ export class PortfolioOptimizer {
   // every container redeploy; deriving cooldowns from persisted rotation timestamps means a
   // freshly-started bot still respects the 4h same-pair cooldown. See Fable audit A6.
   loadCooldownsFromDb(network: string): void {
-    const recent = (rotationQueries.getRecentExecutedPairs as any).all(network) as {
-      sell_symbol: string; buy_symbol: string; last_executed: string
-    }[];
+    const recent = rotationQueries.getRecentExecutedPairs.all(network);
     for (const row of recent) {
       const executedAt = new Date(row.last_executed).getTime();
       const fwdKey = `${row.sell_symbol}->${row.buy_symbol}`;
