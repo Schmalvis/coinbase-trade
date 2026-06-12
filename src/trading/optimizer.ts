@@ -154,12 +154,16 @@ export class PortfolioOptimizer {
 
     const buyCandles  = this.candleService.getStoredCandles(buySymbol,  network, '15m', 96);
     const sellCandles = this.candleService.getStoredCandles(sellSymbol, network, '15m', 96);
+    // Use at most 96 candles but skip index 0 (current/in-progress candle) to avoid
+    // contaminating the historical baseline with the live observation being tested.
     const len = Math.min(buyCandles.length, sellCandles.length);
 
-    if (len < 20) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+    if (len < 21) return { zScore: 0, estimatedGainPct: 0, hasData: false };  // need 20 historical + at least 1 current
 
     const ratios: number[] = [];
-    for (let i = 0; i < len; i++) {
+    // Candles are paired by array index (both ordered newest-first). This assumes
+    // gap-free series — gaps or missing candles in one asset can misalign pairs.
+    for (let i = 1; i < len; i++) {  // start at 1, not 0
       const s = sellCandles[i].close;
       if (s > 0) ratios.push(buyCandles[i].close / s);
     }

@@ -633,9 +633,11 @@ describe('PortfolioOptimizer', () => {
     });
 
     it('returns negative zScore when buy asset is cheaper than historical ratio', () => {
-      // Historical: ETH/USDC ratio = 2000 (ETH at $2000, USDC at $1)
-      // Current: ETH at $1900 (5% cheaper) — ratio 1900/1 = 1900, below historical mean of 2000
-      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH');
+      // Historical: ETH/USDC ratio ~2000 (ETH ~$2000, USDC at $1) with small noise for variance
+      // Current: ETH at $1900 (5% cheaper) — ratio 1900/1 = 1900, below historical mean of ~2000
+      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH').map((c, i) => ({
+        ...c, close: 2000 + (i % 7 - 3) * 5, // ±15 noise -> stdDev > 0
+      }));
       const currentEthCandle = { ...makePricedCandles(1, 1900, 'ETH')[0] };
       const ethCandles = [currentEthCandle, ...historicalEthCandles]; // newest first
       const usdcCandles = makePricedCandles(96, 1, 'USDC');
@@ -661,8 +663,10 @@ describe('PortfolioOptimizer', () => {
     });
 
     it('returns positive zScore when buy asset is more expensive than historical ratio', () => {
-      // Current ETH at $2100 — more expensive than historical $2000 mean
-      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH');
+      // Current ETH at $2100 — more expensive than historical ~$2000 mean
+      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH').map((c, i) => ({
+        ...c, close: 2000 + (i % 7 - 3) * 5, // ±15 noise -> stdDev > 0
+      }));
       const currentEthCandle = { ...makePricedCandles(1, 2100, 'ETH')[0] };
       const ethCandles = [currentEthCandle, ...historicalEthCandles];
       const usdcCandles = makePricedCandles(96, 1, 'USDC');
@@ -685,6 +689,52 @@ describe('PortfolioOptimizer', () => {
       expect(result.hasData).toBe(true);
       expect(result.zScore).toBeGreaterThan(0); // buy is expensive
       expect(result.estimatedGainPct).toBeLessThanOrEqual(0); // no positive mean-reversion
+    });
+
+    it('handles non-USDC sell asset with noisy price series', () => {
+      // ETH/CBBTC pair — both prices have variance
+      // Historical: ETH ~$2000, CBBTC ~$60000, ratio ~0.0333
+      // Current: ETH drops to $1800, CBBTC stable at $60000 — ratio 0.030, below historical mean
+      const baseEthPrice = 2000;
+      const baseBtcPrice = 60000;
+
+      // Build noisy historical candles (skip index 0 which will be current)
+      const ethCandles = Array.from({ length: 96 }, (_, i) => ({
+        symbol: 'ETH', network: 'base-sepolia', interval: '15m' as const,
+        openTime: new Date(Date.now() - i * 15 * 60 * 1000).toISOString(),
+        // Index 0 = current (will be overridden), 1..95 = historical with noise
+        close: i === 0 ? 1800 : baseEthPrice + (i % 7 - 3) * 10, // ±30 noise
+        open: baseEthPrice, high: baseEthPrice * 1.01, low: baseEthPrice * 0.99, volume: 1000,
+        source: 'test',
+      }));
+      const btcCandles = Array.from({ length: 96 }, (_, i) => ({
+        symbol: 'CBBTC', network: 'base-sepolia', interval: '15m' as const,
+        openTime: new Date(Date.now() - i * 15 * 60 * 1000).toISOString(),
+        close: baseBtcPrice + (i % 5 - 2) * 100, // ±200 noise
+        open: baseBtcPrice, high: baseBtcPrice * 1.005, low: baseBtcPrice * 0.995, volume: 0.5,
+        source: 'test',
+      }));
+
+      const mockCandleService = {
+        getStoredCandles: vi.fn().mockImplementation((sym: string) => {
+          if (sym === 'ETH') return ethCandles;
+          if (sym === 'CBBTC') return btcCandles;
+          return [];
+        }),
+      } as any;
+
+      const optimizer = new PortfolioOptimizer(
+        mockCandleService,
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(), makeMockExecutor(), makeMockConfig(),
+      );
+
+      // ETH dropped 10% — should be statistically cheap relative to CBBTC
+      const result = optimizer.computePriceRatioDivergence('ETH', 'CBBTC', 1800, 60000, 'base-sepolia');
+
+      expect(result.hasData).toBe(true);
+      expect(result.zScore).toBeLessThan(0); // ETH is cheap
+      expect(result.estimatedGainPct).toBeGreaterThan(0); // positive mean-reversion
     });
   });
 });
