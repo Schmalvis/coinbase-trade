@@ -117,6 +117,8 @@ function makeMockConfig(overrides: Record<string, any> = {}) {
     DEFAULT_FEE_ESTIMATE_PCT: 0.5,
     MAX_CASH_PCT: 80,
     DRY_RUN: false,
+    ROTATION_SIZE_PCT: 25,
+    MAX_POSITION_PCT: 40,
     ...overrides,
   };
   return { get: (key: string) => defaults[key] } as any;
