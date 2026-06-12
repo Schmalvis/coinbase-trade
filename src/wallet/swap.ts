@@ -151,7 +151,9 @@ export class SwapService {
       return { txHash: transactionHash, status: 'executed' };
 
     } catch (cdpErr) {
-      const msg = cdpErr instanceof Error ? cdpErr.message : String(cdpErr);
+      const msg = cdpErr instanceof Error
+        ? `${cdpErr.message}\n${cdpErr.stack ?? ''}`
+        : String(cdpErr);
       logger.warn(`CDP swap failed: ${msg}`);
 
       // 0x fallback — only if key is set

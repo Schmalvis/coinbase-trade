@@ -18,6 +18,7 @@ vi.mock('../src/core/logger.js', () => ({
 }));
 
 import { SwapService } from '../src/wallet/swap.js';
+import { logger } from '../src/core/logger.js';
 
 // Known addresses — decimals come from TOKEN_DECIMALS cache in swap.ts
 const ETH_ADDR  = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'; // 18 dec
@@ -100,6 +101,33 @@ describe('SwapService.swap', () => {
     expect(mockAccount.swap).toHaveBeenCalledWith(
       expect.objectContaining({ slippageBps: 200 }),
     );
+  });
+
+  it('logs cdp error message (not [object Object]) on swap failure', async () => {
+    const mockAccount = {
+      swap: vi.fn().mockRejectedValueOnce(new Error('insufficient funds')),
+    };
+    const mockClient = { account: mockAccount, address: '0xwallet', network: 'base-mainnet', sdk: {} };
+    const service = new SwapService(mockClient as any);
+
+    // No 0x fallback key set — ensure the CDP error propagates
+    const originalKey = process.env.ZEROX_API_KEY;
+    delete process.env.ZEROX_API_KEY;
+
+    await expect(
+      service.swap(
+        '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+        '0.01',
+        'base-mainnet',
+      )
+    ).rejects.toThrow('insufficient funds');
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('insufficient funds')
+    );
+
+    if (originalKey !== undefined) process.env.ZEROX_API_KEY = originalKey;
   });
 });
 
