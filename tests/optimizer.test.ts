@@ -602,4 +602,89 @@ describe('PortfolioOptimizer', () => {
       );
     });
   });
+
+  describe('computePriceRatioDivergence', () => {
+    function makePricedCandles(count: number, price: number, symbol = 'ETH') {
+      return Array.from({ length: count }, (_, i) => ({
+        symbol,
+        network: 'base-sepolia',
+        interval: '15m' as const,
+        openTime: new Date(Date.now() - (count - i) * 15 * 60 * 1000).toISOString(),
+        open: price, high: price * 1.01, low: price * 0.99, close: price, volume: 1000,
+        source: 'test',
+      }));
+    }
+
+    it('returns hasData=false, zScore=0 and estimatedGainPct=0 when fewer than 20 candles available', () => {
+      const mockCandleService = {
+        getStoredCandles: vi.fn().mockReturnValue([]), // no candle data
+      } as any;
+
+      const optimizer = new PortfolioOptimizer(
+        mockCandleService,
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(), makeMockExecutor(), makeMockConfig(),
+      );
+
+      const result = optimizer.computePriceRatioDivergence('ETH', 'USDC', 2000, 1, 'base-sepolia');
+      expect(result.hasData).toBe(false);
+      expect(result.zScore).toBe(0);
+      expect(result.estimatedGainPct).toBe(0);
+    });
+
+    it('returns negative zScore when buy asset is cheaper than historical ratio', () => {
+      // Historical: ETH/USDC ratio = 2000 (ETH at $2000, USDC at $1)
+      // Current: ETH at $1900 (5% cheaper) — ratio 1900/1 = 1900, below historical mean of 2000
+      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH');
+      const currentEthCandle = { ...makePricedCandles(1, 1900, 'ETH')[0] };
+      const ethCandles = [currentEthCandle, ...historicalEthCandles]; // newest first
+      const usdcCandles = makePricedCandles(96, 1, 'USDC');
+
+      const mockCandleService = {
+        getStoredCandles: vi.fn().mockImplementation((sym: string) => {
+          if (sym === 'ETH') return ethCandles;
+          if (sym === 'USDC') return usdcCandles;
+          return [];
+        }),
+      } as any;
+
+      const optimizer = new PortfolioOptimizer(
+        mockCandleService,
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(), makeMockExecutor(), makeMockConfig(),
+      );
+
+      const result = optimizer.computePriceRatioDivergence('ETH', 'USDC', 1900, 1, 'base-sepolia');
+      expect(result.hasData).toBe(true);
+      expect(result.zScore).toBeLessThan(0); // buy is cheap
+      expect(result.estimatedGainPct).toBeGreaterThan(0); // positive mean-reversion potential
+    });
+
+    it('returns positive zScore when buy asset is more expensive than historical ratio', () => {
+      // Current ETH at $2100 — more expensive than historical $2000 mean
+      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH');
+      const currentEthCandle = { ...makePricedCandles(1, 2100, 'ETH')[0] };
+      const ethCandles = [currentEthCandle, ...historicalEthCandles];
+      const usdcCandles = makePricedCandles(96, 1, 'USDC');
+
+      const mockCandleService = {
+        getStoredCandles: vi.fn().mockImplementation((sym: string) => {
+          if (sym === 'ETH') return ethCandles;
+          if (sym === 'USDC') return usdcCandles;
+          return [];
+        }),
+      } as any;
+
+      const optimizer = new PortfolioOptimizer(
+        mockCandleService,
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(), makeMockExecutor(), makeMockConfig(),
+      );
+
+      const result = optimizer.computePriceRatioDivergence('ETH', 'USDC', 2100, 1, 'base-sepolia');
+      expect(result.hasData).toBe(true);
+      expect(result.zScore).toBeGreaterThan(0); // buy is expensive
+      expect(result.estimatedGainPct).toBeLessThanOrEqual(0); // no positive mean-reversion
+    });
+  });
 });

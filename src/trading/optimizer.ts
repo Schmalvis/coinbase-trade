@@ -137,6 +137,50 @@ export class PortfolioOptimizer {
     }
   }
 
+  // Price-ratio z-score divergence gate (Fable audit A1). The old gain estimate was
+  // `scoreDelta * 0.1`, derived from the same score delta that triggered the rotation —
+  // a fabricated number that always cleared the profit gate. Instead, measure how far the
+  // buy/sell price ratio has diverged from its 96-candle (15m) mean. A negative z-score
+  // means the buy asset is cheap relative to the sell asset (mean-reversion upside); a
+  // non-negative z-score means there's no statistical edge and the rotation is blocked.
+  computePriceRatioDivergence(
+    buySymbol: string,
+    sellSymbol: string,
+    currentBuyPrice: number,
+    currentSellPrice: number,
+    network: string,
+  ): { zScore: number; estimatedGainPct: number; hasData: boolean } {
+    if (currentSellPrice <= 0) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+
+    const buyCandles  = this.candleService.getStoredCandles(buySymbol,  network, '15m', 96);
+    const sellCandles = this.candleService.getStoredCandles(sellSymbol, network, '15m', 96);
+    const len = Math.min(buyCandles.length, sellCandles.length);
+
+    if (len < 20) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+
+    const ratios: number[] = [];
+    for (let i = 0; i < len; i++) {
+      const s = sellCandles[i].close;
+      if (s > 0) ratios.push(buyCandles[i].close / s);
+    }
+    if (ratios.length < 10) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+
+    const mean = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+    const variance = ratios.reduce((s, r) => s + (r - mean) ** 2, 0) / ratios.length;
+    const stdDev = Math.sqrt(variance);
+
+    const currentRatio = currentBuyPrice / currentSellPrice;
+    const zScore = stdDev > 0 ? (currentRatio - mean) / stdDev : 0;
+
+    // Mean-reversion potential: how far the ratio would move if it snapped back to mean.
+    // Positive only when the buy asset is currently below its historical ratio.
+    const estimatedGainPct = mean > 0 && currentRatio > 0
+      ? ((mean / currentRatio) - 1) * 100
+      : 0;
+
+    return { zScore, estimatedGainPct, hasData: true };
+  }
+
   getLatestScores(): OpportunityScore[] {
     return this.latestScores;
   }
@@ -442,28 +486,47 @@ export class PortfolioOptimizer {
     // 7. Estimate fees — multiply by 2 to cover both rotation legs (sell + buy)
     const estimatedFeePct = (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) * 2;
     const rawScoreDelta = candidate.buy.score - candidate.sell.score;
-    // Estimate gain from buy candidate's recent price momentum (last 5 x 15m candles)
-    const buyCandles5 = this.candleService.getStoredCandles(candidate.buy.symbol, network, '15m', 6);
-    // Gross gain proxy: each score point ≈ 0.1% expected edge (no fee subtraction — fees are
-    // checked separately by the profit gate and fee-ratio check in RiskGuard).
-    let estimatedGainPct = rawScoreDelta * 0.1;
-    if (buyCandles5.length >= 2) {
-      const newest = buyCandles5[0].close;
-      const oldest = buyCandles5[buyCandles5.length - 1].close;
-      if (oldest > 0) {
-        // Blend with capped momentum (30% weight) — avoids extrapolating recent runs
-        const momentumPct = ((newest - oldest) / oldest) * 100;
-        estimatedGainPct = Math.max(estimatedGainPct, estimatedGainPct * 0.7 + momentumPct * 0.3);
-      }
-    }
-    let sellPrice = 0;
-    if (candidate.sell.symbol === 'USDC') sellPrice = 1;
-    else if (candidate.sell.symbol === 'ETH') sellPrice = botState.lastPrice ?? 0;
+
+    // Derive current prices for the pair (same lookup pattern as the sell-price block below)
+    let currentBuyPrice = 0;
+    let currentSellPrice = 0;
+    if (candidate.buy.symbol === 'ETH') currentBuyPrice = botState.lastPrice ?? 0;
+    else if (candidate.buy.symbol === 'USDC') currentBuyPrice = 1;
     else {
-      const snap = (queries.recentAssetSnapshots.all(candidate.sell.symbol, 1) as any[])[0];
-      sellPrice = snap?.price_usd ?? 0;
+      const snap = (queries.recentAssetSnapshots.all(candidate.buy.symbol, 1) as { price_usd: number }[])[0];
+      currentBuyPrice = snap?.price_usd ?? 0;
     }
-    const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) * sellPrice;
+    if (candidate.sell.symbol === 'ETH') currentSellPrice = botState.lastPrice ?? 0;
+    else if (candidate.sell.symbol === 'USDC') currentSellPrice = 1;
+    else {
+      const snap = (queries.recentAssetSnapshots.all(candidate.sell.symbol, 1) as { price_usd: number }[])[0];
+      currentSellPrice = snap?.price_usd ?? 0;
+    }
+
+    // A1: price-ratio z-score divergence gate. Replaces the fabricated `scoreDelta * 0.1`
+    // gain estimate that always cleared the profit gate by construction.
+    const divergence = this.computePriceRatioDivergence(
+      candidate.buy.symbol, candidate.sell.symbol,
+      currentBuyPrice, currentSellPrice, network,
+    );
+
+    let estimatedGainPct: number;
+    if (divergence.hasData) {
+      // Block the rotation unless the buy asset is statistically cheap (z < 0) vs the sell asset.
+      if (divergence.zScore >= 0) {
+        logger.info(
+          `PortfolioOptimizer: rotation ${candidate.sell.symbol}→${candidate.buy.symbol} blocked` +
+          ` — no price divergence (z=${divergence.zScore.toFixed(2)})`,
+        );
+        return;
+      }
+      estimatedGainPct = divergence.estimatedGainPct;
+    } else {
+      // Insufficient price history — fall back to the score-based proxy (don't block).
+      estimatedGainPct = rawScoreDelta * 0.1;
+    }
+
+    const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) * currentSellPrice;
     const maxPosPctForSizing = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
     const sellAmount = isRebalance
       ? Math.max(0, (candidate.sell.currentWeight - maxPosPctForSizing) / 100 * totalPortfolioUsd)
