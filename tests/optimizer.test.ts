@@ -562,5 +562,44 @@ describe('PortfolioOptimizer', () => {
         expect.objectContaining({ id: 99, status: 'stuck' }),
       );
     });
+
+    it('marks rotation as stuck when leg-2 retry returns non-executed status', async () => {
+      const mockExecutor = {
+        executeRotation: vi.fn().mockResolvedValue({ status: 'leg1_done' }), // retry also fails
+      };
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 55,
+        sell_symbol: 'USDC',
+        buy_symbol: 'ETH',
+        sell_amount: 20,
+        estimated_gain_pct: 1.0,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: new Date(Date.now() - 20 * 60 * 1000).toISOString(), // 20 min ago — would normally retry
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell3',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      expect(mockExecutor.executeRotation).toHaveBeenCalledOnce();
+      expect(mockUpdateRotation.run).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 55, status: 'stuck' }),
+      );
+    });
   });
 });

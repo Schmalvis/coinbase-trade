@@ -77,6 +77,8 @@ export class PortfolioOptimizer {
 
     logger.info(`[recovery] Found ${stuck.length} stuck leg1_done rotation(s) — retrying leg 2`);
 
+    // Rows up to 24h old are candidates. Rows <1h get one retry; rows 1-24h
+    // that survived a bot restart without being retried get marked stuck immediately.
     for (const row of stuck) {
       const ageMs = Date.now() - new Date(row.timestamp).getTime();
       const ageMin = Math.round(ageMs / 60_000);
@@ -117,7 +119,16 @@ export class PortfolioOptimizer {
           });
           logger.info(`[recovery] Rotation #${row.id} recovered — leg-2 executed`);
         } else {
-          logger.warn(`[recovery] Rotation #${row.id} leg-2 retry returned status: ${result?.status}`);
+          logger.warn(`[recovery] Rotation #${row.id} leg-2 retry returned ${result?.status} — marking stuck`);
+          rotationQueries.updateRotation.run({
+            id: row.id,
+            status: 'stuck',
+            buy_amount: null,
+            sell_tx_hash: row.sell_tx_hash,
+            buy_tx_hash: null,
+            actual_gain_pct: null,
+            veto_reason: `leg-2 retry failed with status: ${result?.status ?? 'unknown'}`,
+          });
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
