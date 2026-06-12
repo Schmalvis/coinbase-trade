@@ -9,6 +9,7 @@ const mockUpsertDailyPnl = { run: vi.fn() };
 const mockGetTodayPnl = { get: vi.fn().mockReturnValue(null) };
 const mockGetDailyPnl = { get: vi.fn().mockReturnValue(null) };
 const mockGetRecentExecutedPairs = { all: vi.fn().mockReturnValue([]) };
+const mockGetStuckRotations = { all: vi.fn().mockReturnValue([]) };
 const mockGetActiveAssets = { all: vi.fn().mockReturnValue([]) };
 const mockGetWatchlist = { all: vi.fn().mockReturnValue([]) };
 const mockInsertEvent = { run: vi.fn() };
@@ -21,6 +22,7 @@ vi.mock('../src/data/db.js', () => ({
     getRecentRotations: mockGetRecentRotations,
     updateRotation: mockUpdateRotation,
     getRecentExecutedPairs: mockGetRecentExecutedPairs,
+    getStuckRotations: mockGetStuckRotations,
   },
   dailyPnlQueries: {
     upsertDailyPnl: mockUpsertDailyPnl,
@@ -130,6 +132,7 @@ describe('PortfolioOptimizer', () => {
     mockGetWatchlist.all.mockReturnValue([]);
     mockGetTodayRotationCount.get.mockReturnValue({ cnt: 0 });
     mockGetRecentExecutedPairs.all.mockReturnValue([]);
+    mockGetStuckRotations.all.mockReturnValue([]);
   });
 
   describe('computeScores', () => {
@@ -475,6 +478,89 @@ describe('PortfolioOptimizer', () => {
       // Should have attempted a rotation
       const scores = optimizer.getLatestScores();
       expect(scores.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('recoverStuckRotations', () => {
+    it('retries leg-2 for a stuck leg1_done rotation', async () => {
+      const mockExecutor = {
+        executeRotation: vi.fn().mockResolvedValue({
+          status: 'executed',
+          actualBuyUsd: 10,
+          sellTxHash: '0xsell',
+          buyTxHash: '0xbuy',
+        }),
+      };
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 42,
+        sell_symbol: 'ETH',
+        buy_symbol: 'USDC',
+        sell_amount: 10,
+        estimated_gain_pct: 1.5,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: new Date(Date.now() - 30 * 60 * 1000).toISOString(), // 30 min ago — within 1h alert window
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      expect(mockExecutor.executeRotation).toHaveBeenCalledWith('ETH', 'USDC', 10, 42);
+      expect(mockUpdateRotation.run).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 42, status: 'executed' }),
+      );
+    });
+
+    it('marks rotation as stuck and skips retry after >1 hour', async () => {
+      const mockExecutor = { executeRotation: vi.fn() };
+
+      mockGetStuckRotations.all.mockReturnValue([{
+        id: 99,
+        sell_symbol: 'ETH',
+        buy_symbol: 'CBBTC',
+        sell_amount: 15,
+        estimated_gain_pct: 2.0,
+        estimated_fee_pct: 1.0,
+        dry_run: 0,
+        network: 'base-sepolia',
+        timestamp: new Date(Date.now() - 90 * 60 * 1000).toISOString(), // 90 min ago — over 1h
+        status: 'leg1_done',
+        buy_amount: null,
+        sell_tx_hash: '0xsell2',
+        buy_tx_hash: null,
+        actual_gain_pct: null,
+        veto_reason: null,
+      }]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        mockExecutor as any,
+        makeMockConfig(),
+      );
+
+      await optimizer.recoverStuckRotations('base-sepolia');
+
+      expect(mockExecutor.executeRotation).not.toHaveBeenCalled();
+      expect(mockUpdateRotation.run).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 99, status: 'stuck' }),
+      );
     });
   });
 });

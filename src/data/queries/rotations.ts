@@ -49,6 +49,15 @@ export const rotationQueries = {
       AND datetime(timestamp) > datetime('now', '-4 hours')
     GROUP BY sell_symbol, buy_symbol
   `) as Statement<[string], { sell_symbol: string; buy_symbol: string; last_executed: string }>,
+
+  getStuckRotations: db.prepare(`
+    SELECT * FROM rotations
+    WHERE network = ?
+      AND status = 'leg1_done'
+      AND dry_run = 0
+      AND datetime(timestamp) > datetime('now', '-24 hours')
+    ORDER BY timestamp ASC
+  `) as Statement<[string], RotationRow>,
 };
 
 export interface DailyPnlRow {

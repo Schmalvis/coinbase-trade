@@ -71,6 +71,61 @@ export class PortfolioOptimizer {
     }
   }
 
+  async recoverStuckRotations(network: string): Promise<void> {
+    const stuck = rotationQueries.getStuckRotations.all(network);
+    if (stuck.length === 0) return;
+
+    logger.info(`[recovery] Found ${stuck.length} stuck leg1_done rotation(s) — retrying leg 2`);
+
+    for (const row of stuck) {
+      const ageMs = Date.now() - new Date(row.timestamp).getTime();
+      const ageMin = Math.round(ageMs / 60_000);
+
+      if (ageMs > 60 * 60 * 1000) {
+        logger.warn(
+          `[recovery] Rotation #${row.id} ${row.sell_symbol}→${row.buy_symbol} stuck >${ageMin}min — manual intervention required`
+        );
+        rotationQueries.updateRotation.run({
+          id: row.id,
+          status: 'stuck',
+          buy_amount: null,
+          sell_tx_hash: row.sell_tx_hash,
+          buy_tx_hash: null,
+          actual_gain_pct: null,
+          veto_reason: `leg-2 unrecovered after ${ageMin}min`,
+        });
+        continue;
+      }
+
+      logger.info(`[recovery] Retrying leg-2 for rotation #${row.id}: buy ${row.buy_symbol} ~$${row.sell_amount.toFixed(2)}`);
+      try {
+        const result = await (this.executor as any).executeRotation(
+          row.sell_symbol, row.buy_symbol, row.sell_amount, row.id,
+        );
+        if (result?.status === 'executed') {
+          const actualGainPct = result.actualBuyUsd != null && row.sell_amount > 0
+            ? (result.actualBuyUsd / row.sell_amount - 1) * 100
+            : null;
+          rotationQueries.updateRotation.run({
+            id: row.id,
+            status: 'executed',
+            buy_amount: result.actualBuyUsd ?? null,
+            sell_tx_hash: row.sell_tx_hash,
+            buy_tx_hash: result.buyTxHash ?? null,
+            actual_gain_pct: actualGainPct,
+            veto_reason: null,
+          });
+          logger.info(`[recovery] Rotation #${row.id} recovered — leg-2 executed`);
+        } else {
+          logger.warn(`[recovery] Rotation #${row.id} leg-2 retry returned status: ${result?.status}`);
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.error(`[recovery] Rotation #${row.id} leg-2 retry failed: ${msg}`);
+      }
+    }
+  }
+
   getLatestScores(): OpportunityScore[] {
     return this.latestScores;
   }
@@ -303,6 +358,8 @@ export class PortfolioOptimizer {
       this.loadCooldownsFromDb(network);
       this._cooldownsLoaded = true;
     }
+
+    await this.recoverStuckRotations(network);
 
     // 1. Compute scores
     const scores = this.computeScores(network);
