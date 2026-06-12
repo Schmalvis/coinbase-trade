@@ -59,7 +59,7 @@ export class PortfolioOptimizer {
   loadCooldownsFromDb(network: string): void {
     const recent = rotationQueries.getRecentExecutedPairs.all(network);
     for (const row of recent) {
-      const executedAt = new Date(/[TZ+]/.test(row.last_executed) ? row.last_executed : row.last_executed.replace(' ', 'T') + 'Z').getTime();
+      const executedAt = new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(row.last_executed) ? row.last_executed : row.last_executed.replace(' ', 'T') + 'Z').getTime();
       const fwdKey = `${row.sell_symbol}->${row.buy_symbol}`;
       const revKey = `${row.buy_symbol}->${row.sell_symbol}`;
       if ((this._rotationCooldowns.get(fwdKey) ?? 0) < executedAt) {
@@ -80,7 +80,7 @@ export class PortfolioOptimizer {
     // Rows up to 24h old are candidates. Rows <1h get one retry; rows 1-24h
     // that survived a bot restart without being retried get marked stuck immediately.
     for (const row of stuck) {
-      const ageMs = Date.now() - new Date(/[TZ+]/.test(row.timestamp) ? row.timestamp : row.timestamp.replace(' ', 'T') + 'Z').getTime();
+      const ageMs = Date.now() - new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(row.timestamp) ? row.timestamp : row.timestamp.replace(' ', 'T') + 'Z').getTime();
       const ageMin = Math.round(ageMs / 60_000);
 
       if (ageMs > 60 * 60 * 1000) {
