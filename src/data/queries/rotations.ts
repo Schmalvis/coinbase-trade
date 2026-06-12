@@ -40,6 +40,15 @@ export const rotationQueries = {
     SELECT COUNT(*) as cnt FROM rotations
     WHERE network = ? AND date(timestamp) = date('now') AND status IN ('executed', 'leg1_done')
   `) as Statement<[string], { cnt: number }>,
+
+  getRecentExecutedPairs: db.prepare(`
+    SELECT sell_symbol, buy_symbol, MAX(timestamp) as last_executed
+    FROM rotations
+    WHERE network = ?
+      AND status IN ('executed', 'leg1_done')
+      AND datetime(timestamp) > datetime('now', '-4 hours')
+    GROUP BY sell_symbol, buy_symbol
+  `) as Statement<[string], { sell_symbol: string; buy_symbol: string; last_executed: string }>,
 };
 
 export interface DailyPnlRow {

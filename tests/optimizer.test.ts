@@ -8,6 +8,7 @@ const mockUpdateRotation = { run: vi.fn() };
 const mockUpsertDailyPnl = { run: vi.fn() };
 const mockGetTodayPnl = { get: vi.fn().mockReturnValue(null) };
 const mockGetDailyPnl = { get: vi.fn().mockReturnValue(null) };
+const mockGetRecentExecutedPairs = { all: vi.fn().mockReturnValue([]) };
 const mockGetActiveAssets = { all: vi.fn().mockReturnValue([]) };
 const mockGetWatchlist = { all: vi.fn().mockReturnValue([]) };
 const mockInsertEvent = { run: vi.fn() };
@@ -19,6 +20,7 @@ vi.mock('../src/data/db.js', () => ({
     getTodayRotationCount: mockGetTodayRotationCount,
     getRecentRotations: mockGetRecentRotations,
     updateRotation: mockUpdateRotation,
+    getRecentExecutedPairs: mockGetRecentExecutedPairs,
   },
   dailyPnlQueries: {
     upsertDailyPnl: mockUpsertDailyPnl,
@@ -127,6 +129,7 @@ describe('PortfolioOptimizer', () => {
     mockGetActiveAssets.all.mockReturnValue([]);
     mockGetWatchlist.all.mockReturnValue([]);
     mockGetTodayRotationCount.get.mockReturnValue({ cnt: 0 });
+    mockGetRecentExecutedPairs.all.mockReturnValue([]);
   });
 
   describe('computeScores', () => {
@@ -270,6 +273,42 @@ describe('PortfolioOptimizer', () => {
 
       const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
       expect(result).toBeNull();
+    });
+  });
+
+  describe('loadCooldownsFromDb', () => {
+    it('loads cooldowns from DB on first tick so redeployed container respects existing cooldowns', () => {
+      // DB says ETH→USDC was executed 2 hours ago (within 4h cooldown window)
+      mockGetRecentExecutedPairs.all.mockReturnValue([
+        {
+          sell_symbol: 'ETH',
+          buy_symbol: 'USDC',
+          last_executed: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        },
+      ]);
+
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(),
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(),
+        makeMockExecutor(),
+        makeMockConfig(),
+      );
+
+      // On a fresh optimizer instance (simulating post-redeploy), the in-memory map is empty.
+      // After calling loadCooldownsFromDb, ETH→USDC should be on cooldown.
+      optimizer.loadCooldownsFromDb('base-sepolia');
+
+      // ETH is held (score below sell threshold), USDC is a strong buy candidate
+      // Without cooldown: ETH→USDC would be a valid rotation
+      // With DB-loaded cooldown: should be blocked
+      const scores = [
+        { symbol: 'ETH',  score: -25, isHeld: true,  currentWeight: 80, signals: { candle15m: { signal: 'sell', strength: 25, reason: '' }, candle1h: { signal: 'sell', strength: 25, reason: '' }, candle24h: { signal: 'sell', strength: 25, reason: '' } } },
+        { symbol: 'USDC', score:  35, isHeld: true,  currentWeight: 20, signals: { candle15m: { signal: 'buy', strength: 35, reason: '' }, candle1h: { signal: 'buy', strength: 35, reason: '' }, candle24h: { signal: 'buy', strength: 35, reason: '' } } },
+      ];
+
+      const result = optimizer.findRotationCandidate(scores as any, 'base-sepolia', 200);
+      expect(result).toBeNull(); // blocked by DB-loaded cooldown
     });
   });
 

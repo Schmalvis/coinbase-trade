@@ -43,6 +43,7 @@ export class PortfolioOptimizer {
   private _riskOff = false;
   private readonly _rotationCooldowns = new Map<string, number>();
   private readonly SAME_PAIR_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+  private _cooldownsLoaded = false;
 
   constructor(
     private readonly candleService: CandleService,
@@ -51,6 +52,26 @@ export class PortfolioOptimizer {
     private readonly executor: TradeExecutor,
     private readonly runtimeConfig: RuntimeConfig,
   ) {}
+
+  // Seed the in-memory cooldown map from the rotations table. The in-memory map is wiped on
+  // every container redeploy; deriving cooldowns from persisted rotation timestamps means a
+  // freshly-started bot still respects the 4h same-pair cooldown. See Fable audit A6.
+  loadCooldownsFromDb(network: string): void {
+    const recent = (rotationQueries.getRecentExecutedPairs as any).all(network) as {
+      sell_symbol: string; buy_symbol: string; last_executed: string
+    }[];
+    for (const row of recent) {
+      const executedAt = new Date(row.last_executed).getTime();
+      const fwdKey = `${row.sell_symbol}->${row.buy_symbol}`;
+      const revKey = `${row.buy_symbol}->${row.sell_symbol}`;
+      if ((this._rotationCooldowns.get(fwdKey) ?? 0) < executedAt) {
+        this._rotationCooldowns.set(fwdKey, executedAt);
+      }
+      if ((this._rotationCooldowns.get(revKey) ?? 0) < executedAt) {
+        this._rotationCooldowns.set(revKey, executedAt);
+      }
+    }
+  }
 
   getLatestScores(): OpportunityScore[] {
     return this.latestScores;
@@ -279,6 +300,12 @@ export class PortfolioOptimizer {
   }
 
   async tick(network: string): Promise<void> {
+    // Seed cooldowns from DB once per process so a redeployed container respects existing cooldowns.
+    if (!this._cooldownsLoaded) {
+      this.loadCooldownsFromDb(network);
+      this._cooldownsLoaded = true;
+    }
+
     // 1. Compute scores
     const scores = this.computeScores(network);
     this.latestScores = scores;
