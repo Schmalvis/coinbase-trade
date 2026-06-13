@@ -26,6 +26,15 @@ export class TradeExecutor {
     return ASSET_REGISTRY.some(a => a.symbol === symbol);
   }
 
+  /**
+   * Expose open positions (entry price + qty per symbol) for read-only consumers
+   * such as the PortfolioOptimizer cost-basis hold-bias (Fable B3). Returns a copy
+   * so callers can't mutate the executor's internal accounting.
+   */
+  getOpenPositions(): Map<string, { entryPrice: number; qty: number }> {
+    return new Map(this._openPositions);
+  }
+
   private async checkSlippage(symbol: string, address: string, amountUsd: number): Promise<boolean> {
     if (this.isRegistryAsset(symbol)) return true; // registry assets skip check
 

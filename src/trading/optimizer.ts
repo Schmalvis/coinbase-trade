@@ -368,11 +368,34 @@ export class PortfolioOptimizer {
 
     if (sellCandidates.length === 0 || buyCandidates.length === 0) return null;
 
+    // Cost-basis hold-bias (Fable B3): positions that are only marginally underwater
+    // (<5% loss) shouldn't be churned out of on a small score edge. Require an extra
+    // +15 score delta before rotating out of a small-loss position. Profitable positions
+    // and deeper losses (>=5%) get no bias.
+    const HOLD_BIAS_DELTA = 15;
+    const HOLD_BIAS_LOSS_THRESHOLD = 0.05;
+    const openPositions = this.executor.getOpenPositions();
+    const currentPriceFor = (symbol: string): number => {
+      if (symbol === 'USDC') return 1;
+      if (symbol === 'ETH') return botState.lastPrice ?? 0;
+      const snap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number }[])[0];
+      return snap?.price_usd ?? 0;
+    };
+    const holdBiasFor = (sellSymbol: string): number => {
+      const pos = openPositions.get(sellSymbol);
+      if (!pos || pos.entryPrice <= 0) return 0;
+      const currentPrice = currentPriceFor(sellSymbol);
+      if (currentPrice <= 0 || currentPrice >= pos.entryPrice) return 0; // in profit or unknown
+      const lossPct = (pos.entryPrice - currentPrice) / pos.entryPrice;
+      return lossPct < HOLD_BIAS_LOSS_THRESHOLD ? HOLD_BIAS_DELTA : 0;
+    };
+
     // Find best pair: highest (buy.score - sell.score) with delta > minDelta
     let bestPair: { sell: OpportunityScore; buy: OpportunityScore } | null = null;
     let bestDelta = -Infinity;
 
     for (const sell of sellCandidates) {
+      const requiredDelta = minDelta + holdBiasFor(sell.symbol);
       for (const buy of buyCandidates) {
         if (buy.symbol === sell.symbol) continue;
         const blacklistKey = `${sell.symbol}->${buy.symbol}`;
@@ -381,7 +404,7 @@ export class PortfolioOptimizer {
           continue;
         }
         const delta = buy.score - sell.score;
-        if (delta <= minDelta || delta <= bestDelta) continue;
+        if (delta <= requiredDelta || delta <= bestDelta) continue;
         // Same-pair cooldown: skip if this pair (or its reverse) was rotated recently
         const pairKey = `${sell.symbol}->${buy.symbol}`;
         const revKey = `${buy.symbol}->${sell.symbol}`;

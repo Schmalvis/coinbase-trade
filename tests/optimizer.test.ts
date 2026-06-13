@@ -103,8 +103,10 @@ function makeMockRiskGuard(approved = true) {
   } as any;
 }
 
-function makeMockExecutor() {
-  return {} as any;
+function makeMockExecutor(openPositions?: Map<string, { entryPrice: number; qty: number }>) {
+  return {
+    getOpenPositions: () => new Map(openPositions ?? []),
+  } as any;
 }
 
 function makeMockConfig(overrides: Record<string, any> = {}) {
@@ -239,6 +241,46 @@ describe('PortfolioOptimizer', () => {
       // delta = 30 - (-25) = 55 < 100
       const result = optimizer.findRotationCandidate(scores);
       expect(result).toBeNull();
+    });
+
+    it('applies cost-basis hold-bias: blocks rotation out of a 3% underwater position when delta is below minDelta+15', () => {
+      // ETH entry $2062, current (botState.lastPrice) $2000 → ~3.0% underwater (<5%).
+      // minDelta=30, so the hold-bias raises the required delta to 45.
+      // DEGEN is used as the buy leg (not in the correlated-pair blacklist).
+      const openPositions = new Map([['ETH', { entryPrice: 2062, qty: 1 }]]);
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(), makeMockStrategy(), makeMockRiskGuard(),
+        makeMockExecutor(openPositions),
+        makeMockConfig({ ROTATION_SELL_THRESHOLD: -20, ROTATION_BUY_THRESHOLD: 20, MIN_ROTATION_SCORE_DELTA: 30 }),
+      );
+
+      const scores: any[] = [
+        { symbol: 'ETH', score: -25, confidence: 1, signals: {}, currentWeight: 50, isHeld: true },
+        { symbol: 'DEGEN', score: 0, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+      ];
+      // delta = 0 - (-25) = 25. Below minDelta(30)+15 = 45 → blocked by hold-bias.
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
+      expect(result).toBeNull();
+    });
+
+    it('applies cost-basis hold-bias: allows rotation out of a 3% underwater position when delta exceeds minDelta+15', () => {
+      // ETH entry $2062, current $2000 → ~3.0% underwater. required delta = 45.
+      const openPositions = new Map([['ETH', { entryPrice: 2062, qty: 1 }]]);
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(), makeMockStrategy(), makeMockRiskGuard(),
+        makeMockExecutor(openPositions),
+        makeMockConfig({ ROTATION_SELL_THRESHOLD: -20, ROTATION_BUY_THRESHOLD: 20, MIN_ROTATION_SCORE_DELTA: 30 }),
+      );
+
+      const scores: any[] = [
+        { symbol: 'ETH', score: -25, confidence: 1, signals: {}, currentWeight: 50, isHeld: true },
+        { symbol: 'DEGEN', score: 35, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+      ];
+      // delta = 35 - (-25) = 60. Above minDelta(30)+15 = 45 → allowed despite hold-bias.
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
+      expect(result).not.toBeNull();
+      expect(result!.sell.symbol).toBe('ETH');
+      expect(result!.buy.symbol).toBe('DEGEN');
     });
 
     it('blocks ETH→CBETH rotation (correlated pair blacklist)', () => {
