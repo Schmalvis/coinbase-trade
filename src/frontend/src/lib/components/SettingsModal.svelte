@@ -27,6 +27,7 @@
   let maxPositionPct = 40;
   let maxDailyLossPct = 5;
   let maxRotationPct = 25;
+  let rotationSizePct = 10;
   let maxDailyRotations = 10;
   let portfolioFloorUsd = 100;
   let minRotationGainPct = 2;
@@ -59,6 +60,7 @@
     maxPositionPct = Number(s['MAX_POSITION_PCT'] ?? 40);
     maxDailyLossPct = Number(s['MAX_DAILY_LOSS_PCT'] ?? 5);
     maxRotationPct = Number(s['MAX_ROTATION_PCT'] ?? 25);
+    rotationSizePct = Number(s['ROTATION_SIZE_PCT'] ?? 10);
     maxDailyRotations = Number(s['MAX_DAILY_ROTATIONS'] ?? 10);
     portfolioFloorUsd = Number(s['PORTFOLIO_FLOOR_USD'] ?? 100);
     minRotationGainPct = Number(s['MIN_ROTATION_GAIN_PCT'] ?? 2);
@@ -103,6 +105,7 @@
       MAX_POSITION_PCT: maxPositionPct,
       MAX_DAILY_LOSS_PCT: maxDailyLossPct,
       MAX_ROTATION_PCT: maxRotationPct,
+      ROTATION_SIZE_PCT: rotationSizePct,
       MAX_DAILY_ROTATIONS: maxDailyRotations,
       PORTFOLIO_FLOOR_USD: portfolioFloorUsd,
       MIN_ROTATION_GAIN_PCT: minRotationGainPct,
@@ -242,6 +245,7 @@
           ['MAX_POSITION_PCT','Max Position %',maxPositionPct],
           ['MAX_DAILY_LOSS_PCT','Max Daily Loss %',maxDailyLossPct],
           ['MAX_ROTATION_PCT','Max Rotation %',maxRotationPct],
+          ['ROTATION_SIZE_PCT','Rotation Size % (of held asset)',rotationSizePct],
           ['MAX_DAILY_ROTATIONS','Max Daily Rotations',maxDailyRotations],
           ['PORTFOLIO_FLOOR_USD','Portfolio Floor USD',portfolioFloorUsd],
           ['MIN_ROTATION_GAIN_PCT','Min Rotation Gain %',minRotationGainPct],
@@ -259,6 +263,8 @@
               <input type="number" class={numInput} bind:value={maxDailyLossPct} />
             {:else if key === 'MAX_ROTATION_PCT'}
               <input type="number" class={numInput} bind:value={maxRotationPct} />
+            {:else if key === 'ROTATION_SIZE_PCT'}
+              <input type="number" class={numInput} bind:value={rotationSizePct} min="1" max="100" step="5" />
             {:else if key === 'MAX_DAILY_ROTATIONS'}
               <input type="number" class={numInput} bind:value={maxDailyRotations} />
             {:else if key === 'PORTFOLIO_FLOOR_USD'}
