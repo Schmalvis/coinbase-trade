@@ -9,10 +9,10 @@ type CandleStore = Map<string, Map<string, Candle[]>>;
 
 function loadCandles(db: BetterSqlite3.Database, config: BacktestConfig): CandleStore {
   const rows = db.prepare(`
-    SELECT symbol, network, interval, openTime, open, high, low, close, volume, source
+    SELECT symbol, network, interval, open_time AS openTime, open, high, low, close, volume, source
     FROM candles
-    WHERE network = ? AND openTime >= ? AND openTime <= ?
-    ORDER BY openTime ASC
+    WHERE network = ? AND open_time >= ? AND open_time <= ?
+    ORDER BY open_time ASC
   `).all(
     config.network,
     config.fromDate,
