@@ -340,14 +340,17 @@ export class PortfolioOptimizer {
     const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
     const minDelta = this.runtimeConfig.get('MIN_ROTATION_SCORE_DELTA') as number;
 
-    // Exclude grid-strategy assets from rotation
-    const gridAssets = new Set(
+    // Exclude self-managed assets from rotation — assets with their own active strategy loop
+    // (grid, sma, momentum-burst, volatility-breakout, trend-continuation) own their own trades.
+    // Allowing the optimizer to also rotate them causes fee churn with no net position change.
+    const SELF_MANAGED_STRATEGIES = new Set(['grid', 'sma', 'momentum-burst', 'volatility-breakout', 'trend-continuation']);
+    const selfManagedAssets = new Set(
       (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
-        .filter(a => a.strategy === 'grid')
+        .filter(a => SELF_MANAGED_STRATEGIES.has(a.strategy))
         .map(a => a.symbol)
     );
 
-    // Sell candidates: held assets with score below threshold (excluding grid assets).
+    // Sell candidates: held assets with score below threshold (excluding self-managed assets).
     // USDC is also a valid sell candidate when a non-USDC asset scores above buy threshold —
     // this enables USDC → strong-asset rotations when the market turns bullish.
     // Skip dust positions (< $2) — too small to route and cause phantom position-limit vetoes.
@@ -355,7 +358,7 @@ export class PortfolioOptimizer {
     const hasStrongBuyCandidate = scores.some(s => s.symbol !== 'USDC' && s.score > buyThreshold);
     const sellCandidates = scores.filter(s =>
       s.isHeld &&
-      !gridAssets.has(s.symbol) &&
+      !selfManagedAssets.has(s.symbol) &&
       (s.currentWeight / 100 * totalPortfolioUsd) >= MIN_ROTATION_SELL_USD &&
       (s.score < sellThreshold || (s.symbol === 'USDC' && hasStrongBuyCandidate))
     );
@@ -399,14 +402,15 @@ export class PortfolioOptimizer {
   ): { sell: OpportunityScore; buy: OpportunityScore } | null {
     const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
 
-    const gridAssets = new Set(
+    const SELF_MANAGED_STRATEGIES = new Set(['grid', 'sma', 'momentum-burst', 'volatility-breakout', 'trend-continuation']);
+    const selfManagedAssets = new Set(
       (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
-        .filter(a => a.strategy === 'grid')
+        .filter(a => SELF_MANAGED_STRATEGIES.has(a.strategy))
         .map(a => a.symbol)
     );
 
     const overCapAssets = scores.filter(
-      s => s.isHeld && s.symbol !== 'USDC' && s.currentWeight > maxPosPct && !gridAssets.has(s.symbol)
+      s => s.isHeld && s.symbol !== 'USDC' && s.currentWeight > maxPosPct && !selfManagedAssets.has(s.symbol)
     );
 
     if (overCapAssets.length === 0) return null;
