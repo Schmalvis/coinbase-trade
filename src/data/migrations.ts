@@ -112,6 +112,13 @@ const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    version: 7,
+    description: 'add score_delta to rotations for calibration tracking',
+    run: (db) => {
+      try { db.exec(`ALTER TABLE rotations ADD COLUMN score_delta REAL`); } catch { /* exists */ }
+    },
+  },
 ];
 
 export function getSchemaVersion(db: DB): number {

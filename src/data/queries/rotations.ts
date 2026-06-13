@@ -10,6 +10,7 @@ export interface RotationRow {
   buy_amount: number | null;
   sell_tx_hash: string | null;
   buy_tx_hash: string | null;
+  score_delta: number | null;
   estimated_gain_pct: number;
   actual_gain_pct: number | null;
   estimated_fee_pct: number;
@@ -21,9 +22,9 @@ export interface RotationRow {
 
 export const rotationQueries = {
   insertRotation: db.prepare(`
-    INSERT INTO rotations (sell_symbol, buy_symbol, sell_amount, estimated_gain_pct, estimated_fee_pct, dry_run, network)
-    VALUES (@sell_symbol, @buy_symbol, @sell_amount, @estimated_gain_pct, @estimated_fee_pct, @dry_run, @network)
-  `) as Statement<{ sell_symbol: string; buy_symbol: string; sell_amount: number; estimated_gain_pct: number; estimated_fee_pct: number; dry_run: number; network: string }>,
+    INSERT INTO rotations (sell_symbol, buy_symbol, sell_amount, score_delta, estimated_gain_pct, estimated_fee_pct, dry_run, network)
+    VALUES (@sell_symbol, @buy_symbol, @sell_amount, @score_delta, @estimated_gain_pct, @estimated_fee_pct, @dry_run, @network)
+  `) as Statement<{ sell_symbol: string; buy_symbol: string; sell_amount: number; score_delta: number | null; estimated_gain_pct: number; estimated_fee_pct: number; dry_run: number; network: string }>,
 
   updateRotation: db.prepare(`
     UPDATE rotations
@@ -57,6 +58,16 @@ export const rotationQueries = {
       AND dry_run = 0
       AND datetime(timestamp) > datetime('now', '-24 hours')
     ORDER BY timestamp ASC
+  `) as Statement<[string], RotationRow>,
+
+  getCalibrationData: db.prepare(`
+    SELECT id, timestamp, sell_symbol, buy_symbol, sell_amount, buy_amount,
+           score_delta, estimated_gain_pct, actual_gain_pct, estimated_fee_pct,
+           status, dry_run
+    FROM rotations
+    WHERE network = ?
+    ORDER BY id DESC
+    LIMIT 100
   `) as Statement<[string], RotationRow>,
 };
 

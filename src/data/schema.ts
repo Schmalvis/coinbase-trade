@@ -93,6 +93,7 @@ export function initSchema(db: DB): void {
       buy_amount          REAL,
       sell_tx_hash        TEXT,
       buy_tx_hash         TEXT,
+      score_delta         REAL,
       estimated_gain_pct  REAL NOT NULL,
       actual_gain_pct     REAL,
       estimated_fee_pct   REAL NOT NULL,

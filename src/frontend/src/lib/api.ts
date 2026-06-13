@@ -115,5 +115,8 @@ export const saveTheme = (theme: string) => put<{ ok: boolean }>('/api/theme', {
 // Faucet
 export const requestFaucet = (assetId: string) => post<{ ok: boolean }>('/api/faucet', { assetId });
 
+// Calibration
+export const fetchCalibration = () => get<any[]>('/api/calibration');
+
 // Auth
 export const logout = () => post<{ ok: boolean }>('/auth/logout');
