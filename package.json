@@ -11,7 +11,8 @@
     "dev:frontend": "cd src/frontend && npm run dev",
     "cli": "tsx cli.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "backtest": "tsx src/backtest/cli.ts"
   },
   "dependencies": {
     "@coinbase/cdp-sdk": "^1.48.0",
