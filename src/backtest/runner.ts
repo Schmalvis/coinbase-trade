@@ -8,6 +8,11 @@ import type { Candle } from '../services/candles.js';
 type CandleStore = Map<string, Map<string, Candle[]>>;
 
 function loadCandles(db: BetterSqlite3.Database, config: BacktestConfig): CandleStore {
+  // Load 30 days before fromDate so 24h/1h signals have enough lookback history.
+  // Ticks are still driven only from fromDate onward (see tick-filter below).
+  const lookbackStart = new Date(new Date(config.fromDate).getTime() - 30 * 86400_000)
+    .toISOString().slice(0, 10);
+
   const rows = db.prepare(`
     SELECT symbol, network, interval, open_time AS openTime, open, high, low, close, volume, source
     FROM candles
@@ -15,7 +20,7 @@ function loadCandles(db: BetterSqlite3.Database, config: BacktestConfig): Candle
     ORDER BY open_time ASC
   `).all(
     config.network,
-    config.fromDate,
+    lookbackStart,
     config.toDate + 'T23:59:59Z',
   ) as Candle[];
 
@@ -105,10 +110,12 @@ export async function runBacktest(config: BacktestConfig): Promise<BacktestResul
   const fullConfig: BacktestConfig = { ...config, initialBalances: balances, initialPrices: prices };
   const portfolio = new VirtualPortfolio(fullConfig);
 
-  // Build 15m tick timeline from candle openTimes across all symbols
+  // Build 15m tick timeline from fromDate onward only — lookback candles are history, not ticks
   const allTicks = new Set<string>();
   for (const sym of config.symbols) {
-    for (const c of store.get(sym)?.get('15m') ?? []) allTicks.add(c.openTime);
+    for (const c of store.get(sym)?.get('15m') ?? []) {
+      if (c.openTime >= config.fromDate) allTicks.add(c.openTime);
+    }
   }
   const ticks = [...allTicks].sort();
 
