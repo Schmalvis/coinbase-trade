@@ -58,6 +58,7 @@ export function registerRiskRoutes(router: Router, ctx: RouteContext): void {
       portfolio_usd: portfolioUsd,
       optimizer_enabled: !!engine.optimizerEnabled,
       optimizer_status: !engine.optimizerEnabled ? 'disabled' : (optimizer?.isRiskOff ? 'risk-off' : 'active'),
+      macro_gate_active: !!optimizer?.isMacroGateActive,
       has_data: !!todayPnl,
     });
   });

@@ -86,4 +86,18 @@ export const discoveredAssetQueries = {
   getActiveMemecoins: db.prepare(
     `SELECT symbol FROM discovered_assets WHERE is_memecoin = 1 AND status = 'active'`
   ) as Statement<[], { symbol: string }>,
+
+  // C3 — losing-streak auto-disable: last N realized (executed) sell trades for a symbol
+  getRecentRealizedTrades: db.prepare(
+    `SELECT realized_pnl FROM trades
+     WHERE symbol = ? AND network = ? AND action = 'sell'
+       AND realized_pnl IS NOT NULL AND status = 'executed'
+     ORDER BY id DESC LIMIT ?`
+  ) as Statement<[string, string, number], { realized_pnl: number }>,
+
+  // C3 — set shadow_until (Unix ms) to pause an asset after a losing streak
+  setShadowUntil: db.prepare(
+    `UPDATE discovered_assets SET shadow_until = @shadow_until
+     WHERE UPPER(symbol) = UPPER(@symbol) AND network = @network`
+  ) as Statement<{ shadow_until: number; symbol: string; network: string }>,
 };

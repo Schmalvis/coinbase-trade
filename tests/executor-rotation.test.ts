@@ -44,6 +44,9 @@ const mockDiscoveredAssetQueries = {
   getAddressBySymbol: { get: vi.fn().mockReturnValue(undefined) },
   getMemecoinflagBySymbol: { get: vi.fn().mockReturnValue(undefined) },
   getActiveMemecoins: { all: vi.fn().mockReturnValue([]) },
+  getAssetBySymbol: { get: vi.fn().mockReturnValue({ shadow_until: null }) },
+  getRecentRealizedTrades: { all: vi.fn().mockReturnValue([]) },
+  setShadowUntil: { run: vi.fn() },
 };
 
 vi.mock('../src/core/state.js', () => ({
@@ -68,6 +71,9 @@ vi.mock('../src/data/db.js', () => ({
     getAddressBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getAddressBySymbol.get(...args) },
     getMemecoinflagBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getMemecoinflagBySymbol.get(...args) },
     getActiveMemecoins: { all: (...args: unknown[]) => mockDiscoveredAssetQueries.getActiveMemecoins.all(...args) },
+    getAssetBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getAssetBySymbol.get(...args) },
+    getRecentRealizedTrades: { all: (...args: unknown[]) => mockDiscoveredAssetQueries.getRecentRealizedTrades.all(...args) },
+    setShadowUntil: { run: (...args: unknown[]) => mockDiscoveredAssetQueries.setShadowUntil.run(...args) },
   },
 }));
 

@@ -10,6 +10,10 @@ import { getMemecoincapVeto } from './risk-guard.js';
 
 const MAX_SHADOW_PERIOD_MS = 48 * 60 * 60 * 1000; // sanity cap — stale/corrupt values beyond 48h are ignored
 
+// C3 — auto-disable on losing streak
+const LOSING_STREAK_THRESHOLD = 3;              // consecutive realized losses before auto-pause
+const LOSING_STREAK_SHADOW_MS = 7 * 24 * 60 * 60 * 1000; // pause the asset for 7 days
+
 export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
   if (!shadowUntil) return false;
   if (shadowUntil > Date.now() + MAX_SHADOW_PERIOD_MS) return false; // value is stale or was set incorrectly
@@ -33,6 +37,38 @@ export class TradeExecutor {
    */
   getOpenPositions(): Map<string, { entryPrice: number; qty: number }> {
     return new Map(this._openPositions);
+  }
+
+  /**
+   * C3 — Auto-disable on losing streak. After a SELL realizes P&L, check whether the
+   * last LOSING_STREAK_THRESHOLD realized sells on this asset were all losses. If so,
+   * shadow the asset (effectively pausing live trades) for a week and fire a Telegram alert.
+   * Skips registry assets, assets with too few realized trades, and already-shadowed assets.
+   */
+  private checkLosingStreak(symbol: string): void {
+    if (this.isRegistryAsset(symbol)) return;
+
+    const network = botState.activeNetwork;
+    const row = discoveredAssetQueries.getAssetBySymbol.get(symbol, network) as
+      { shadow_until: number | null } | undefined;
+    if (!row) return;
+    if (isShadowPeriod(row.shadow_until)) return; // already shadowed — don't double-trigger
+
+    const recent = discoveredAssetQueries.getRecentRealizedTrades.all(
+      symbol, network, LOSING_STREAK_THRESHOLD,
+    ) as { realized_pnl: number }[];
+
+    // Only apply once we have at least the threshold number of realized sells
+    if (recent.length < LOSING_STREAK_THRESHOLD) return;
+    if (!recent.every(t => t.realized_pnl < 0)) return;
+
+    const shadowUntil = Date.now() + LOSING_STREAK_SHADOW_MS;
+    discoveredAssetQueries.setShadowUntil.run({ shadow_until: shadowUntil, symbol, network });
+
+    const msg = `🛑 ${symbol} auto-paused after ${LOSING_STREAK_THRESHOLD} consecutive realized losses — shadowed for 7 days`;
+    logger.warn(`[${symbol}] ${msg}`);
+    queries.insertEvent.run('losing_streak_pause', `${symbol}: ${LOSING_STREAK_THRESHOLD} consecutive losses`);
+    botState.emitAlert(msg);
   }
 
   private async checkSlippage(symbol: string, address: string, amountUsd: number): Promise<boolean> {
@@ -354,6 +390,8 @@ export class TradeExecutor {
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
       entryPrice: entryPriceForRecord, realizedPnl: status === 'executed' ? realizedPnl : undefined, symbol,
     });
+    // C3: after a realized sell, check for a losing streak and auto-pause if found
+    if (signal === 'sell' && status === 'executed') this.checkLosingStreak(symbol);
     logger.info(`executeForAsset complete: ${signal} ${symbol} (${status})`);
   }
 
@@ -491,6 +529,8 @@ export class TradeExecutor {
       triggeredBy: 'rotation', status: leg1Status, dryRun,
       reason: `rotation → ${buySymbol}`, realizedPnl: sellRealizedPnl, symbol: sellSymbol,
     });
+    // C3: rotation leg-1 is a realized sell — check for a losing streak on the sold asset
+    if (leg1Status === 'executed') this.checkLosingStreak(sellSymbol);
 
     // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
     if (buySymbol === 'USDC') {

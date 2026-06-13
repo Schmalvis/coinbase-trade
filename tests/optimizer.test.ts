@@ -283,6 +283,29 @@ describe('PortfolioOptimizer', () => {
       expect(result!.buy.symbol).toBe('DEGEN');
     });
 
+    it('C5 macro gate active: restricts buy candidates to USDC only (blocks crypto buys, allows sell-to-cash)', () => {
+      const optimizer = new PortfolioOptimizer(
+        makeMockCandleService(), makeMockStrategy(), makeMockRiskGuard(),
+        makeMockExecutor(),
+        makeMockConfig({ ROTATION_SELL_THRESHOLD: -20, ROTATION_BUY_THRESHOLD: 20, MIN_ROTATION_SCORE_DELTA: 30 }),
+      );
+
+      // CBBTC is held and weak (sell candidate), DEGEN is a strong crypto buy candidate,
+      // USDC is also available. With the macro gate active, the only valid buy leg is USDC.
+      const scores: any[] = [
+        { symbol: 'CBBTC', score: -40, confidence: 1, signals: {}, currentWeight: 60, isHeld: true },
+        { symbol: 'DEGEN', score: 50, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+        { symbol: 'USDC', score: 0, confidence: 1, signals: {}, currentWeight: 40, isHeld: true },
+      ];
+
+      // CBBTC→USDC delta = 0-(-40) = 40 > minDelta(30). Without gate DEGEN would win (delta 90);
+      // with gate only USDC is a valid buy leg → sell CBBTC → USDC.
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200, true);
+      expect(result).not.toBeNull();
+      expect(result!.sell.symbol).toBe('CBBTC');
+      expect(result!.buy.symbol).toBe('USDC');
+    });
+
     it('blocks ETH→CBETH rotation (correlated pair blacklist)', () => {
       const optimizer = new PortfolioOptimizer(
         makeMockCandleService(), makeMockStrategy({ signal: 'sell', strength: 80, reason: 'test' }),

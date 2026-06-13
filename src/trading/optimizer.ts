@@ -1,5 +1,6 @@
 import { CandleService } from '../services/candles.js';
 import { CandleStrategy, type CandleSignal } from '../strategy/candle.js';
+import { getMarketRegime } from '../strategy/regime.js';
 import { RiskGuard } from './risk-guard.js';
 import type { TradeExecutor } from './executor.js';
 import { botState } from '../core/state.js';
@@ -41,6 +42,7 @@ const CORRELATED_PAIR_BLACKLIST = new Set([
 export class PortfolioOptimizer {
   private latestScores: OpportunityScore[] = [];
   private _riskOff = false;
+  private _macroGateActive = false;
   private readonly _rotationCooldowns = new Map<string, number>();
   private readonly SAME_PAIR_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
   private _cooldownsLoaded = false;
@@ -206,6 +208,12 @@ export class PortfolioOptimizer {
     return this._riskOff;
   }
 
+  // C5 global macro gate state — true when ETH's 1h regime is a downtrend and all
+  // crypto buy-side rotations are suppressed (USDC-only buy leg). Surfaced for /api/risk.
+  get isMacroGateActive(): boolean {
+    return this._macroGateActive;
+  }
+
   private fetchScoreInputs(network: string): ScoreInputs {
     const symbolSet = new Set<string>();
 
@@ -335,6 +343,7 @@ export class PortfolioOptimizer {
     scores: OpportunityScore[],
     network: string,
     totalPortfolioUsd: number,
+    macroGateActive = false,
   ): { sell: OpportunityScore; buy: OpportunityScore } | null {
     const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
     const buyThreshold = this.runtimeConfig.get('ROTATION_BUY_THRESHOLD') as number;
@@ -363,8 +372,12 @@ export class PortfolioOptimizer {
       (s.score < sellThreshold || (s.symbol === 'USDC' && hasStrongBuyCandidate))
     );
 
-    // Buy candidates: any asset with score above threshold, OR USDC (always valid defensive rotation target)
-    const buyCandidates = scores.filter(s => s.score > buyThreshold || s.symbol === 'USDC');
+    // Buy candidates: any asset with score above threshold, OR USDC (always valid defensive rotation target).
+    // C5 global macro gate: when ETH is in a 1h downtrend, suppress ALL crypto buys — only USDC
+    // remains a valid buy leg, so defensive sells-to-cash still flow but no new crypto is bought.
+    const buyCandidates = macroGateActive
+      ? scores.filter(s => s.symbol === 'USDC')
+      : scores.filter(s => s.score > buyThreshold || s.symbol === 'USDC');
 
     if (sellCandidates.length === 0 || buyCandidates.length === 0) return null;
 
@@ -510,8 +523,17 @@ export class PortfolioOptimizer {
       return;
     }
 
+    // 5b. C5 global macro gate: use ETH's 1h regime as a portfolio-wide buy gate.
+    // In a downtrend, block buying any crypto (USDC-only buy leg); sells to cash still allowed.
+    const ethHourlyCandles = this.candleService.getStoredCandles('ETH', network, '1h', 50);
+    const macroGateActive = getMarketRegime(ethHourlyCandles) === 'downtrend';
+    this._macroGateActive = macroGateActive;
+    if (macroGateActive) {
+      logger.info('[optimizer] global macro gate: ETH downtrend — buy candidates restricted to USDC');
+    }
+
     // 6. Find rotation candidate (fall back to rebalance if over-cap with no normal candidate)
-    const rotationCandidate = this.findRotationCandidate(scores, network, totalPortfolioUsd);
+    const rotationCandidate = this.findRotationCandidate(scores, network, totalPortfolioUsd, macroGateActive);
     const rebalanceCandidate = rotationCandidate ? null : this.findRebalanceCandidate(scores, network);
     const candidate = rotationCandidate ?? rebalanceCandidate;
     const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
