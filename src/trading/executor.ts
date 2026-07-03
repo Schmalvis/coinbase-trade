@@ -346,10 +346,10 @@ export class TradeExecutor {
 
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
-      if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+      if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
       if (signal === 'sell') this._openPositions.delete(symbol);
       this.recordTrade({
-        signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice,
+        signal: signal as 'buy' | 'sell', amountEth: signal === 'buy' ? amount / (assetPrice || 1) : amount, price: assetPrice,
         triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
         entryPrice: entryPriceForRecord, realizedPnl, symbol,
       });
@@ -379,14 +379,14 @@ export class TradeExecutor {
 
     if (status === 'executed') {
       if (signal === 'buy') {
-        this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount });
+        this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
       } else {
         this._openPositions.delete(symbol);
       }
     }
 
     this.recordTrade({
-      signal: signal as 'buy' | 'sell', amountEth: amount, price: assetPrice, txHash,
+      signal: signal as 'buy' | 'sell', amountEth: signal === 'buy' ? amount / (assetPrice || 1) : amount, price: assetPrice, txHash,
       triggeredBy: 'asset-strategy', status, dryRun: false, reason,
       entryPrice: entryPriceForRecord, realizedPnl: status === 'executed' ? realizedPnl : undefined, symbol,
     });
@@ -469,7 +469,7 @@ export class TradeExecutor {
     buySymbol: string,
     sellAmountUsd: number,  // USD value — converted to token units internally
     rotationId?: number,
-  ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string; actualBuyUsd?: number }> {
+  ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string; actualBuyUsd?: number; failureReason?: string }> {
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
     // Convert USD sell amount to native token units for leg 1.
@@ -502,35 +502,40 @@ export class TradeExecutor {
       ? (discoveredAssetQueries.getAddressBySymbol.get(buySymbol) as { address: string } | undefined)?.address
       : undefined;
 
-    // Leg 1: Sell → USDC
+    // Leg 1: Sell → USDC (skip when sell side is already USDC — avoids USDC→USDC swap error)
     let sellTxHash: string | undefined;
     let leg1Status = 'executed';
-    if (!dryRun) {
+
+    if (sellSymbol === 'USDC') {
+      logger.info(`Rotation: sell side is USDC — skipping leg 1, spending $${sellAmountUsd.toFixed(2)} directly`);
+    } else if (!dryRun) {
       try {
         const result = await this.tools.swap(sellSymbol, 'USDC', sellTokenAmount.toString(), sellAddr);
         sellTxHash = result.txHash;
       } catch (err) {
         logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
-        return { status: 'failed' };
+        return { status: 'failed', failureReason: `leg1: ${err instanceof Error ? err.message : String(err)}` };
       }
     } else {
       logger.info(`[DRY RUN] Rotation leg 1: sell ${sellTokenAmount.toFixed(8)} ${sellSymbol} (~$${sellAmountUsd.toFixed(2)}) → USDC`);
       leg1Status = 'dry_run';
     }
 
-    // Record leg 1 sell trade
-    const sellPos = this._openPositions.get(sellSymbol);
-    const sellRealizedPnl = sellPos && price > 0
-      ? (price - sellPos.entryPrice) * Math.min(sellTokenAmount, sellPos.qty)
-      : undefined;
-    this._openPositions.delete(sellSymbol);
-    this.recordTrade({
-      signal: 'sell', amountEth: sellTokenAmount, price, txHash: sellTxHash,
-      triggeredBy: 'rotation', status: leg1Status, dryRun,
-      reason: `rotation → ${buySymbol}`, realizedPnl: sellRealizedPnl, symbol: sellSymbol,
-    });
-    // C3: rotation leg-1 is a realized sell — check for a losing streak on the sold asset
-    if (leg1Status === 'executed') this.checkLosingStreak(sellSymbol);
+    // Record leg 1 sell trade (only when actually selling a non-USDC asset)
+    if (sellSymbol !== 'USDC') {
+      const sellPos = this._openPositions.get(sellSymbol);
+      const sellRealizedPnl = sellPos && price > 0
+        ? (price - sellPos.entryPrice) * Math.min(sellTokenAmount, sellPos.qty)
+        : undefined;
+      this._openPositions.delete(sellSymbol);
+      this.recordTrade({
+        signal: 'sell', amountEth: sellTokenAmount, price, txHash: sellTxHash,
+        triggeredBy: 'rotation', status: leg1Status, dryRun,
+        reason: `rotation → ${buySymbol}`, realizedPnl: sellRealizedPnl, symbol: sellSymbol,
+      });
+      // C3: rotation leg-1 is a realized sell — check for a losing streak on the sold asset
+      if (leg1Status === 'executed') this.checkLosingStreak(sellSymbol);
+    }
 
     // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
     if (buySymbol === 'USDC') {

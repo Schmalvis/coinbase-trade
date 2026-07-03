@@ -665,7 +665,7 @@ export class PortfolioOptimizer {
     });
     const rotationId = Number(insertResult.lastInsertRowid);
 
-    let rotationResult: { status: string; sellTxHash?: string | null; buyTxHash?: string | null; actualBuyUsd?: number } | null = null;
+    let rotationResult: { status: string; sellTxHash?: string | null; buyTxHash?: string | null; actualBuyUsd?: number; failureReason?: string } | null = null;
     if (typeof (this.executor as any).executeRotation === 'function') {
       rotationResult = await (this.executor as any).executeRotation(
         candidate.sell.symbol,
@@ -693,7 +693,7 @@ export class PortfolioOptimizer {
         sell_tx_hash: rotationResult.sellTxHash ?? null,
         buy_tx_hash: rotationResult.buyTxHash ?? null,
         actual_gain_pct: actualGainPct,
-        veto_reason: null,
+        veto_reason: rotationResult.status === 'failed' ? (rotationResult.failureReason ?? 'execution failed') : null,
       });
     }
 
