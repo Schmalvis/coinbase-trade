@@ -167,6 +167,39 @@ export class PortfolioOptimizer {
   ): { zScore: number; estimatedGainPct: number; hasData: boolean } {
     if (currentSellPrice <= 0) return { zScore: 0, estimatedGainPct: 0, hasData: false };
 
+    // R4: USDC has no stored candles so the paired-ratio approach cannot apply.
+    // When one leg is USDC, analyse only the crypto side against its own 24h mean.
+    const usdcAsBuy  = buySymbol  === 'USDC';
+    const usdcAsSell = sellSymbol === 'USDC';
+    if (usdcAsBuy || usdcAsSell) {
+      const cryptoSymbol       = usdcAsBuy ? sellSymbol       : buySymbol;
+      const currentCryptoPrice = usdcAsBuy ? currentSellPrice : currentBuyPrice;
+      const cryptoCandles = this.candleService.getStoredCandles(cryptoSymbol, network, '15m', 96);
+      const cLen = cryptoCandles.length;
+      if (cLen < 21) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+
+      // Skip index 0 (current in-progress candle) — same convention as the ratio path.
+      const closes = cryptoCandles.slice(1, cLen).map(c => c.close).filter(p => p > 0);
+      if (closes.length < 10) return { zScore: 0, estimatedGainPct: 0, hasData: false };
+      const mean = closes.reduce((a, b) => a + b, 0) / closes.length;
+
+      // Simple % deviation of current price from 24h mean (no std needed for single-asset).
+      const z = mean > 0 ? (currentCryptoPrice - mean) / mean : 0;
+
+      // Caller blocks when zScore >= 0. For sell-to-USDC (usdcAsBuy), price above its mean
+      // is a GOOD exit — negate z so the gate allows it. For buy-from-USDC (usdcAsSell),
+      // price below mean is a GOOD cheap entry — z is already negative, no negation needed.
+      const zScore = usdcAsBuy ? -z : z;
+
+      // Favourable moves get +2.5%. Unfavourable directions have no mean-reversion edge —
+      // report a non-positive estimate. The caller's zScore gate blocks those rotations
+      // anyway, but the sign must be correct for test contracts and future fee-gate logic.
+      const favourable = usdcAsBuy ? z > 0 : z < 0;
+      const estimatedGainPct = favourable ? 2.5 : -1.5;
+
+      return { zScore, estimatedGainPct, hasData: true };
+    }
+
     const buyCandles  = this.candleService.getStoredCandles(buySymbol,  network, '15m', 96);
     const sellCandles = this.candleService.getStoredCandles(sellSymbol, network, '15m', 96);
     // Use at most 96 candles but skip index 0 (current/in-progress candle) to avoid
@@ -408,7 +441,7 @@ export class PortfolioOptimizer {
     let bestDelta = -Infinity;
 
     for (const sell of sellCandidates) {
-      const requiredDelta = minDelta + holdBiasFor(sell.symbol);
+      const holdBias = holdBiasFor(sell.symbol);
       for (const buy of buyCandidates) {
         if (buy.symbol === sell.symbol) continue;
         const blacklistKey = `${sell.symbol}->${buy.symbol}`;
@@ -416,8 +449,12 @@ export class PortfolioOptimizer {
           logger.debug(`Rotation ${blacklistKey} blocked — correlated pair blacklist`);
           continue;
         }
+        // R1: Hold-bias does not apply to defensive exits into USDC. The fee-buffer haircut
+        // means every entry starts marginally underwater, so hold-bias would require a delta
+        // beyond the observed score range and block all USDC exits. Allow them unconditionally.
+        const requiredDelta = minDelta + (buy.symbol === 'USDC' ? 0 : holdBias);
         const delta = buy.score - sell.score;
-        if (delta <= requiredDelta || delta <= bestDelta) continue;
+        if (delta < requiredDelta || delta <= bestDelta) continue;
         // Same-pair cooldown: skip if this pair (or its reverse) was rotated recently
         const pairKey = `${sell.symbol}->${buy.symbol}`;
         const revKey = `${buy.symbol}->${sell.symbol}`;
