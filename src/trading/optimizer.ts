@@ -304,10 +304,10 @@ export class PortfolioOptimizer {
       const candles1h = this.candleService.getStoredCandles(sym, network, '1h', 50);
       const candles24h = this.candleService.getStoredCandles(sym, network, '24h', 50);
 
-      // Evaluate signals
-      const signal15m = candles15m.length >= 26 ? this.strategy.evaluate(candles15m) : HOLD_SIGNAL;
-      const signal1h = candles1h.length >= 26 ? this.strategy.evaluate(candles1h) : HOLD_SIGNAL;
-      const signal24h = candles24h.length >= 26 ? this.strategy.evaluate(candles24h) : HOLD_SIGNAL;
+      // Evaluate signals — getStoredCandles returns newest-first (DESC); strategy expects oldest-first
+      const signal15m = candles15m.length >= 26 ? this.strategy.evaluate(candles15m.slice().reverse()) : HOLD_SIGNAL;
+      const signal1h = candles1h.length >= 26 ? this.strategy.evaluate(candles1h.slice().reverse()) : HOLD_SIGNAL;
+      const signal24h = candles24h.length >= 26 ? this.strategy.evaluate(candles24h.slice().reverse()) : HOLD_SIGNAL;
 
       // Compute signed component per timeframe
       const direction = (sig: CandleSignal) =>
@@ -558,16 +558,32 @@ export class PortfolioOptimizer {
       botState.emitAlert('RISK-OFF mode deactivated: opportunity detected');
     }
 
-    // 5. If risk-off, skip rotation logic
+    // 5. If risk-off, only allow defensive sells-to-USDC — no new crypto buys
     if (this._riskOff) {
-      logger.debug('PortfolioOptimizer: risk-off active, skipping rotation');
+      logger.debug('PortfolioOptimizer: risk-off active, defensive USDC exits only');
+      const riskOffCandidate = this.findRotationCandidate(scores, network, totalPortfolioUsd, true);
+      if (riskOffCandidate) {
+        const sellPrice = riskOffCandidate.sell.symbol === 'ETH' ? (botState.lastPrice ?? 0)
+          : riskOffCandidate.sell.symbol === 'USDC' ? 1
+          : ((queries.recentAssetSnapshots.all(riskOffCandidate.sell.symbol, 1) as { price_usd: number }[])[0]?.price_usd ?? 0);
+        const sellUsdValue = (botState.assetBalances.get(riskOffCandidate.sell.symbol) ?? 0) * sellPrice;
+        const riskOffSellAmount = sellUsdValue * ((this.runtimeConfig.get('ROTATION_SIZE_PCT') as number) / 100);
+        if (riskOffSellAmount >= 2 && typeof (this.executor as any).executeRotation === 'function') {
+          logger.info(`PortfolioOptimizer: risk-off defensive exit — ${riskOffCandidate.sell.symbol} → ${riskOffCandidate.buy.symbol} $${riskOffSellAmount.toFixed(2)}`);
+          await (this.executor as any).executeRotation(
+            riskOffCandidate.sell.symbol,
+            riskOffCandidate.buy.symbol,
+            riskOffSellAmount,
+          );
+        }
+      }
       return;
     }
 
     // 5b. C5 global macro gate: use ETH's 1h regime as a portfolio-wide buy gate.
     // In a downtrend, block buying any crypto (USDC-only buy leg); sells to cash still allowed.
     const ethHourlyCandles = this.candleService.getStoredCandles('ETH', network, '1h', 50);
-    const macroGateActive = getMarketRegime(ethHourlyCandles) === 'downtrend';
+    const macroGateActive = getMarketRegime(ethHourlyCandles.slice().reverse()) === 'downtrend';
     this._macroGateActive = macroGateActive;
     if (macroGateActive) {
       logger.info('[optimizer] global macro gate: ETH downtrend — buy candidates restricted to USDC');

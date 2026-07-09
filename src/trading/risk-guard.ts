@@ -121,7 +121,9 @@ export class RiskGuard {
     }
 
     // 5b & 6: Profit/fee gates — skip for rebalances (risk management, not profit-seeking)
-    if (!proposal.isRebalance) {
+    // Also skip for defensive USDC exits: cash preservation is always valid regardless of
+    // estimated gain. Blocking exits to USDC in a falling market is the opposite of risk management.
+    if (!proposal.isRebalance && proposal.buySymbol !== 'USDC') {
       const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 0.01;
       const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
       if (estimatedProfitUsd < minProfitUsd) {
