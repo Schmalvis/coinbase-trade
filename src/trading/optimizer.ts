@@ -392,15 +392,16 @@ export class PortfolioOptimizer {
         .map(a => a.symbol)
     );
 
-    // Sell candidates: held assets with score below threshold (excluding self-managed assets).
+    // Sell candidates: held assets with score below threshold.
     // USDC is also a valid sell candidate when a non-USDC asset scores above buy threshold —
     // this enables USDC → strong-asset rotations when the market turns bullish.
     // Skip dust positions (< $2) — too small to route and cause phantom position-limit vetoes.
+    // Self-managed assets (sma, grid, etc.) are allowed here; the inner loop blocks crypto↔crypto
+    // churn for them but permits defensive exits to USDC.
     const MIN_ROTATION_SELL_USD = 2;
     const hasStrongBuyCandidate = scores.some(s => s.symbol !== 'USDC' && s.score > buyThreshold);
     const sellCandidates = scores.filter(s =>
       s.isHeld &&
-      !selfManagedAssets.has(s.symbol) &&
       (s.currentWeight / 100 * totalPortfolioUsd) >= MIN_ROTATION_SELL_USD &&
       (s.score < sellThreshold || (s.symbol === 'USDC' && hasStrongBuyCandidate))
     );
@@ -449,6 +450,9 @@ export class PortfolioOptimizer {
           logger.debug(`Rotation ${blacklistKey} blocked — correlated pair blacklist`);
           continue;
         }
+        // Self-managed assets may only rotate to USDC (defensive exit). Block crypto↔crypto
+        // churn which would fight the asset's own strategy loop.
+        if (selfManagedAssets.has(sell.symbol) && buy.symbol !== 'USDC') continue;
         // R1: Hold-bias does not apply to defensive exits into USDC. The fee-buffer haircut
         // means every entry starts marginally underwater, so hold-bias would require a delta
         // beyond the observed score range and block all USDC exits. Allow them unconditionally.
@@ -616,7 +620,9 @@ export class PortfolioOptimizer {
     let estimatedGainPct: number;
     if (divergence.hasData) {
       // Block the rotation unless the buy asset is statistically cheap (z < 0) vs the sell asset.
-      if (divergence.zScore >= 0) {
+      // Defensive exits to USDC are exempt — in a falling market the sell asset is below its mean
+      // (zScore > 0) which is exactly when we want to exit, not stay in.
+      if (divergence.zScore >= 0 && candidate.buy.symbol !== 'USDC') {
         logger.info(
           `PortfolioOptimizer: rotation ${candidate.sell.symbol}→${candidate.buy.symbol} blocked` +
           ` — no price divergence (z=${divergence.zScore.toFixed(2)})`,

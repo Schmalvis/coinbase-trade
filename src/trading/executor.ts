@@ -539,6 +539,9 @@ export class TradeExecutor {
 
     // Defensive rotation to USDC: leg 1 IS the full rotation — no leg 2 needed
     if (buySymbol === 'USDC') {
+      // Claim per-asset cooldown so the sma loop cannot immediately rebuy the sold asset
+      // and undo the defensive exit within the same cooldown window.
+      if (leg1Status === 'executed') this._assetCooldowns.set(sellSymbol, new Date());
       botState.recordTrade(new Date());
       return { status: 'executed', sellTxHash, actualBuyUsd: sellAmountUsd };
     }
