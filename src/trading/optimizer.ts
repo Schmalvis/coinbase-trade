@@ -568,13 +568,94 @@ export class PortfolioOptimizer {
           : ((queries.recentAssetSnapshots.all(riskOffCandidate.sell.symbol, 1) as { price_usd: number }[])[0]?.price_usd ?? 0);
         const sellUsdValue = (botState.assetBalances.get(riskOffCandidate.sell.symbol) ?? 0) * sellPrice;
         const riskOffSellAmount = sellUsdValue * ((this.runtimeConfig.get('ROTATION_SIZE_PCT') as number) / 100);
-        if (riskOffSellAmount >= 2 && typeof (this.executor as any).executeRotation === 'function') {
-          logger.info(`PortfolioOptimizer: risk-off defensive exit — ${riskOffCandidate.sell.symbol} → ${riskOffCandidate.buy.symbol} $${riskOffSellAmount.toFixed(2)}`);
-          await (this.executor as any).executeRotation(
-            riskOffCandidate.sell.symbol,
-            riskOffCandidate.buy.symbol,
-            riskOffSellAmount,
-          );
+        const riskOffFeePct = (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) * 2;
+        const riskOffScoreDelta = riskOffCandidate.buy.score - riskOffCandidate.sell.score;
+        if (riskOffSellAmount >= 2) {
+          const riskOffProposal = {
+            sellSymbol: riskOffCandidate.sell.symbol,
+            buySymbol: riskOffCandidate.buy.symbol,
+            sellAmount: riskOffSellAmount,
+            estimatedGainPct: 0,
+            estimatedFeePct: riskOffFeePct,
+            buyTargetWeightPct: riskOffCandidate.buy.currentWeight + (riskOffSellAmount / (totalPortfolioUsd || 1)) * 100,
+            isRebalance: false,
+          };
+          const riskOffDecision = this.riskGuard.checkRotation(riskOffProposal, network, totalPortfolioUsd);
+          if (!riskOffDecision.approved) {
+            logger.info(`PortfolioOptimizer: risk-off exit vetoed — ${riskOffDecision.vetoReason}`);
+            const vetoInsert = rotationQueries.insertRotation.run({
+              sell_symbol: riskOffCandidate.sell.symbol,
+              buy_symbol: riskOffCandidate.buy.symbol,
+              sell_amount: riskOffSellAmount,
+              score_delta: riskOffScoreDelta,
+              estimated_gain_pct: 0,
+              estimated_fee_pct: riskOffFeePct,
+              dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
+              network,
+            });
+            rotationQueries.updateRotation.run({
+              id: Number(vetoInsert.lastInsertRowid),
+              status: 'vetoed',
+              buy_amount: null,
+              sell_tx_hash: null,
+              buy_tx_hash: null,
+              actual_gain_pct: null,
+              veto_reason: riskOffDecision.vetoReason ?? null,
+            });
+          } else {
+            const riskOffActualAmount = riskOffDecision.adjustedAmount ?? riskOffSellAmount;
+            const riskOffCooldownKey = `${riskOffCandidate.sell.symbol}->${riskOffCandidate.buy.symbol}`;
+            this._rotationCooldowns.set(riskOffCooldownKey, Date.now());
+            for (const [k, t] of this._rotationCooldowns) {
+              if (Date.now() - t > this.SAME_PAIR_COOLDOWN_MS) this._rotationCooldowns.delete(k);
+            }
+            const riskOffInsert = rotationQueries.insertRotation.run({
+              sell_symbol: riskOffCandidate.sell.symbol,
+              buy_symbol: riskOffCandidate.buy.symbol,
+              sell_amount: riskOffActualAmount,
+              score_delta: riskOffScoreDelta,
+              estimated_gain_pct: 0,
+              estimated_fee_pct: riskOffFeePct,
+              dry_run: (this.runtimeConfig.get('DRY_RUN') as boolean) ? 1 : 0,
+              network,
+            });
+            const riskOffRotationId = Number(riskOffInsert.lastInsertRowid);
+            logger.info(`PortfolioOptimizer: risk-off defensive exit — ${riskOffCandidate.sell.symbol} → ${riskOffCandidate.buy.symbol} $${riskOffActualAmount.toFixed(2)}`);
+            let riskOffResult: { status: string; sellTxHash?: string | null; buyTxHash?: string | null; actualBuyUsd?: number; failureReason?: string } | null = null;
+            if (typeof (this.executor as any).executeRotation === 'function') {
+              riskOffResult = await (this.executor as any).executeRotation(
+                riskOffCandidate.sell.symbol,
+                riskOffCandidate.buy.symbol,
+                riskOffActualAmount,
+              );
+            }
+            if (riskOffResult) {
+              const riskOffGainPct = riskOffResult.status === 'executed' && riskOffResult.actualBuyUsd != null && riskOffActualAmount > 0
+                ? (riskOffResult.actualBuyUsd / riskOffActualAmount - 1) * 100
+                : null;
+              rotationQueries.updateRotation.run({
+                id: riskOffRotationId,
+                status: riskOffResult.status === 'executed' ? 'executed'
+                  : riskOffResult.status === 'leg1_done' ? 'leg1_done'
+                  : 'failed',
+                buy_amount: riskOffResult.actualBuyUsd ?? null,
+                sell_tx_hash: riskOffResult.sellTxHash ?? null,
+                buy_tx_hash: riskOffResult.buyTxHash ?? null,
+                actual_gain_pct: riskOffGainPct,
+                veto_reason: riskOffResult.status === 'failed' ? (riskOffResult.failureReason ?? 'execution failed') : null,
+              });
+            }
+            runTransaction(() => {
+              dailyPnlQueries.upsertDailyPnl.run({
+                date: today,
+                network,
+                high_water: totalPortfolioUsd,
+                current_usd: totalPortfolioUsd,
+                rotations: todayCount + 1,
+                realized_pnl: todayRealized,
+              });
+            });
+          }
         }
       }
       return;
