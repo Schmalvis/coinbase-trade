@@ -298,6 +298,10 @@ export class PortfolioOptimizer {
 
     const scores: OpportunityScore[] = [];
 
+    // Fetch ETH 1h candles for regime context — passed to evaluate() so regime multipliers activate
+    const ethHourlyCandlesAsc = this.candleService.getStoredCandles('ETH', network, '1h', 50).slice().reverse();
+    const hourlyForRegime = ethHourlyCandlesAsc.length >= 26 ? ethHourlyCandlesAsc : undefined;
+
     for (const sym of symbols) {
       // Get candles for each timeframe
       const candles15m = this.candleService.getStoredCandles(sym, network, '15m', 50);
@@ -305,9 +309,9 @@ export class PortfolioOptimizer {
       const candles24h = this.candleService.getStoredCandles(sym, network, '24h', 50);
 
       // Evaluate signals — getStoredCandles returns newest-first (DESC); strategy expects oldest-first
-      const signal15m = candles15m.length >= 26 ? this.strategy.evaluate(candles15m.slice().reverse()) : HOLD_SIGNAL;
-      const signal1h = candles1h.length >= 26 ? this.strategy.evaluate(candles1h.slice().reverse()) : HOLD_SIGNAL;
-      const signal24h = candles24h.length >= 26 ? this.strategy.evaluate(candles24h.slice().reverse()) : HOLD_SIGNAL;
+      const signal15m = candles15m.length >= 26 ? this.strategy.evaluate(candles15m.slice().reverse(), hourlyForRegime) : HOLD_SIGNAL;
+      const signal1h = candles1h.length >= 26 ? this.strategy.evaluate(candles1h.slice().reverse(), hourlyForRegime) : HOLD_SIGNAL;
+      const signal24h = candles24h.length >= 26 ? this.strategy.evaluate(candles24h.slice().reverse(), hourlyForRegime) : HOLD_SIGNAL;
 
       // Compute signed component per timeframe
       const direction = (sig: CandleSignal) =>
@@ -341,6 +345,9 @@ export class PortfolioOptimizer {
 
       // Clamp to [-100, 100]
       score = Math.max(-100, Math.min(100, score));
+
+      // USDC is the cash benchmark — pin score to 0 to avoid synthetic signals from constant-price candles
+      if (sym === 'USDC') score = 0;
 
       const usdValue = assetUsdValues.get(sym) ?? 0;
       const currentWeight = totalPortfolioUsd > 0 ? (usdValue / totalPortfolioUsd) * 100 : 0;
@@ -542,7 +549,7 @@ export class PortfolioOptimizer {
     const riskOffThreshold = this.runtimeConfig.get('RISK_OFF_THRESHOLD') as number;
     const riskOnThreshold = this.runtimeConfig.get('RISK_ON_THRESHOLD') as number;
 
-    const allBelowRiskOff = scores.length > 0 && scores.every(s => s.score < riskOffThreshold);
+    const allBelowRiskOff = scores.length > 0 && scores.filter(s => s.symbol !== 'USDC').every(s => s.score < riskOffThreshold);
     const anyAboveRiskOn = scores.some(s => s.score > riskOnThreshold);
 
     if (allBelowRiskOff && !this._riskOff) {

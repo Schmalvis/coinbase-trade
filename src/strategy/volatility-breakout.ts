@@ -26,7 +26,7 @@ export class VolatilityBreakoutStrategy implements Strategy {
   evaluate(snapshots: Snapshot[]): StrategyResult {
     if (snapshots.length < 2) return { signal: 'hold', reason: 'Not enough data' };
 
-    const candles1h = this.getCandles1h(30);
+    const candles1h = this.getCandles1h(30).slice().reverse();
     if (candles1h.length < 22) {
       return { signal: 'hold', reason: `VBR: need 22 x 1h candles (have ${candles1h.length})` };
     }

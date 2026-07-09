@@ -34,8 +34,8 @@ export class MomentumBurstStrategy implements Strategy {
   evaluate(snapshots: Snapshot[]): StrategyResult {
     if (snapshots.length < 2) return { signal: 'hold', reason: 'Not enough data' };
 
-    const candles15m = this.getCandles15m(30);
-    const candles1h  = this.getCandles1h(25);
+    const candles15m = this.getCandles15m(30).slice().reverse();
+    const candles1h  = this.getCandles1h(25).slice().reverse();
 
     if (candles15m.length < 26) return { signal: 'hold', reason: `MBC: need 26 x 15m candles (have ${candles15m.length})` };
 
@@ -53,8 +53,8 @@ export class MomentumBurstStrategy implements Strategy {
 
     // Volume check: current vs 20-period average
     const volumes = candles15m.map(c => c.volume);
-    const avgVol = volumes.slice(0, 20).reduce((a, b) => a + b, 0) / Math.min(volumes.length, 20);
-    const volRatio = avgVol > 0 ? volumes[0] / avgVol : 0;
+    const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(volumes.length, 20);
+    const volRatio = avgVol > 0 ? volumes[volumes.length - 1] / avgVol : 0;
     const highVolume = volRatio >= 1.5;
 
     // Signal crossovers

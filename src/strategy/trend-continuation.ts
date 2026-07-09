@@ -33,7 +33,7 @@ export class TrendContinuationStrategy implements Strategy {
     if (snapshots.length < 2) return { signal: 'hold', reason: 'Not enough data' };
 
     // Hard cold-start guard: EMA-50 needs at least TCP_MIN_1H_CANDLES candles
-    const candles1h = this.getCandles1h(65);
+    const candles1h = this.getCandles1h(65).slice().reverse();
     if (candles1h.length < TCP_MIN_1H_CANDLES) {
       return {
         signal: 'hold',
@@ -41,7 +41,7 @@ export class TrendContinuationStrategy implements Strategy {
       };
     }
 
-    const candles15m = this.getCandles15m(30);
+    const candles15m = this.getCandles15m(30).slice().reverse();
     if (candles15m.length < 26) {
       return {
         signal: 'hold',
@@ -102,7 +102,7 @@ export class TrendContinuationStrategy implements Strategy {
     const rsiInZone = rsi >= 40 && rsi <= 55;
 
     const volumes = candles15m.map(c => c.volume);
-    const avgVol = volumes.slice(0, 20).reduce((a, b) => a + b, 0) / Math.min(volumes.length, 20);
+    const avgVol = volumes.slice(-20).reduce((a, b) => a + b, 0) / Math.min(volumes.length, 20);
     const quietPullback = avgVol > 0 ? volumes[volumes.length - 1] < avgVol : true;
 
     // Entry: all conditions aligned
