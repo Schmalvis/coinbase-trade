@@ -107,6 +107,60 @@ export class TradeExecutor {
     );
   }
 
+  seedOpenPositions(network: string): void {
+    try {
+      const registrySymbols = ASSET_REGISTRY.map(a => a.symbol);
+      const discoveredSymbols = (discoveredAssetQueries.getActiveAssets.all(network) as { symbol: string }[]).map(r => r.symbol);
+      const allSymbols = Array.from(new Set([...registrySymbols, ...discoveredSymbols]));
+
+      let n = 0;
+      const seededSymbols: string[] = [];
+
+      for (const symbol of allSymbols) {
+        if (symbol === 'USDC') continue;
+
+        const snapshot = queries.getLatestAssetSnapshot.get(symbol) as { balance: number; price_usd: number } | undefined;
+        if (!snapshot) continue;
+        if (snapshot.balance <= 0) continue;
+        if (snapshot.balance * snapshot.price_usd < 0.01) continue; // dust
+
+        const row = queries.lastTradeForSymbol.get(symbol, network) as
+          { action: string; price_usd: number; amount_eth: number; entry_price: number | null } | undefined;
+
+        let entryPrice: number;
+        let qty: number;
+
+        if (row && row.action === 'buy' && row.price_usd > 0) {
+          // Rule 1: last trade was a buy → use its price as cost basis
+          entryPrice = row.price_usd;
+          qty = Math.min(row.amount_eth, snapshot.balance);
+        } else if (row && row.action === 'sell' && row.entry_price != null && row.entry_price > 0) {
+          // Rule 2: last trade was a sell with entry_price recorded — carry it forward
+          entryPrice = row.entry_price;
+          qty = snapshot.balance;
+        } else {
+          // Rule 3: no usable trade history — seed at current price
+          entryPrice = snapshot.price_usd;
+          qty = snapshot.balance;
+          logger.info(`[${symbol}] No trade history — seeding at current price ${entryPrice.toFixed(4)} (rule 3)`);
+        }
+
+        if (entryPrice <= 0) continue;
+
+        this._openPositions.set(symbol, { entryPrice, qty });
+        n++;
+        seededSymbols.push(symbol);
+      }
+
+      if (n > 0) {
+        logger.info(`Seeded ${n} open positions from DB: ${seededSymbols.join(', ')}`);
+      }
+    } catch (err) {
+      logger.error('seedOpenPositions failed', err);
+      return;
+    }
+  }
+
   async execute(signal: Signal, reason: string, triggeredBy = 'strategy'): Promise<boolean> {
     if (signal === 'hold') return false;
     if (botState.isPaused) {
@@ -347,7 +401,14 @@ export class TradeExecutor {
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
       if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
-      if (signal === 'sell') this._openPositions.delete(symbol);
+      if (signal === 'sell') {
+        const posKey = symbol;
+        const existingPos = this._openPositions.get(posKey);
+        if (existingPos) {
+          existingPos.qty -= amount;
+          if (existingPos.qty <= 1e-9) this._openPositions.delete(posKey);
+        }
+      }
       this.recordTrade({
         signal: signal as 'buy' | 'sell', amountEth: signal === 'buy' ? amount / (assetPrice || 1) : amount, price: assetPrice,
         triggeredBy: 'asset-strategy', status: 'dry_run', dryRun: true, reason,
@@ -381,7 +442,12 @@ export class TradeExecutor {
       if (signal === 'buy') {
         this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
       } else {
-        this._openPositions.delete(symbol);
+        const posKey = symbol;
+        const existingPos = this._openPositions.get(posKey);
+        if (existingPos) {
+          existingPos.qty -= amount;
+          if (existingPos.qty <= 1e-9) this._openPositions.delete(posKey);
+        }
       }
     }
 
@@ -527,11 +593,16 @@ export class TradeExecutor {
       const sellRealizedPnl = sellPos && price > 0
         ? (price - sellPos.entryPrice) * Math.min(sellTokenAmount, sellPos.qty)
         : undefined;
-      this._openPositions.delete(sellSymbol);
+      if (sellPos) {
+        sellPos.qty -= sellTokenAmount;
+        if (sellPos.qty <= 1e-9) this._openPositions.delete(sellSymbol);
+      }
       this.recordTrade({
         signal: 'sell', amountEth: sellTokenAmount, price, txHash: sellTxHash,
         triggeredBy: 'rotation', status: leg1Status, dryRun,
-        reason: `rotation → ${buySymbol}`, realizedPnl: sellRealizedPnl, symbol: sellSymbol,
+        reason: `rotation → ${buySymbol}`,
+        entryPrice: sellPos?.entryPrice,
+        realizedPnl: sellRealizedPnl, symbol: sellSymbol,
       });
       // C3: rotation leg-1 is a realized sell — check for a losing streak on the sold asset
       if (leg1Status === 'executed') this.checkLosingStreak(sellSymbol);

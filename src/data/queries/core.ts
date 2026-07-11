@@ -52,6 +52,16 @@ export const queries: Record<string, Statement> = {
     FROM trades
     WHERE date(timestamp) = date('now') AND network = ? AND status = 'executed'
   `) as Statement<[string], { total: number }>,
+
+  lastTradeForSymbol: db.prepare(`
+    SELECT action, price_usd, amount_eth, entry_price
+    FROM trades
+    WHERE symbol = ? AND network = ?
+      AND status IN ('executed', 'dry_run')
+      AND triggered_by != 'shadow-period'
+      AND price_usd > 0
+    ORDER BY id DESC LIMIT 1
+  `),
 };
 
 export const portfolioSnapshotQueries = {

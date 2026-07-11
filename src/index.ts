@@ -101,6 +101,7 @@ async function main() {
   });
 
   const executor = new TradeExecutor(tools, runtimeConfig);
+  executor.seedOpenPositions(botState.activeNetwork);
   const engine = new TradingEngine(executor, runtimeConfig);
 
   const optimizer = new PortfolioOptimizer(candleService, candleStrategy, riskGuard, executor, runtimeConfig);
