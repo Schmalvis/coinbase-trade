@@ -75,9 +75,12 @@ export const discoveredAssetQueries = {
     `SELECT * FROM discovered_assets WHERE UPPER(symbol) = UPPER(?) AND network = ? LIMIT 1`
   ) as Statement<[string, string], DiscoveredAssetRow>,
 
+  // C10: scoped to network + status='active' — an unscoped lookup could return a
+  // dismissed/pending spam token's address for a symbol shared with an active/curated
+  // asset, causing the executor to swap into the wrong (impostor) contract.
   getAddressBySymbol: db.prepare(
-    `SELECT address FROM discovered_assets WHERE symbol = ? LIMIT 1`
-  ) as Statement<[string], { address: string }>,
+    `SELECT address FROM discovered_assets WHERE symbol = ? AND network = ? AND status = 'active' LIMIT 1`
+  ) as Statement<[string, string], { address: string }>,
 
   getMemecoinflagBySymbol: db.prepare(
     `SELECT is_memecoin FROM discovered_assets WHERE symbol = ? LIMIT 1`

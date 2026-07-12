@@ -1,9 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Mock viem (used by SwapService.getDecimals for unknown tokens) ──
+// ── Mock viem (used by SwapService.getDecimals for unknown tokens, and by the new
+// C8-followup settlement wait via src/wallet/erc20.js's shared getPublicClient) ──
+const mockWaitForTransactionReceipt = vi.fn().mockResolvedValue({ status: 'success' });
 vi.mock('viem', () => ({
   createPublicClient: vi.fn().mockReturnValue({
     readContract: vi.fn().mockResolvedValue(18),
+    waitForTransactionReceipt: (...args: unknown[]) => mockWaitForTransactionReceipt(...args),
   }),
   http: vi.fn().mockReturnValue({}),
 }));
@@ -52,6 +55,36 @@ describe('SwapService.swap', () => {
         fromAmount: 500000000000000000n, // 0.5 ETH in wei
       }),
     );
+    expect(result.txHash).toBe('0xtxHash');
+    expect(result.status).toBe('executed');
+    // C8-followup: swap() must wait for the on-chain receipt before returning.
+    expect(mockWaitForTransactionReceipt).toHaveBeenCalledWith(
+      expect.objectContaining({ hash: '0xtxHash' }),
+    );
+  });
+
+  // C8-followup: a tx that mines but reverts must be reported as 'failed', not 'executed' —
+  // otherwise callers record a phantom fill/P&L for a swap that moved no funds.
+  it('returns status:failed when the swap tx reverts on-chain', async () => {
+    mockWaitForTransactionReceipt.mockResolvedValueOnce({ status: 'reverted' });
+    const wc = makeWalletClient();
+    const service = new SwapService(wc as any);
+
+    const result = await service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet');
+
+    expect(result.txHash).toBe('0xtxHash');
+    expect(result.status).toBe('failed');
+  });
+
+  // C8-followup: a timeout/error fetching the receipt must not hang or crash — best-effort
+  // degrade to 'executed' (matches pre-existing behavior for the rare un-mined case).
+  it('degrades to status:executed when the receipt wait times out/errors', async () => {
+    mockWaitForTransactionReceipt.mockRejectedValueOnce(new Error('timeout'));
+    const wc = makeWalletClient();
+    const service = new SwapService(wc as any);
+
+    const result = await service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet');
+
     expect(result.txHash).toBe('0xtxHash');
     expect(result.status).toBe('executed');
   });

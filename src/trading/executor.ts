@@ -221,6 +221,9 @@ export class TradeExecutor {
       try {
         const result = await this.tools.swap(fromSymbol, toSymbol, amount.toString());
         txHash = result.txHash;
+        // C8-followup: swap() now settles on-chain before returning. A reverted tx comes back
+        // as status:'failed' WITHOUT throwing — must not be recorded as an executed trade.
+        if (result.status === 'failed') status = 'failed';
       } catch (err) {
         logger.error('Swap failed', err);
         status = 'failed';
@@ -291,7 +294,7 @@ export class TradeExecutor {
 
     // Slippage pre-check for non-registry assets (buy only)
     if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
-      const assetRow = discoveredAssetQueries.getAddressBySymbol.get(symbol) as { address: string } | undefined;
+      const assetRow = discoveredAssetQueries.getAddressBySymbol.get(symbol, botState.activeNetwork) as { address: string } | undefined;
       if (assetRow) {
         const portfolioUsd = latestSnap?.portfolio_usd ?? 0;
         const tradeUsd = portfolioUsd * 0.1; // pre-check at 10% of portfolio
@@ -400,12 +403,22 @@ export class TradeExecutor {
       }
     }
 
-    // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
-    const sanityPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
     // For buy: amount is USDC (already USD-denominated). For sell: use asset's own price, not ETH price.
     const assetSnapForValue = signal === 'sell'
       ? (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0]
       : undefined;
+
+    // C11: for a non-registry SELL, never fall back to the ETH `price` when there's no valid
+    // asset snapshot — that would value a spam token at ETH's price (~$3000/token) and
+    // corrupt the sanity check, floor, and P&L math below. Treat it as unpriceable and skip.
+    if (signal === 'sell' && !this.isRegistryAsset(symbol) && !(assetSnapForValue && assetSnapForValue.price_usd > 0)) {
+      logger.warn(`[${symbol}] SELL rejected — no valid price for value/P&L math (price=${assetSnapForValue?.price_usd ?? 'none'})`);
+      queries.insertEvent.run('sell_no_price_veto', `${symbol}: price=${assetSnapForValue?.price_usd ?? 'none'}`);
+      return;
+    }
+
+    // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
+    const sanityPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
     let tradeValueUsdAsset = signal === 'buy'
       ? amount
       : amount * (assetSnapForValue?.price_usd ?? (price || 0));
@@ -437,9 +450,13 @@ export class TradeExecutor {
       }
     }
 
-    // Resolve asset price for P&L tracking
+    // Resolve asset price for P&L tracking.
+    // C11: registry assets keep the ETH-price fallback (unchanged behavior); non-registry
+    // assets never fall back to it — the SELL guard above and C1's BUY guard already ensure
+    // a valid snapshot exists in normal operation, but this closes the path defensively too
+    // (assetPrice=0 short-circuits the position-record checks below rather than mispricing).
     const assetPriceSnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; balance: number }[])[0];
-    const assetPrice = assetPriceSnap?.price_usd ?? price;
+    const assetPrice = assetPriceSnap?.price_usd ?? (this.isRegistryAsset(symbol) ? price : 0);
 
     // Compute realized P&L for sells (don't delete position yet — wait for swap confirmation)
     let entryPriceForRecord: number | undefined;
@@ -481,7 +498,7 @@ export class TradeExecutor {
     try {
       // Resolve contract address for discovered tokens — registry/ETH/USDC resolve via getTokenAddress()
       const tokenAddr = !this.isRegistryAsset(symbol)
-        ? (discoveredAssetQueries.getAddressBySymbol.get(symbol) as { address: string } | undefined)?.address
+        ? (discoveredAssetQueries.getAddressBySymbol.get(symbol, botState.activeNetwork) as { address: string } | undefined)?.address
         : undefined;
       const result = await this.tools.swap(
         fromSymbol, toSymbol, amount.toString(),
@@ -489,6 +506,13 @@ export class TradeExecutor {
         signal === 'buy'  ? tokenAddr : undefined,
       );
       txHash = result.txHash;
+      // C8-followup: swap() now settles on-chain before returning. A reverted tx comes back
+      // as status:'failed' WITHOUT throwing — must not be recorded as an executed trade or
+      // open a phantom position below.
+      if (result.status === 'failed') {
+        logger.error(`[${symbol}] Swap reverted on-chain for ${signal} txHash=${txHash}`);
+        status = 'failed';
+      }
     } catch (err) {
       logger.error(`[${symbol}] Swap failed for ${signal}`, err);
       status = 'failed';
@@ -526,7 +550,7 @@ export class TradeExecutor {
     tokenIn: string,
     tokenOut: string,
     amountIn: string,
-  ): Promise<{ txHash?: string; dryRun: boolean }> {
+  ): Promise<{ txHash?: string; dryRun: boolean; status: string }> {
     const cooldown = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
     const lastTrade = botState.lastTradeAt;
     if (lastTrade) {
@@ -541,10 +565,17 @@ export class TradeExecutor {
     const price = botState.lastPrice ?? 0;
 
     let txHash: string | undefined;
+    let status = 'executed';
 
     if (!dryRun) {
       const result = await this.tools.ensoRoute(tokenIn, tokenOut, amountIn);
       txHash = result.txHash;
+      // C8-followup: swap() now settles on-chain before returning. A reverted tx comes back
+      // as status:'failed' WITHOUT throwing — must not be recorded as an executed trade.
+      if (result.status === 'failed') {
+        logger.error(`Enso trade reverted on-chain (${tokenIn.slice(0, 10)}→${tokenOut.slice(0, 10)}) txHash=${txHash}`);
+        status = 'failed';
+      }
     }
 
     this.recordTrade({
@@ -553,18 +584,18 @@ export class TradeExecutor {
       price,
       txHash,
       triggeredBy: 'manual-enso',
-      status: 'executed',
+      status,
       dryRun,
       reason: `enso ${tokenIn.slice(0, 10)}→${tokenOut.slice(0, 10)}`,
     });
-    return { txHash, dryRun };
+    return { txHash, dryRun, status };
   }
 
   async executeManual(
     from: TokenSymbol,
     to: TokenSymbol,
     fromAmount: string,
-  ): Promise<{ txHash?: string; dryRun: boolean }> {
+  ): Promise<{ txHash?: string; dryRun: boolean; status: string }> {
     const cooldown = this.runtimeConfig.get('TRADE_COOLDOWN_SECONDS') as number;
     const lastTrade = botState.lastTradeAt;
     if (lastTrade) {
@@ -581,14 +612,21 @@ export class TradeExecutor {
     const amountEth = from === 'ETH' ? parseFloat(fromAmount) : parseFloat(fromAmount) / (price || 1);
 
     let txHash: string | undefined;
+    let status = 'executed';
 
     if (!dryRun) {
       const result = await this.tools.swap(from, to, fromAmount);
       txHash = result.txHash;
+      // C8-followup: swap() now settles on-chain before returning. A reverted tx comes back
+      // as status:'failed' WITHOUT throwing — must not be recorded as an executed trade.
+      if (result.status === 'failed') {
+        logger.error(`Manual trade reverted on-chain (${from}→${to}) txHash=${txHash}`);
+        status = 'failed';
+      }
     }
 
-    this.recordTrade({ signal, amountEth, price, txHash, triggeredBy: 'manual', status: 'executed', dryRun, reason: 'manual', symbol: signal === 'sell' ? from : to });
-    return { txHash, dryRun };
+    this.recordTrade({ signal, amountEth, price, txHash, triggeredBy: 'manual', status, dryRun, reason: 'manual', symbol: signal === 'sell' ? from : to });
+    return { txHash, dryRun, status };
   }
 
   async executeRotation(
@@ -630,15 +668,19 @@ export class TradeExecutor {
 
     // Resolve contract addresses for discovered tokens upfront
     const sellAddr = !this.isRegistryAsset(sellSymbol)
-      ? (discoveredAssetQueries.getAddressBySymbol.get(sellSymbol) as { address: string } | undefined)?.address
+      ? (discoveredAssetQueries.getAddressBySymbol.get(sellSymbol, botState.activeNetwork) as { address: string } | undefined)?.address
       : undefined;
     const buyAddr = !this.isRegistryAsset(buySymbol)
-      ? (discoveredAssetQueries.getAddressBySymbol.get(buySymbol) as { address: string } | undefined)?.address
+      ? (discoveredAssetQueries.getAddressBySymbol.get(buySymbol, botState.activeNetwork) as { address: string } | undefined)?.address
       : undefined;
 
     // Leg 1: Sell → USDC (skip when sell side is already USDC — avoids USDC→USDC swap error)
     let sellTxHash: string | undefined;
     let leg1Status = 'executed';
+    // C8: real USDC proceeds measured from a before/after balance delta around the leg-1
+    // swap. Only set when leg 1 actually executes live in THIS call — used below to size
+    // leg 2 from reality instead of the (possibly stale-priced) intended sellAmountUsd.
+    let leg1ProceedsUsd: number | undefined;
 
     if (skipLeg1) {
       // C5: leg 1 already executed on the original rotation. Re-running it here would
@@ -648,8 +690,50 @@ export class TradeExecutor {
       logger.info(`Rotation: sell side is USDC — skipping leg 1, spending $${sellAmountUsd.toFixed(2)} directly`);
     } else if (!dryRun) {
       try {
+        // C9: clamp the leg-1 sell amount to the real on-chain balance. sellTokenAmount was
+        // derived from a (possibly stale) snapshot price — an overstated amount makes the
+        // swap fail; an understated one sells too little. Abort cleanly on ~0 balance rather
+        // than attempting a dust swap.
+        const freshSellAddr = sellAddr ?? this.tools.getTokenAddress(sellSymbol);
+        const freshSellBalance = await this.tools.getErc20Balance(freshSellAddr);
+        if (freshSellBalance <= 1e-9) {
+          logger.warn(`Rotation leg 1 aborted — fresh on-chain balance of ${sellSymbol} is ~0`);
+          return { status: 'failed', failureReason: `leg1: ${sellSymbol} on-chain balance is ~0` };
+        }
+        if (freshSellBalance < sellTokenAmount) {
+          logger.info(`Rotation leg 1: clamping ${sellSymbol} sell amount ${sellTokenAmount.toFixed(8)} → fresh balance ${freshSellBalance.toFixed(8)}`);
+          sellTokenAmount = freshSellBalance;
+        }
+
+        // C8: measure USDC balance immediately before/after the swap to know the real proceeds.
+        let usdcBefore: number | undefined;
+        try {
+          usdcBefore = await this.tools.getErc20BalanceBySymbol('USDC');
+        } catch {
+          usdcBefore = undefined;
+        }
+
         const result = await this.tools.swap(sellSymbol, 'USDC', sellTokenAmount.toString(), sellAddr);
         sellTxHash = result.txHash;
+
+        // C8-followup: swap() now waits for on-chain settlement before returning. A reverted
+        // tx comes back as status:'failed' WITHOUT throwing — must abort the rotation here
+        // (not proceed to leg 2, not record a phantom sell) rather than falling through as if
+        // leg 1 succeeded.
+        if (result.status === 'failed') {
+          logger.error(`Rotation leg 1 reverted on-chain (sell ${sellSymbol}) txHash=${sellTxHash}`);
+          return { status: 'failed', sellTxHash, failureReason: `leg1: swap reverted on-chain (txHash=${sellTxHash})` };
+        }
+
+        if (usdcBefore != null) {
+          try {
+            const usdcAfter = await this.tools.getErc20BalanceBySymbol('USDC');
+            const measured = usdcAfter - usdcBefore;
+            if (measured > 0) leg1ProceedsUsd = measured;
+          } catch (err) {
+            logger.warn(`Rotation leg 1: could not measure post-swap USDC balance — leg 2 will size from intended amount`, err);
+          }
+        }
       } catch (err) {
         logger.error(`Rotation leg 1 failed (sell ${sellSymbol})`, err);
         return { status: 'failed', failureReason: `leg1: ${err instanceof Error ? err.message : String(err)}` };
@@ -687,12 +771,20 @@ export class TradeExecutor {
       // and undo the defensive exit within the same cooldown window.
       if (leg1Status === 'executed') this._assetCooldowns.set(sellSymbol, new Date());
       botState.recordTrade(new Date());
-      return { status: 'executed', sellTxHash, actualBuyUsd: sellAmountUsd };
+      // C8: report the measured leg-1 proceeds when available (live exit) — falls back to
+      // the intended amount for skipLeg1 recovery / dry-run, where nothing was measured.
+      return { status: 'executed', sellTxHash, actualBuyUsd: leg1ProceedsUsd ?? sellAmountUsd };
     }
 
     // Leg 2: USDC → Buy target. Spend only the proceeds from leg 1, not all USDC.
-    const leg2UsdcAmount = sellAmountUsd * 0.98; // 2% buffer for fees
+    // C8: when leg 1 executed live in THIS call and its real proceeds were measured, size
+    // leg 2 from those measured proceeds. skipLeg1 recovery (leg 1 ran in a prior process —
+    // no delta measurable here), a USDC-sourced sell (no leg-1 swap at all), and dry-run
+    // (nothing actually moved on-chain) all fall back to the existing sellAmountUsd-based
+    // sizing — the pre-existing safe "spend only proceeds, not all USDC" behavior.
+    const leg2UsdcAmount = (leg1ProceedsUsd ?? sellAmountUsd) * 0.98; // 2% buffer for fees
     let buyTxHash: string | undefined;
+    let actualLeg2Spent: number | undefined;
 
     // C4: slippage-check the buy leg for non-registry targets (fail-closed). Rotations
     // previously bought discovered tokens with no slippage screening at all. If the check
@@ -721,8 +813,19 @@ export class TradeExecutor {
           return { status: 'leg1_done', sellTxHash };
         }
         const actualLeg2 = Math.min(leg2UsdcAmount, freshUsdcBalance * 0.99);
+        actualLeg2Spent = actualLeg2;
         const result = await this.tools.swap('USDC', buySymbol, actualLeg2.toString(), undefined, buyAddr);
         buyTxHash = result.txHash;
+
+        // C8-followup: swap() now waits for on-chain settlement before returning. A reverted
+        // tx comes back as status:'failed' WITHOUT throwing — leg 1's proceeds are already in
+        // USDC, so the rotation stays leg1_done (not 'failed') rather than recording a
+        // phantom buy fill/position below.
+        if (result.status === 'failed') {
+          logger.error(`Rotation leg 2 reverted on-chain (buy ${buySymbol}) txHash=${buyTxHash}`);
+          botState.recordTrade(new Date());
+          return { status: 'leg1_done', sellTxHash, buyTxHash };
+        }
       } catch (err) {
         logger.error(`Rotation leg 2 failed (buy ${buySymbol})`, err);
         botState.recordTrade(new Date());
@@ -732,10 +835,13 @@ export class TradeExecutor {
       logger.info(`[DRY RUN] Rotation leg 2: buy ${buySymbol} with $${leg2UsdcAmount.toFixed(2)} USDC`);
     }
 
-    // Record leg 2 buy trade
+    // Record leg 2 buy trade. C8: use the actually-spent amount when known (live — clamped to
+    // real fresh USDC balance above), else the intended/simulated amount (dry-run), so the
+    // recorded position/trade and the returned actualBuyUsd agree on the same real number.
+    const leg2SpentForRecord = actualLeg2Spent ?? leg2UsdcAmount;
     const buySnapPrice = buySymbol === 'ETH' ? (botState.lastPrice ?? 0)
       : (queries.recentAssetSnapshots.all(buySymbol, 1) as { price_usd: number }[])[0]?.price_usd ?? 0;
-    const buyTokenAmount = buySnapPrice > 0 ? leg2UsdcAmount / buySnapPrice : 0;
+    const buyTokenAmount = buySnapPrice > 0 ? leg2SpentForRecord / buySnapPrice : 0;
     this._openPositions.set(buySymbol, { entryPrice: buySnapPrice, qty: buyTokenAmount });
     this.recordTrade({
       signal: 'buy', amountEth: buyTokenAmount, price: buySnapPrice, txHash: buyTxHash,
@@ -744,7 +850,7 @@ export class TradeExecutor {
     });
 
     botState.recordTrade(new Date());
-    return { status: 'executed', sellTxHash, buyTxHash, actualBuyUsd: leg2UsdcAmount };
+    return { status: 'executed', sellTxHash, buyTxHash, actualBuyUsd: leg2SpentForRecord };
   }
 
   private recordTrade(t: {

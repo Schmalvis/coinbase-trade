@@ -1,8 +1,11 @@
-import { createPublicClient, http } from 'viem';
-import { base, baseSepolia } from 'viem/chains';
 import type { CdpWalletClient } from './client.js';
 import { logger } from '../core/logger.js';
 import { ASSET_REGISTRY } from '../assets/registry.js';
+import { getPublicClient } from './erc20.js';
+
+// C8-followup: bounded wait for the on-chain receipt after submitting a swap. Base blocks
+// land in ~2s, but this caps the worst case so a stuck/never-mined tx can't hang the poll loop.
+const RECEIPT_TIMEOUT_MS = 90_000;
 
 export interface SwapPrice {
   fromToken: string;
@@ -80,8 +83,7 @@ export class SwapService {
     if (TOKEN_DECIMALS[lower] !== undefined) return TOKEN_DECIMALS[lower];
 
     // Read from contract
-    const chain = network === 'base-mainnet' ? base : baseSepolia;
-    const client = createPublicClient({ chain, transport: http() });
+    const client = getPublicClient(network);
     const dec = await client.readContract({
       address: tokenAddress as `0x${string}`,
       abi: ERC20_DECIMALS_ABI,
@@ -89,6 +91,42 @@ export class SwapService {
     }) as number;
     TOKEN_DECIMALS[lower] = dec; // cache
     return dec;
+  }
+
+  /**
+   * C8-followup: wait for the submitted swap tx to actually settle on-chain, and interpret
+   * the outcome. Called only for real (non-dry-run) swaps — callers gate on DRY_RUN before
+   * ever reaching swap(), so this never runs in dry-run mode.
+   *
+   * - receipt.status === 'success'  → 'executed' (tx mined, effects applied — callers can now
+   *   safely read post-swap balances, e.g. C8's leg-1 proceeds measurement).
+   * - receipt.status === 'reverted' → 'failed' (tx mined but reverted — no funds moved; must
+   *   NOT be reported as executed, or callers record a phantom fill/P&L).
+   * - timeout or a receipt-fetch error → 'executed' (best-effort degrade). We deliberately do
+   *   NOT hang the poll loop waiting indefinitely, and we deliberately do NOT report 'failed'
+   *   on a merely-unconfirmed tx (it may still land and succeed — reporting 'failed' here could
+   *   cause a caller to attempt a compensating action against a swap that actually succeeds).
+   *   This matches pre-existing behavior for the rare un-mined case: the tx hash is still
+   *   returned, and downstream balance-delta measurements (e.g. C8) simply see no delta yet
+   *   and fall back to their pre-existing safe sizing rather than the real measured proceeds.
+   */
+  private async waitForSettlement(txHash: string, network: string): Promise<'executed' | 'failed'> {
+    try {
+      const client = getPublicClient(network);
+      const receipt = await client.waitForTransactionReceipt({
+        hash: txHash as `0x${string}`,
+        timeout: RECEIPT_TIMEOUT_MS,
+      });
+      if (receipt.status === 'reverted') {
+        logger.error(`Swap tx reverted on-chain: ${txHash}`);
+        return 'failed';
+      }
+      return 'executed';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`Swap receipt wait failed/timed out for ${txHash} — treating as executed (best-effort, unconfirmed): ${msg}`);
+      return 'executed';
+    }
   }
 
   async getSwapPrice(
@@ -147,7 +185,12 @@ export class SwapService {
         slippageBps: this.isRegistrySwap(fromTokenAddress, toTokenAddress) ? 150 : 200,
       });
 
-      logger.info(`Swap executed: ${fromAmount} ${fromTokenAddress} → ${toTokenAddress} txHash=${transactionHash}`);
+      logger.info(`Swap submitted: ${fromAmount} ${fromTokenAddress} → ${toTokenAddress} txHash=${transactionHash} — waiting for settlement`);
+      const settleStatus = await this.waitForSettlement(transactionHash, network);
+      if (settleStatus === 'failed') {
+        return { txHash: transactionHash, status: 'failed' };
+      }
+      logger.info(`Swap settled: ${fromAmount} ${fromTokenAddress} → ${toTokenAddress} txHash=${transactionHash}`);
       return { txHash: transactionHash, status: 'executed' };
 
     } catch (cdpErr) {
@@ -236,6 +279,11 @@ export class SwapService {
       },
     });
 
+    logger.info(`0x swap submitted: txHash=${transactionHash} — waiting for settlement`);
+    const settleStatus = await this.waitForSettlement(transactionHash, network);
+    if (settleStatus === 'failed') {
+      return { txHash: transactionHash, status: 'failed' };
+    }
     return { txHash: transactionHash, status: 'executed_via_0x' };
   }
 }

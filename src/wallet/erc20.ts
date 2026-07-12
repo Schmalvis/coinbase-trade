@@ -23,7 +23,7 @@ const ERC20_ABI = [
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const clientCache = new Map<string, any>();
 
-function getPublicClient(network: string) {
+export function getPublicClient(network: string) {
   if (clientCache.has(network)) return clientCache.get(network)!;
   const chain = network === 'base-mainnet' ? base : baseSepolia;
   const client = createPublicClient({ chain, transport: http() });

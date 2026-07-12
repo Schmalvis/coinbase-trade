@@ -29,8 +29,14 @@ const mockState = {
 };
 
 // Minimal mock for tools
+// C9 needs getTokenAddress() (to resolve a fresh-balance lookup address for registry sell
+// symbols like ETH, which have no discovered_assets row) and getErc20Balance() (the fresh
+// on-chain balance used to clamp the leg-1 sell amount). Both default to values that never
+// clamp/abort so existing test expectations are unaffected unless a test overrides them.
 const mockTools = {
   swap: vi.fn().mockResolvedValue({ txHash: '0xabc', status: 'success' }),
+  getTokenAddress: vi.fn().mockReturnValue('0xnative'),
+  getErc20Balance: vi.fn().mockResolvedValue(1_000_000),
 };
 
 // Minimal mock for queries
@@ -85,7 +91,12 @@ describe('TradeExecutor.executeRotation()', () => {
     mockState.lastTradeAt = null;
     mockState.lastPrice = 3000;
     mockState.lastUsdcBalance = 50;
-    mockTools.swap.mockResolvedValue({ txHash: '0xabc', status: 'success' });
+    // mockReset() (not just clearAllMocks) so any unconsumed .mockResolvedValueOnce() entries
+    // from a prior test's over-provisioned queue (e.g. a leg 2 value queued but never reached
+    // because the rotation returned early) can never leak into the next test's call sequence.
+    mockTools.swap.mockReset().mockResolvedValue({ txHash: '0xabc', status: 'success' });
+    mockTools.getTokenAddress.mockReturnValue('0xnative');
+    mockTools.getErc20Balance.mockResolvedValue(1_000_000);
     mockDiscoveredAssetQueries.getAddressBySymbol.get.mockReturnValue(undefined);
   });
 
@@ -181,5 +192,105 @@ describe('TradeExecutor.executeRotation()', () => {
 
     expect(result.status).toBe('executed');
     expect(mockTools.swap).toHaveBeenNthCalledWith(1, 'MYTOKEN', 'USDC', expect.any(String), '0xtoken456');
+  });
+
+  // C9 — clamp leg-1 sell amount to the real on-chain balance
+  it('C9: aborts leg 1 cleanly when the fresh on-chain sell balance is ~0', async () => {
+    mockTools.getErc20Balance.mockResolvedValueOnce(0);
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+
+    expect(result.status).toBe('failed');
+    expect(result.failureReason).toMatch(/on-chain balance/);
+    expect(mockTools.swap).not.toHaveBeenCalled();
+  });
+
+  it('C9: clamps leg-1 sell amount down to the fresh on-chain balance when lower than intended', async () => {
+    // Intended sellTokenAmount = 0.05 / 3000 ≈ 0.0000167 ETH — fresh balance is smaller.
+    mockTools.getErc20Balance.mockResolvedValueOnce(0.00001);
+    mockTools.swap
+      .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+      .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+
+    expect(result.status).toBe('executed');
+    const sellAmountArg = mockTools.swap.mock.calls[0][2] as string;
+    expect(parseFloat(sellAmountArg)).toBeCloseTo(0.00001, 8);
+  });
+
+  // C8 — size leg 2 from measured leg-1 proceeds, not the intended amount
+  it('C8: sizes leg 2 from measured leg-1 USDC proceeds rather than the intended sellAmountUsd', async () => {
+    const localTools = {
+      ...mockTools,
+      swap: vi.fn()
+        .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+        .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' }),
+      // before leg 1 = 50, after leg 1 = 53.5 → measured proceeds = 3.5 (not 20 * 0.98 = 19.6)
+      getErc20BalanceBySymbol: vi.fn()
+        .mockResolvedValueOnce(50)
+        .mockResolvedValueOnce(53.5)
+        .mockResolvedValue(53.5),
+    };
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(localTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 20);
+
+    expect(result.status).toBe('executed');
+    const buyAmountArg = localTools.swap.mock.calls[1][2] as string;
+    expect(parseFloat(buyAmountArg)).toBeCloseTo(3.43, 6); // 3.5 * 0.98
+    expect(result.actualBuyUsd).toBeCloseTo(3.43, 6);
+  });
+
+  // C8-followup: swap() now settles on-chain before returning. A reverted tx comes back as
+  // status:'failed' WITHOUT throwing — the rotation must abort, not proceed to leg 2.
+  it('C8-followup: aborts rotation when leg 1 reverts on-chain (status:failed, no throw)', async () => {
+    mockTools.swap.mockResolvedValueOnce({ txHash: '0xreverted', status: 'failed' });
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+
+    expect(result.status).toBe('failed');
+    expect(result.sellTxHash).toBe('0xreverted');
+    expect(result.failureReason).toMatch(/reverted/);
+    // Leg 1 reverted — leg 2 must never be attempted.
+    expect(mockTools.swap).toHaveBeenCalledTimes(1);
+  });
+
+  // C8-followup: a leg-2 revert must leave the rotation leg1_done (leg 1's proceeds are
+  // already safely in USDC), not record a phantom buy fill.
+  it('C8-followup: leaves rotation leg1_done when leg 2 reverts on-chain (status:failed, no throw)', async () => {
+    mockTools.swap
+      .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+      .mockResolvedValueOnce({ txHash: '0xreverted', status: 'failed' });
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+
+    expect(result.status).toBe('leg1_done');
+    expect(result.sellTxHash).toBe('0xsell');
+    expect(result.buyTxHash).toBe('0xreverted');
+    expect(mockState.recordTrade).toHaveBeenCalled();
+  });
+
+  it('C8: falls back to sellAmountUsd-based sizing on skipLeg1 recovery (no leg-1 delta to measure)', async () => {
+    mockTools.swap.mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+    const rc = makeRc({ DRY_RUN: false });
+    const executor = new TradeExecutor(mockTools as any, rc as any);
+    const result = await executor.executeRotation('ETH', 'CBBTC', 10, 42, true);
+
+    expect(result.status).toBe('executed');
+    // No leg-1 swap in recovery mode — the only swap call is leg 2, sized off sellAmountUsd.
+    expect(mockTools.swap).toHaveBeenCalledTimes(1);
+    const buyAmountArg = mockTools.swap.mock.calls[0][2] as string;
+    expect(parseFloat(buyAmountArg)).toBeCloseTo(9.8, 6); // 10 * 0.98
   });
 });
