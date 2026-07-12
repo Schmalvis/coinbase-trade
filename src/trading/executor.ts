@@ -1,6 +1,6 @@
 import { CoinbaseTools, type TokenSymbol } from '../wallet/tools.js';
 import { botState } from '../core/state.js';
-import { queries, discoveredAssetQueries } from '../data/db.js';
+import { queries, discoveredAssetQueries, dailyPnlQueries } from '../data/db.js';
 import { logger } from '../core/logger.js';
 import type { Signal } from '../strategy/base.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
@@ -85,6 +85,13 @@ export class TradeExecutor {
 
     try {
       const impact = await this.tools.getQuoteImpactPct(address, amountUsd);
+      // C4: fail-CLOSED for non-registry assets. A null impact means we could not obtain a
+      // reliable slippage reading (no 0x key, HTTP error, or the quote lacked an impact field).
+      // We must not trade blind into an illiquid token, so block rather than assume 0% impact.
+      if (impact === null) {
+        logger.warn(`[${symbol}] Slippage unknown (no reliable quote) — trade vetoed (fail-closed)`);
+        return false;
+      }
       this.slippageCache.set(symbol, impact);
       if (impact > 1.5) {
         logger.warn(`[${symbol}] Slippage ${impact.toFixed(2)}% > 1.5% — trade vetoed`);
@@ -92,8 +99,8 @@ export class TradeExecutor {
       }
       return true;
     } catch (err) {
-      logger.warn(`[${symbol}] Slippage check failed: ${err} — allowing trade (fail-open)`);
-      return true; // fail-open: don't block trades on API errors
+      logger.warn(`[${symbol}] Slippage check failed: ${err} — trade vetoed (fail-closed)`);
+      return false; // fail-closed: never trade a non-registry asset we cannot price-check
     }
   }
 
@@ -242,6 +249,29 @@ export class TradeExecutor {
       return;
     }
 
+    // Safety: daily-loss limit (C6). The optimizer path enforces MAX_DAILY_LOSS_PCT via
+    // RiskGuard, but per-asset trades bypassed it entirely — a day of per-asset bleed with
+    // no rotation candidate never halted. Mirror RiskGuard's close-based metric here
+    // (baseline = day's opening value, falling back to high_water for legacy rows).
+    const maxDailyLossPct = this.runtimeConfig.get('MAX_DAILY_LOSS_PCT') as number;
+    const todayPnlRow = dailyPnlQueries.getTodayPnl.get(botState.activeNetwork) as
+      { open_usd: number | null; high_water: number | null } | undefined;
+    const lossBaseline = (todayPnlRow?.open_usd && todayPnlRow.open_usd > 0
+      ? todayPnlRow.open_usd
+      : todayPnlRow?.high_water) ?? 0;
+    const currentPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
+    if (lossBaseline > 0 && currentPortfolioUsd > 0) {
+      const lossPct = ((lossBaseline - currentPortfolioUsd) / lossBaseline) * 100;
+      if (lossPct > maxDailyLossPct) {
+        logger.warn(`[${symbol}] Trade blocked — daily loss ${lossPct.toFixed(1)}% > ${maxDailyLossPct}%`);
+        if (!botState.isPaused) {
+          botState.setStatus('paused');
+          botState.emitAlert(`Daily loss limit hit (${lossPct.toFixed(1)}%). Trading paused.`);
+        }
+        return;
+      }
+    }
+
     // Safety: position limit check for buys (C3)
     if (signal === 'buy') {
       const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
@@ -353,6 +383,23 @@ export class TradeExecutor {
 
     const price = botState.lastPrice ?? 0;
 
+    // C1: reject a BUY of a non-registry asset that has no fresh, positive price.
+    // Illiquid/spam tokens frequently price at $0 (feed dropout or genuinely worthless);
+    // buying them spends real USDC on effectively-worthless fills. Registry assets
+    // (ETH/CBBTC/CBETH/USDC) are exempt — they price via Pyth/fixed and keep their flow.
+    if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
+      const buySnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; timestamp: string }[])[0];
+      const MAX_PRICE_AGE_MS = 30 * 60 * 1000; // stale price (>30min) = don't buy
+      const buyPriceAgeMs = buySnap?.timestamp
+        ? Date.now() - new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(buySnap.timestamp) ? buySnap.timestamp : buySnap.timestamp.replace(' ', 'T') + 'Z').getTime()
+        : Infinity;
+      if (!buySnap || !(buySnap.price_usd > 0) || buyPriceAgeMs > MAX_PRICE_AGE_MS) {
+        logger.warn(`[${symbol}] BUY rejected — no fresh price (price=$${buySnap?.price_usd ?? 'none'}, age=${Number.isFinite(buyPriceAgeMs) ? Math.round(buyPriceAgeMs / 1000) + 's' : 'n/a'})`);
+        queries.insertEvent.run('buy_no_price_veto', `${symbol}: price=${buySnap?.price_usd ?? 'none'}`);
+        return;
+      }
+    }
+
     // Sanity check: reject trades exceeding 2x portfolio value (likely a parsing error)
     const sanityPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
     // For buy: amount is USDC (already USD-denominated). For sell: use asset's own price, not ETH price.
@@ -370,6 +417,13 @@ export class TradeExecutor {
 
     // Minimum trade value guard — floor up to minimum if balance allows, skip if too small
     if (tradeValueUsdAsset < MIN_TRADE_VALUE_USD) {
+      // C1: never FORCE a floored $2 trade on a non-registry (discovered/spam) asset.
+      // Forcing $2 into an illiquid token buys near-worthless fills and pays fees that
+      // exceed the trade. Registry assets keep the floor behaviour for dust consolidation.
+      if (!this.isRegistryAsset(symbol)) {
+        logger.info(`[${symbol}] Trade skipped — $${tradeValueUsdAsset.toFixed(2)} below $${MIN_TRADE_VALUE_USD} min (no floor for non-registry assets)`);
+        return;
+      }
       const assetUsdPrice = signal === 'buy' ? 1 : (assetSnapForValue?.price_usd ?? (price || 1));
       const balanceUsd = balance * assetUsdPrice;
       if (balanceUsd >= MIN_TRADE_VALUE_USD * 2) {
@@ -400,7 +454,9 @@ export class TradeExecutor {
 
     if (dryRun) {
       logger.info(`[DRY RUN] ${signal} ${symbol} amount=${amount}: ${reason}`);
-      if (signal === 'buy') this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
+      // C1: only record a position when we have a real entry price. entryPrice=0 corrupts
+      // realized-P&L accounting (a later sell can't compute gain from a 0 basis).
+      if (signal === 'buy' && assetPrice > 0) this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / assetPrice });
       if (signal === 'sell') {
         const posKey = symbol;
         const existingPos = this._openPositions.get(posKey);
@@ -440,7 +496,12 @@ export class TradeExecutor {
 
     if (status === 'executed') {
       if (signal === 'buy') {
-        this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / (assetPrice || 1) });
+        // C1: skip recording a position without a real entry price (would corrupt P&L).
+        if (assetPrice > 0) {
+          this._openPositions.set(symbol, { entryPrice: assetPrice, qty: amount / assetPrice });
+        } else {
+          logger.warn(`[${symbol}] Position not recorded — asset price is 0`);
+        }
       } else {
         const posKey = symbol;
         const existingPos = this._openPositions.get(posKey);
@@ -535,15 +596,22 @@ export class TradeExecutor {
     buySymbol: string,
     sellAmountUsd: number,  // USD value — converted to token units internally
     rotationId?: number,
+    skipLeg1 = false,       // C5: recovery of a leg1_done rotation — leg 1 already sold, do leg 2 only
   ): Promise<{ status: 'executed' | 'leg1_done' | 'failed'; sellTxHash?: string; buyTxHash?: string; actualBuyUsd?: number; failureReason?: string }> {
     const dryRun = this.runtimeConfig.get('DRY_RUN') as boolean;
 
     // Convert USD sell amount to native token units for leg 1.
     // Previously this passed USD directly to tools.swap which expects token units,
     // causing swaps 100-1000x larger than intended (e.g. "8.87 ETH" instead of "$8.87 of ETH").
-    let sellTokenAmount: number;
+    let sellTokenAmount = 0;
     let price = 0;
-    if (sellSymbol === 'USDC') {
+    if (skipLeg1) {
+      // Recovery: proceeds from the original leg 1 are already in USDC. We only need a
+      // reference price for bookkeeping — never re-sell, so no price>0 gate is required.
+      price = sellSymbol === 'USDC' ? 1
+        : sellSymbol === 'ETH' ? (botState.lastPrice ?? 0)
+        : ((queries.recentAssetSnapshots.all(sellSymbol, 1) as { price_usd: number }[])[0]?.price_usd ?? 0);
+    } else if (sellSymbol === 'USDC') {
       sellTokenAmount = sellAmountUsd;
       price = 1;
     } else {
@@ -572,7 +640,11 @@ export class TradeExecutor {
     let sellTxHash: string | undefined;
     let leg1Status = 'executed';
 
-    if (sellSymbol === 'USDC') {
+    if (skipLeg1) {
+      // C5: leg 1 already executed on the original rotation. Re-running it here would
+      // sell a SECOND tranche of the asset (double-sell). Skip straight to leg 2.
+      logger.info(`[recovery] Skipping leg 1 for ${sellSymbol}→${buySymbol} — proceeds already in USDC`);
+    } else if (sellSymbol === 'USDC') {
       logger.info(`Rotation: sell side is USDC — skipping leg 1, spending $${sellAmountUsd.toFixed(2)} directly`);
     } else if (!dryRun) {
       try {
@@ -587,8 +659,9 @@ export class TradeExecutor {
       leg1Status = 'dry_run';
     }
 
-    // Record leg 1 sell trade (only when actually selling a non-USDC asset)
-    if (sellSymbol !== 'USDC') {
+    // Record leg 1 sell trade (only when actually selling a non-USDC asset).
+    // C5: on recovery (skipLeg1) the original sell was already recorded — don't duplicate it.
+    if (!skipLeg1 && sellSymbol !== 'USDC') {
       const sellPos = this._openPositions.get(sellSymbol);
       const sellRealizedPnl = sellPos && price > 0
         ? (price - sellPos.entryPrice) * Math.min(sellTokenAmount, sellPos.qty)
@@ -620,6 +693,20 @@ export class TradeExecutor {
     // Leg 2: USDC → Buy target. Spend only the proceeds from leg 1, not all USDC.
     const leg2UsdcAmount = sellAmountUsd * 0.98; // 2% buffer for fees
     let buyTxHash: string | undefined;
+
+    // C4: slippage-check the buy leg for non-registry targets (fail-closed). Rotations
+    // previously bought discovered tokens with no slippage screening at all. If the check
+    // vetoes, leg 1 already executed, so we stop at leg1_done holding USDC (safe).
+    if (!dryRun && !this.isRegistryAsset(buySymbol) && buyAddr) {
+      const ok = await this.checkSlippage(buySymbol, buyAddr, leg2UsdcAmount);
+      if (!ok) {
+        logger.warn(`Rotation leg 2 vetoed — slippage/liquidity check failed for ${buySymbol}`);
+        queries.insertEvent.run('slippage_veto', `${buySymbol}: rotation leg-2`);
+        botState.recordTrade(new Date());
+        return { status: 'leg1_done', sellTxHash };
+      }
+    }
+
     if (!dryRun) {
       try {
         let freshUsdcBalance: number;

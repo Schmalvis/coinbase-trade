@@ -22,6 +22,12 @@ export class ThresholdStrategy implements Strategy {
     const recent = snapshots.slice(0, 60).map(s => s.eth_price);
     const rollingHigh = Math.max(...recent);
 
+    // C2: guard against zero/NaN prices. A 0 price (feed dropout) yields a 100% "drop"
+    // that would fire a spurious buy; a 0 rollingHigh makes dropPct NaN. Hold on bad data.
+    if (!(current > 0) || !(rollingHigh > 0)) {
+      return { signal: 'hold', reason: 'Invalid price data (non-positive price)' };
+    }
+
     if (this.entryPrice === null) {
       this.entryPrice = current;
       this.trailingHigh = current;

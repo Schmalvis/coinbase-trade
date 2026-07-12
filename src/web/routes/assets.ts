@@ -33,8 +33,57 @@ function checkTcpCandleRequirement(symbol: string, network: string): string | nu
   return null;
 }
 
+// C7 — promotion quality gate. A discovered token must not become tradeable until it has a
+// stable positive price AND a viable two-way market. This blocks the root cause of the $0-price
+// spam-token buys: illiquid/unpriceable tokens going active and then being bought with real USDC.
+const PROMOTION_MIN_PRICED_SNAPSHOTS = 3;      // N consecutive snapshots all priced > $0
+const PROMOTION_MAX_ROUNDTRIP_LOSS_PCT = 15;   // reject if a $2 buy→sell round-trip loses more than this
+const PROMOTION_SHADOW_MS = 24 * 60 * 60 * 1000; // dry-run window after promotion
+
+function isRegistrySymbol(symbol: string, network: string): boolean {
+  return assetsForNetwork(network).some(a => a.symbol.toUpperCase() === symbol.toUpperCase());
+}
+
+async function assertPromotable(
+  tools: RouteContext['tools'],
+  row: DiscoveredAssetRow,
+  network: string,
+): Promise<{ ok: boolean; reason?: string }> {
+  // 1. Price sanity — the N most-recent snapshots must all be priced > 0.
+  const snaps = queries.recentAssetSnapshots.all(row.symbol, PROMOTION_MIN_PRICED_SNAPSHOTS) as { price_usd: number }[];
+  if (snaps.length < PROMOTION_MIN_PRICED_SNAPSHOTS || !snaps.every(s => s.price_usd > 0)) {
+    return { ok: false, reason: `${row.symbol}: needs ${PROMOTION_MIN_PRICED_SNAPSHOTS} consecutive priced (>$0) snapshots before it can be enabled` };
+  }
+  if (!row.address) {
+    return { ok: false, reason: `${row.symbol}: missing contract address — cannot verify liquidity` };
+  }
+
+  // 2. Round-trip quote USDC → token → USDC. Confirms real buy liquidity AND that the token
+  //    can be sold back (basic honeypot / one-way-liquidity screen). Any quote failure blocks.
+  try {
+    const buyQuote = await tools.getSwapPrice('USDC' as any, row.symbol as any, '2', undefined, row.address);
+    const tokenOut = parseFloat(buyQuote.toAmount);
+    if (buyQuote.priceImpact === 'no_liquidity' || !(tokenOut > 0)) {
+      return { ok: false, reason: `${row.symbol}: no buy liquidity (USDC→${row.symbol} quote empty)` };
+    }
+    const sellQuote = await tools.getSwapPrice(row.symbol as any, 'USDC' as any, tokenOut.toString(), row.address, undefined);
+    const usdcBack = parseFloat(sellQuote.toAmount);
+    if (sellQuote.priceImpact === 'no_liquidity' || !(usdcBack > 0)) {
+      return { ok: false, reason: `${row.symbol}: cannot sell back (${row.symbol}→USDC quote empty — possible honeypot)` };
+    }
+    const roundtripLossPct = (1 - usdcBack / 2) * 100;
+    if (roundtripLossPct > PROMOTION_MAX_ROUNDTRIP_LOSS_PCT) {
+      return { ok: false, reason: `${row.symbol}: round-trip loss ${roundtripLossPct.toFixed(1)}% > ${PROMOTION_MAX_ROUNDTRIP_LOSS_PCT}% — too illiquid to trade` };
+    }
+  } catch (err) {
+    return { ok: false, reason: `${row.symbol}: liquidity quote failed (${err instanceof Error ? err.message : String(err)}) — not enabled` };
+  }
+
+  return { ok: true };
+}
+
 export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
-  const { engine } = ctx;
+  const { engine, tools } = ctx;
 
   router.get('/api/assets', (_req, res) => {
     const network = botState.activeNetwork;
@@ -100,7 +149,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
   });
 
   // POST /api/assets/bulk-enable — must be before /:address/enable
-  router.post('/api/assets/bulk-enable', (req, res) => {
+  router.post('/api/assets/bulk-enable', async (req, res) => {
     const { addresses } = req.body as { addresses: string[] };
     if (!Array.isArray(addresses) || addresses.length === 0) {
       return res.status(400).json({ error: 'addresses must be a non-empty array' });
@@ -109,17 +158,32 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     const allAssets = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
 
     const assetByAddress = new Map(allAssets.map(r => [r.address.toLowerCase(), r]));
-    const toEnable: DiscoveredAssetRow[] = [];
+    const candidates: DiscoveredAssetRow[] = [];
     let skipped = 0;
     for (const address of addresses) {
       const row = assetByAddress.get(address.toLowerCase());
       if (!row || row.status !== 'pending') { skipped++; continue; }
+      candidates.push(row);
+    }
+
+    // C7: run the promotion quality gate on each candidate; only those that pass go active.
+    const toEnable: DiscoveredAssetRow[] = [];
+    const rejected: string[] = [];
+    for (const row of candidates) {
+      if (!isRegistrySymbol(row.symbol, network)) {
+        const gate = await assertPromotable(tools, row, network);
+        if (!gate.ok) { rejected.push(gate.reason ?? row.symbol); skipped++; continue; }
+      }
       toEnable.push(row);
     }
 
     runTransaction(() => {
       for (const row of toEnable) {
         discoveredAssetQueries.updateAssetStatus.run({ status: 'active', address: row.address, network });
+        // C7: 24h shadow (dry-run) period after promotion for non-registry tokens.
+        if (!isRegistrySymbol(row.symbol, network)) {
+          discoveredAssetQueries.setShadowUntil.run({ shadow_until: Date.now() + PROMOTION_SHADOW_MS, symbol: row.symbol, network });
+        }
       }
     });
 
@@ -135,7 +199,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
 
     const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
     botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
-    return res.json({ ok: true, succeeded: toEnable.length, skipped });
+    return res.json({ ok: true, succeeded: toEnable.length, skipped, rejected });
   });
 
   // POST /api/assets/bulk-dismiss — must be before /:address/dismiss
@@ -172,7 +236,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
   });
 
   // POST /api/assets/:address/enable
-  router.post('/api/assets/:address/enable', (req, res) => {
+  router.post('/api/assets/:address/enable', async (req, res) => {
     const { address } = req.params;
     const network = botState.activeNetwork;
     const body = req.body as Record<string, unknown>;
@@ -205,6 +269,13 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     }
     if (!row) return res.status(404).json({ error: `Asset ${address} not found on ${network}` });
 
+    // C7: quality gate — non-registry tokens must pass price-stability + round-trip liquidity
+    // checks before going live. Registry assets (ETH/CBBTC/CBETH) are exempt.
+    if (!isRegistrySymbol(row.symbol, network)) {
+      const gate = await assertPromotable(tools, row, network);
+      if (!gate.ok) return res.status(400).json({ error: gate.reason });
+    }
+
     const dbAddress = row.address;
     const params = body as { strategyType: string; dropPct: number; risePct: number; smaShort: number; smaLong: number; smaUseEma?: boolean; smaVolumeFilter?: boolean; smaRsiFilter?: boolean };
     discoveredAssetQueries.updateAssetStrategyConfig.run({
@@ -223,6 +294,11 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
       address: dbAddress,
       network,
     });
+    // C7: start a 24h shadow (dry-run) period for newly-promoted non-registry tokens so live
+    // trades are deferred while behaviour is observed. Mirrors apply-status.ts semantics.
+    if (!isRegistrySymbol(row.symbol, network)) {
+      discoveredAssetQueries.setShadowUntil.run({ shadow_until: Date.now() + PROMOTION_SHADOW_MS, symbol: row.symbol, network });
+    }
     engine.startAssetLoop(dbAddress, row.symbol, {
       strategyType: params.strategyType as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
       dropPct: params.dropPct,

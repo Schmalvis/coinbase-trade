@@ -27,8 +27,12 @@ vi.mock('../src/core/state.js', () => ({
 vi.mock('../src/data/db.js', () => ({
   queries: {
     insertTrade: { run: mockInsertTradeRun },
+    insertEvent: { run: vi.fn() },
     recentPortfolioSnapshots: { all: mockRecentPortfolioAll },
     recentAssetSnapshots: { all: mockRecentAssetAll },
+  },
+  dailyPnlQueries: {
+    getTodayPnl: { get: vi.fn(() => undefined) },
   },
 }));
 

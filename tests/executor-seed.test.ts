@@ -53,6 +53,9 @@ vi.mock('../src/data/db.js', () => ({
     getAddressBySymbol: mockGetAddressBySymbol,
     getRecentRealizedTrades: mockGetRecentRealizedTrades,
   },
+  dailyPnlQueries: {
+    getTodayPnl: { get: vi.fn(() => undefined) },
+  },
 }));
 
 vi.mock('../src/core/state.js', () => ({

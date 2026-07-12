@@ -165,7 +165,13 @@ export class SwapService {
     }
   }
 
-  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number> {
+  /**
+   * Returns the estimated price impact (%) for buying `tokenAddress` with `amountUsd` of USDC,
+   * or `null` when a reliable reading cannot be obtained (no 0x key, HTTP error, or the quote
+   * response lacks an impact field). Callers must treat `null` as "unknown" and fail-closed for
+   * non-registry assets — a `0` here previously meant "fail-open", which silenced the guard.
+   */
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number | null> {
     const network = this.walletClient.network;
     const chainId = network === 'base-mainnet' ? 8453 : 84532;
     const usdcAddress = network === 'base-mainnet'
@@ -176,8 +182,8 @@ export class SwapService {
 
     const zeroXKey = process.env.ZEROX_API_KEY;
     if (!zeroXKey) {
-      logger.debug(`getQuoteImpactPct: no ZEROX_API_KEY — returning 0 (fail-open)`);
-      return 0;
+      logger.debug(`getQuoteImpactPct: no ZEROX_API_KEY — returning null (cannot assess slippage)`);
+      return null;
     }
 
     const address = this.walletClient.address ?? '';
@@ -187,12 +193,19 @@ export class SwapService {
 
     const res = await fetch(url, { headers: { '0x-api-key': zeroXKey, '0x-version': 'v2' } });
     if (!res.ok) {
-      logger.warn(`getQuoteImpactPct: 0x quote failed ${res.status} — returning 0 (fail-open)`);
-      return 0;
+      logger.warn(`getQuoteImpactPct: 0x quote failed ${res.status} — returning null`);
+      return null;
     }
-    const quote = await res.json() as { estimatedPriceImpact?: string };
+    const quote = await res.json() as { estimatedPriceImpact?: string; liquidityAvailable?: boolean };
+    // No liquidity for this pair is an unconditional block signal.
+    if (quote.liquidityAvailable === false) return 100;
+    // TODO(S1): the 0x v2 /swap/permit2/quote response may NOT include `estimatedPriceImpact`
+    // (that field is v1-era). If it is absent we cannot derive impact from this response, so
+    // return null (→ callers fail-closed for non-registry assets) rather than a false 0%.
+    // Confirm the v2 field name against a live response and parse the real impact here.
+    if (quote.estimatedPriceImpact === undefined) return null;
     // estimatedPriceImpact is a string like "0.0123" meaning 1.23%
-    return parseFloat(quote.estimatedPriceImpact ?? '0') * 100;
+    return parseFloat(quote.estimatedPriceImpact) * 100;
   }
 
   private async swapVia0x(

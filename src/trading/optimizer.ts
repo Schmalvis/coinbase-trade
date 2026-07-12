@@ -103,8 +103,10 @@ export class PortfolioOptimizer {
 
       logger.info(`[recovery] Retrying leg-2 for rotation #${row.id}: buy ${row.buy_symbol} ~$${row.sell_amount.toFixed(2)}`);
       try {
+        // C5: pass skipLeg1=true — the original leg 1 already sold; recovery must only
+        // complete leg 2 (buy). Re-running leg 1 here would double-sell the asset.
         const result = await (this.executor as any).executeRotation(
-          row.sell_symbol, row.buy_symbol, row.sell_amount, row.id,
+          row.sell_symbol, row.buy_symbol, row.sell_amount, row.id, true,
         );
         if (result?.status === 'executed') {
           const actualGainPct = result.actualBuyUsd != null && row.sell_amount > 0

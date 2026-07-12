@@ -135,17 +135,10 @@ export async function startPortfolioTracker(
         }
       }
 
-      // Only persist the portfolio snapshot when the poll was complete. A partial
-      // total is worse than no data point: the optimizer reads the latest snapshot
-      // for risk checks, so a glitch low could fire a phantom halt. Downstream code
-      // reads the last *good* snapshot instead when we skip.
-      if (pollDegraded) {
-        logger.warn(`Portfolio poll incomplete — skipping snapshot (partial total was $${portfolioUsd.toFixed(2)})`);
-      } else {
-        queries.insertPortfolioSnapshot.run({ portfolio_usd: portfolioUsd });
-        logger.info(`Portfolio: $${portfolioUsd.toFixed(2)}`);
-      }
-
+      // C3: the authoritative portfolio snapshot is written AFTER the Alchemy discovery
+      // block below, so discovered-token holdings (balance × price) are included in the
+      // total. Writing it here (registry-only) understated the portfolio by the full value
+      // of every discovered token held — every USDC→token buy looked like an instant loss.
       if (alchemyService) {
         try {
           const network = botState.activeNetwork;
@@ -218,22 +211,49 @@ export async function startPortfolioTracker(
               let price = (prices[`base:${row.address}`] as any)?.usd ?? 0;
               // Fallback: candle close price when DefiLlama returns nothing
               if (price === 0) price = getCandleFallbackPrice(row.symbol);
-              queries.insertAssetSnapshot.run({ symbol: row.symbol, price_usd: price, balance: 0 });
 
-              // Update balance from hex balance
+              // Balance from Alchemy hex balance (the REAL held amount).
               const hexBal = hexBalanceMap.get(row.address.toLowerCase());
               const humanBalance = hexBal
                 ? Number(BigInt(hexBal)) / Math.pow(10, row.decimals)
                 : 0;
               botState.updateAssetBalance(row.symbol, humanBalance);
-              if (price > 0) candleService?.recordSpotPrice(row.symbol, network, price);
+
+              if (price > 0) {
+                // C2: only persist a snapshot with a real (>0) price. C3: record the REAL
+                // balance (was hardcoded 0) and fold the position's value into the total.
+                queries.insertAssetSnapshot.run({ symbol: row.symbol, price_usd: price, balance: humanBalance });
+                portfolioUsd += humanBalance * price;
+                candleService?.recordSpotPrice(row.symbol, network, price);
+              } else if (humanBalance > 0) {
+                // Held but unpriceable — the total is understated this cycle. Degrade the
+                // poll so we skip the snapshot rather than persist a phantom low.
+                pollDegraded = true;
+                logger.warn(`${row.symbol}: held balance ${humanBalance} but price unavailable — portfolio poll degraded`);
+              }
             } catch (err) {
               logger.error(`Failed to price/balance discovered asset ${row.symbol}`, err);
+              pollDegraded = true;
             }
           }
         } catch (err) {
           logger.warn('Alchemy discovery step failed, skipping', err);
+          // If any discovered assets are active, their value may be missing from the total —
+          // degrade so we don't persist an understated portfolio snapshot below.
+          const activeDiscovered = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
+          if (activeDiscovered.length > 0) pollDegraded = true;
         }
+      }
+
+      // C3: persist the authoritative portfolio snapshot now that discovered-token value
+      // has been accumulated. Skip on a degraded poll — a partial total is worse than no
+      // data point (the optimizer/risk guards read the latest snapshot; a glitch low could
+      // fire a phantom floor/daily-loss halt). Downstream reads the last *good* snapshot.
+      if (pollDegraded) {
+        logger.warn(`Portfolio poll incomplete — skipping snapshot (partial total was $${portfolioUsd.toFixed(2)})`);
+      } else {
+        queries.insertPortfolioSnapshot.run({ portfolio_usd: portfolioUsd });
+        logger.info(`Portfolio: $${portfolioUsd.toFixed(2)}`);
       }
     } catch (err) {
       logger.error('Portfolio tracker poll failed', err);

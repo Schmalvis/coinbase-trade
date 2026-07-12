@@ -50,15 +50,19 @@ const mkPending = (): DiscoveredAssetRow => ({
 });
 
 // ── Mock DB ──────────────────────────────────────────────────────────────────
-const mockUpdateAssetStatus = vi.fn();
-const mockDismissAsset = vi.fn();
-const mockGetDiscoveredAssets = vi.fn(() => [mkPending()]);
+const { mockUpdateAssetStatus, mockDismissAsset, mockGetDiscoveredAssets, mockRecentAssetSnaps, mockSetShadowUntil } = vi.hoisted(() => ({
+  mockUpdateAssetStatus: vi.fn(),
+  mockDismissAsset: vi.fn(),
+  mockGetDiscoveredAssets: vi.fn(() => [] as unknown[]),
+  mockRecentAssetSnaps: { all: vi.fn(() => [] as unknown[]) },
+  mockSetShadowUntil: { run: vi.fn() },
+}));
 
 vi.mock('../src/data/db.js', () => ({
   db: {},
   runTransaction: vi.fn((fn: () => void) => fn()),
   queries: {
-    recentAssetSnapshots: { all: vi.fn(() => []) },
+    recentAssetSnapshots: mockRecentAssetSnaps,
     recentSnapshots: { all: vi.fn(() => []) },
     recentTrades: { all: vi.fn(() => []) },
     recentPortfolioSnapshots: { all: vi.fn(() => []) },
@@ -81,6 +85,7 @@ vi.mock('../src/data/db.js', () => ({
     updateGridConfig: { run: vi.fn() },
     dismissAsset: { run: mockDismissAsset },
     upsertDiscoveredAsset: { run: vi.fn() },
+    setShadowUntil: { run: mockSetShadowUntil.run },
   },
   passkeyQueries: {
     getPasskey: { get: vi.fn() },
@@ -156,6 +161,14 @@ function makeMockEngine() {
     start: vi.fn(), stop: vi.fn(),
     startAssetLoop: vi.fn(), stopAssetLoop: vi.fn(),
     reloadAssetConfig: vi.fn(),
+  };
+}
+
+// Tools mock whose round-trip quote satisfies the C7 promotion gate:
+// USDC→token→USDC returns toAmount '2' each leg → 0% round-trip loss, has liquidity.
+function makeMockTools() {
+  return {
+    getSwapPrice: vi.fn(async () => ({ toAmount: '2', priceImpact: undefined })),
   };
 }
 
@@ -251,11 +264,13 @@ describe('POST /api/assets/bulk-enable', () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     mockGetDiscoveredAssets.mockReturnValue([mkPending()]);
+    // C7 gate: provide 3 priced snapshots so the price-stability check passes.
+    mockRecentAssetSnaps.all.mockReturnValue([{ price_usd: 1 }, { price_usd: 1 }, { price_usd: 1 }]);
     capturedApp = null;
     engine = makeMockEngine();
 
     const { startWebServer } = await import('../src/web/server.js');
-    startWebServer({} as any, makeMockRuntimeConfig() as any, {} as any, engine as any);
+    startWebServer(makeMockTools() as any, makeMockRuntimeConfig() as any, {} as any, engine as any);
 
     server = http.createServer(capturedApp!);
     await new Promise<void>(r => server.listen(0, '127.0.0.1', r));

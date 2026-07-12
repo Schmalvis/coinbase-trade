@@ -145,9 +145,11 @@ export class TradingEngine {
     }
 
     const limit = params.strategyType === 'grid' ? 5 : params.strategyType === 'threshold' ? 65 : params.smaLong + 5;
-    const raw = queries.recentAssetSnapshots.all(symbol, limit) as {
+    // C2: drop zero/negative-price snapshots — a $0 feed dropout must never feed a strategy
+    // (it produces phantom 100% drops → spurious buys). Legit prices are always > 0.
+    const raw = (queries.recentAssetSnapshots.all(symbol, limit) as {
       price_usd: number; balance: number; timestamp: string;
-    }[];
+    }[]).filter(r => r.price_usd > 0);
     if (raw.length === 0) return;
 
     const snapshots = raw.map(r => ({

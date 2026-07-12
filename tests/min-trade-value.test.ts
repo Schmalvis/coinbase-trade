@@ -20,6 +20,9 @@ vi.mock('../src/data/db.js', () => ({
     recentPortfolioSnapshots: mockRecentPortfolioSnaps,
     recentAssetSnapshots: mockRecentAssetSnaps,
   },
+  dailyPnlQueries: {
+    getTodayPnl: { get: vi.fn(() => undefined) },
+  },
   runTransaction: vi.fn((fn: () => void) => fn()),
 }));
 

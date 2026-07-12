@@ -587,7 +587,8 @@ describe('PortfolioOptimizer', () => {
 
       await optimizer.recoverStuckRotations('base-sepolia');
 
-      expect(mockExecutor.executeRotation).toHaveBeenCalledWith('ETH', 'USDC', 10, 42);
+      // C5: recovery must pass skipLeg1=true so leg 1 is NOT re-run (no double-sell).
+      expect(mockExecutor.executeRotation).toHaveBeenCalledWith('ETH', 'USDC', 10, 42, true);
       expect(mockUpdateRotation.run).toHaveBeenCalledWith(
         expect.objectContaining({ id: 42, status: 'executed' }),
       );

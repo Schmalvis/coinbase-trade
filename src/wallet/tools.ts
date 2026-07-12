@@ -156,7 +156,7 @@ export class CoinbaseTools {
     return this.getSwapPrice(from, to, estimatedFrom);
   }
 
-  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number> {
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number | null> {
     return this.swapService.getQuoteImpactPct(tokenAddress, amountUsd);
   }
 
