@@ -119,6 +119,13 @@ const MIGRATIONS: Migration[] = [
       try { db.exec(`ALTER TABLE rotations ADD COLUMN score_delta REAL`); } catch { /* exists */ }
     },
   },
+  {
+    version: 8,
+    description: 'add open_usd to daily_pnl for close-based daily-loss metric',
+    run: (db) => {
+      try { db.exec(`ALTER TABLE daily_pnl ADD COLUMN open_usd REAL NOT NULL DEFAULT 0`); } catch { /* exists */ }
+    },
+  },
 ];
 
 export function getSchemaVersion(db: DB): number {

@@ -83,6 +83,11 @@ export async function startPortfolioTracker(
       }
 
       let portfolioUsd = 0;
+      // Track poll completeness: if any held asset fails to price/balance, the
+      // computed total is understated. Writing that partial value produces
+      // phantom "portfolio crashed" snapshots (e.g. $16 vs a real $196) that can
+      // trip the floor kill switch / daily-loss halt downstream. See below.
+      let pollDegraded = false;
 
       for (const asset of assets) {
         try {
@@ -100,6 +105,14 @@ export async function startPortfolioTracker(
             ]);
           }
 
+          // A held asset with no price understates the total — treat as degraded
+          // so we don't persist a partial portfolio value. (balance 0 is fine:
+          // we simply hold none of it, contributing a legitimate $0.)
+          if (balance > 0 && !(price > 0)) {
+            pollDegraded = true;
+            logger.warn(`${asset.symbol}: held balance ${balance} but price unavailable — portfolio poll degraded`);
+          }
+
           portfolioUsd += balance * price;
           queries.insertAssetSnapshot.run({ symbol: asset.symbol, price_usd: price, balance });
           botState.updateAssetBalance(asset.symbol, balance);
@@ -115,12 +128,23 @@ export async function startPortfolioTracker(
 
           logger.debug(`${asset.symbol}: balance=${balance} price=$${price.toFixed(2)}`);
         } catch (err) {
+          // A thrown asset (RPC/balance failure) means its value is missing from
+          // the sum — the total is unreliable this cycle.
+          pollDegraded = true;
           logger.error(`Failed to poll ${asset.symbol}`, err);
         }
       }
 
-      queries.insertPortfolioSnapshot.run({ portfolio_usd: portfolioUsd });
-      logger.info(`Portfolio: $${portfolioUsd.toFixed(2)}`);
+      // Only persist the portfolio snapshot when the poll was complete. A partial
+      // total is worse than no data point: the optimizer reads the latest snapshot
+      // for risk checks, so a glitch low could fire a phantom halt. Downstream code
+      // reads the last *good* snapshot instead when we skip.
+      if (pollDegraded) {
+        logger.warn(`Portfolio poll incomplete — skipping snapshot (partial total was $${portfolioUsd.toFixed(2)})`);
+      } else {
+        queries.insertPortfolioSnapshot.run({ portfolio_usd: portfolioUsd });
+        logger.info(`Portfolio: $${portfolioUsd.toFixed(2)}`);
+      }
 
       if (alchemyService) {
         try {

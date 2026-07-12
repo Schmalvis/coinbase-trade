@@ -75,9 +75,12 @@ export function registerOptimizerCommands(bot: Telegraf, ctx: OptimizerCommandCt
     const floor = runtimeConfig?.get('PORTFOLIO_FLOOR_USD') ?? '?';
     const mode = optimizer?.isRiskOff ? 'risk-off' : 'normal';
 
+    // Daily P&L vs the day's opening value (matches the risk-guard metric),
+    // falling back to high_water for legacy rows with no open_usd.
     let lossPct = 0;
-    if (pnl?.high_water && pnl.current_usd) {
-      lossPct = ((pnl.high_water - pnl.current_usd) / pnl.high_water) * 100;
+    const baseline = pnl?.open_usd > 0 ? pnl.open_usd : pnl?.high_water;
+    if (baseline > 0 && pnl?.current_usd) {
+      lossPct = ((baseline - pnl.current_usd) / baseline) * 100;
     }
 
     tgCtx.reply(`🛡️ Risk Status

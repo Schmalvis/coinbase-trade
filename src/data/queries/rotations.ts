@@ -74,6 +74,7 @@ export const rotationQueries = {
 export interface DailyPnlRow {
   date: string;
   network: string;
+  open_usd: number;
   high_water: number;
   current_usd: number;
   rotations: number;
@@ -81,15 +82,17 @@ export interface DailyPnlRow {
 }
 
 export const dailyPnlQueries = {
+  // open_usd is captured on the day's first insert (the opening portfolio value)
+  // and never updated — it's the baseline for the close-based daily-loss metric.
   upsertDailyPnl: db.prepare(`
-    INSERT INTO daily_pnl (date, network, high_water, current_usd, rotations, realized_pnl)
-    VALUES (@date, @network, @high_water, @current_usd, @rotations, @realized_pnl)
+    INSERT INTO daily_pnl (date, network, open_usd, high_water, current_usd, rotations, realized_pnl)
+    VALUES (@date, @network, @open_usd, @high_water, @current_usd, @rotations, @realized_pnl)
     ON CONFLICT(date, network) DO UPDATE SET
       high_water = MAX(daily_pnl.high_water, excluded.high_water),
       current_usd = excluded.current_usd,
       rotations = excluded.rotations,
       realized_pnl = excluded.realized_pnl
-  `) as Statement<{ date: string; network: string; high_water: number; current_usd: number; rotations: number; realized_pnl: number }>,
+  `) as Statement<{ date: string; network: string; open_usd: number; high_water: number; current_usd: number; rotations: number; realized_pnl: number }>,
 
   getDailyPnl: db.prepare(`
     SELECT * FROM daily_pnl WHERE date = ? AND network = ?

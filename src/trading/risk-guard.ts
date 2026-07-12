@@ -73,11 +73,15 @@ export class RiskGuard {
       return { approved: false, vetoReason: `Portfolio floor breached ($${portfolioUsd} < $${floor})` };
     }
 
-    // 2. Daily loss limit
+    // 2. Daily loss limit — measured against the day's OPENING value ("am I down
+    // today?"), not the intraday peak. Peak-based drawdown fires on ordinary
+    // volatility even when flat/up on the day; close-based matches intent and
+    // messaging. Falls back to high_water for legacy rows with no open_usd.
     const maxLossPct = this.runtimeConfig.get('MAX_DAILY_LOSS_PCT') as number;
     const todayPnl = dailyPnlQueries.getTodayPnl.get(network) as any;
-    if (todayPnl && todayPnl.high_water > 0) {
-      const lossPct = ((todayPnl.high_water - portfolioUsd) / todayPnl.high_water) * 100;
+    const lossBaseline = (todayPnl?.open_usd > 0 ? todayPnl.open_usd : todayPnl?.high_water) ?? 0;
+    if (lossBaseline > 0) {
+      const lossPct = ((lossBaseline - portfolioUsd) / lossBaseline) * 100;
       if (lossPct > maxLossPct) {
         this.logDecision('risk_halt', `Daily loss: ${lossPct.toFixed(1)}% > ${maxLossPct}%`);
         botState.setStatus('paused');

@@ -525,9 +525,23 @@ export class PortfolioOptimizer {
     const scores = this.computeScores(network);
     this.latestScores = scores;
 
-    // 2. Update daily PnL high water — use authoritative portfolio_snapshot value
-    const latestSnap = (queries.recentPortfolioSnapshots.all(1) as { portfolio_usd: number }[])[0];
-    const totalPortfolioUsd = latestSnap?.portfolio_usd ?? 0;
+    // 2. Update daily PnL high water — use authoritative portfolio_snapshot value.
+    // Defense-in-depth against a residual glitch snapshot (the tracker now skips
+    // incomplete polls, but guard here too since this value feeds the floor/loss
+    // kill switches): if the latest snapshot is an extreme low outlier vs recent
+    // history, fall back to the recent median rather than acting on a bad reading.
+    const recentSnaps = (queries.recentPortfolioSnapshots.all(5) as { portfolio_usd: number }[])
+      .map(s => s.portfolio_usd)
+      .filter(v => typeof v === 'number');
+    let totalPortfolioUsd = recentSnaps[0] ?? 0;
+    if (recentSnaps.length >= 3) {
+      const sorted = [...recentSnaps].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)];
+      if (median > 0 && totalPortfolioUsd < median * 0.7) {
+        logger.warn(`Optimizer: latest portfolio snapshot $${totalPortfolioUsd.toFixed(2)} is an outlier vs median $${median.toFixed(2)} — using median for risk checks`);
+        totalPortfolioUsd = median;
+      }
+    }
 
     const realizedRow = queries.todayRealizedPnl.get(network) as { total: number } | undefined;
     const todayRealized = realizedRow?.total ?? 0;
@@ -539,6 +553,7 @@ export class PortfolioOptimizer {
     dailyPnlQueries.upsertDailyPnl.run({
       date: today,
       network,
+      open_usd: totalPortfolioUsd,
       high_water: totalPortfolioUsd,
       current_usd: totalPortfolioUsd,
       rotations: todayCount,
@@ -656,6 +671,7 @@ export class PortfolioOptimizer {
               dailyPnlQueries.upsertDailyPnl.run({
                 date: today,
                 network,
+                open_usd: totalPortfolioUsd,
                 high_water: totalPortfolioUsd,
                 current_usd: totalPortfolioUsd,
                 rotations: todayCount + 1,
@@ -849,6 +865,7 @@ export class PortfolioOptimizer {
       dailyPnlQueries.upsertDailyPnl.run({
         date: today,
         network,
+        open_usd: totalPortfolioUsd,
         high_water: totalPortfolioUsd,
         current_usd: totalPortfolioUsd,
         rotations: todayCount + 1,

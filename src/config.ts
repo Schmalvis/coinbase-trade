@@ -38,7 +38,7 @@ const schema = z.object({
   ALLOWED_IPS: z.string().default(''),
 
   MAX_POSITION_PCT: z.coerce.number().default(40),
-  MAX_DAILY_LOSS_PCT: z.coerce.number().default(5),
+  MAX_DAILY_LOSS_PCT: z.coerce.number().default(7),
   MAX_ROTATION_PCT: z.coerce.number().default(25),
   MAX_DAILY_ROTATIONS: z.coerce.number().default(4),
   PORTFOLIO_FLOOR_USD: z.coerce.number().default(90),

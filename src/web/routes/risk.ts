@@ -22,7 +22,12 @@ export function registerRiskRoutes(router: Router, ctx: RouteContext): void {
       }
     }
 
-    const pnl = todayPnl ? (portfolioUsd - (todayPnl.high_water ?? portfolioUsd)) : 0;
+    // Daily P&L vs the day's opening value (matches the risk-guard metric),
+    // falling back to high_water for legacy rows with no open_usd.
+    const pnlBaseline = (todayPnl?.open_usd && todayPnl.open_usd > 0)
+      ? todayPnl.open_usd
+      : (todayPnl?.high_water ?? portfolioUsd);
+    const pnl = todayPnl ? (portfolioUsd - pnlBaseline) : 0;
     const maxLoss = runtimeConfig.get('MAX_DAILY_LOSS_PCT') as number;
     const maxRot = runtimeConfig.get('MAX_DAILY_ROTATIONS') as number;
     const floor = runtimeConfig.get('PORTFOLIO_FLOOR_USD') as number;

@@ -109,6 +109,7 @@ export function initSchema(db: DB): void {
     CREATE TABLE IF NOT EXISTS daily_pnl (
       date          TEXT NOT NULL,
       network       TEXT NOT NULL,
+      open_usd      REAL NOT NULL DEFAULT 0,
       high_water    REAL NOT NULL,
       current_usd   REAL NOT NULL,
       rotations     INTEGER NOT NULL DEFAULT 0,
