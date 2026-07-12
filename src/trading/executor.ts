@@ -84,10 +84,15 @@ export class TradeExecutor {
     }
 
     try {
-      const impact = await this.tools.getQuoteImpactPct(address, amountUsd);
+      // S1: impact is derived from a CDP-SDK quote (getQuoteImpactPct) compared against the
+      // latest known spot price for this asset — no 0x key required/used. If we have no recent
+      // priced snapshot, spotPriceUsd is 0 and getQuoteImpactPct returns null (fail-closed).
+      const spotRow = queries.getLatestAssetSnapshot.get(symbol) as { price_usd: number } | undefined;
+      const spotPriceUsd = spotRow?.price_usd ?? 0;
+      const impact = await this.tools.getQuoteImpactPct(address, amountUsd, spotPriceUsd);
       // C4: fail-CLOSED for non-registry assets. A null impact means we could not obtain a
-      // reliable slippage reading (no 0x key, HTTP error, or the quote lacked an impact field).
-      // We must not trade blind into an illiquid token, so block rather than assume 0% impact.
+      // reliable slippage reading (no liquidity, no spot price, or the quote failed). We must
+      // not trade blind into an illiquid token, so block rather than assume 0% impact.
       if (impact === null) {
         logger.warn(`[${symbol}] Slippage unknown (no reliable quote) — trade vetoed (fail-closed)`);
         return false;

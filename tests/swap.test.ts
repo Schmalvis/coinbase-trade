@@ -20,6 +20,18 @@ vi.mock('../src/core/logger.js', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
+// swap.ts's waitForSettlement degrade path emits a bot_event + Telegram alert (batch fix) —
+// mock these out so tests never touch the real on-disk DB (default DATA_DIR points at the
+// live bot's data directory) or a real alert bus.
+const mockInsertEventRun = vi.hoisted(() => vi.fn());
+const mockEmitAlert = vi.hoisted(() => vi.fn());
+vi.mock('../src/data/db.js', () => ({
+  queries: { insertEvent: { run: mockInsertEventRun } },
+}));
+vi.mock('../src/core/state.js', () => ({
+  botState: { emitAlert: mockEmitAlert },
+}));
+
 import { SwapService } from '../src/wallet/swap.js';
 import { logger } from '../src/core/logger.js';
 
@@ -87,6 +99,32 @@ describe('SwapService.swap', () => {
 
     expect(result.txHash).toBe('0xtxHash');
     expect(result.status).toBe('executed');
+  });
+
+  // batch fix: the settlement-timeout degrade must not fail silently — it must surface a
+  // bot_event + Telegram alert so an operator can manually verify the unconfirmed tx.
+  it('emits a bot_event and Telegram alert on settlement-timeout degrade', async () => {
+    mockWaitForTransactionReceipt.mockRejectedValueOnce(new Error('timeout'));
+    const wc = makeWalletClient();
+    const service = new SwapService(wc as any);
+
+    await service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet');
+
+    expect(mockInsertEventRun).toHaveBeenCalledWith(
+      'swap_settlement_timeout',
+      expect.stringContaining('0xtxHash'),
+    );
+    expect(mockEmitAlert).toHaveBeenCalledWith(expect.stringContaining('0xtxHash'));
+  });
+
+  it('does not emit a bot_event/alert when settlement succeeds normally', async () => {
+    const wc = makeWalletClient();
+    const service = new SwapService(wc as any);
+
+    await service.swap(ETH_ADDR, USDC_ADDR, '0.5', 'base-mainnet');
+
+    expect(mockInsertEventRun).not.toHaveBeenCalled();
+    expect(mockEmitAlert).not.toHaveBeenCalled();
   });
 
   it('throws when wallet is not initialised', async () => {
@@ -195,5 +233,103 @@ describe('SwapService.getSwapPrice', () => {
     (wc as any).address = null;
     const service = new SwapService(wc as any);
     await expect(service.getSwapPrice(ETH_ADDR, USDC_ADDR, '1', 'base-mainnet')).rejects.toThrow('Wallet not initialised');
+  });
+});
+
+// S1: getQuoteImpactPct now computes impact via a CDP SDK quote (getSwapPrice, no 0x key)
+// compared against a caller-supplied spot price ("quote-vs-spot") — replacing the permanently
+// broken 0x v2 estimatedPriceImpact parse.
+describe('SwapService.getQuoteImpactPct', () => {
+  const TOKEN_ADDR = '0x1234000000000000000000000000000000000000';
+
+  beforeEach(() => { vi.clearAllMocks(); });
+
+  it('computes positive impact % from quote-vs-spot execution price', async () => {
+    const wc = makeWalletClient();
+    // $2 USDC in → 1.9 tokens out (18 decimals) → execution price 2/1.9 ≈ 1.0526 USDC/token
+    wc.mockGetSwapPrice.mockResolvedValue({
+      toAmount: 1900000000000000000n,
+      liquidityAvailable: true,
+    });
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1 /* spotPriceUsd */);
+
+    expect(impact).not.toBeNull();
+    expect(impact as number).toBeCloseTo(5.263, 2);
+  });
+
+  it('clamps to 0 when execution price is better than (or equal to) spot', async () => {
+    const wc = makeWalletClient();
+    // $2 USDC in → 2.5 tokens out → execution price 0.8 USDC/token, spot is 1 → "negative" impact
+    wc.mockGetSwapPrice.mockResolvedValue({
+      toAmount: 2500000000000000000n,
+      liquidityAvailable: true,
+    });
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1);
+
+    expect(impact).toBe(0);
+  });
+
+  it('returns null when the quote reports no liquidity', async () => {
+    const wc = makeWalletClient();
+    wc.mockGetSwapPrice.mockResolvedValue({ toAmount: 0n, liquidityAvailable: false });
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1);
+
+    expect(impact).toBeNull();
+  });
+
+  it('returns null when the quote resolves a zero/invalid toAmount', async () => {
+    const wc = makeWalletClient();
+    wc.mockGetSwapPrice.mockResolvedValue({ toAmount: 0n, liquidityAvailable: true });
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1);
+
+    expect(impact).toBeNull();
+  });
+
+  it('returns null when the quote call throws', async () => {
+    const wc = makeWalletClient();
+    wc.mockGetSwapPrice.mockRejectedValue(new Error('rpc error'));
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1);
+
+    expect(impact).toBeNull();
+  });
+
+  it('returns null without calling the SDK when spotPriceUsd is missing/zero', async () => {
+    const wc = makeWalletClient();
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 0);
+
+    expect(impact).toBeNull();
+    expect(wc.mockGetSwapPrice).not.toHaveBeenCalled();
+  });
+
+  it('never calls the 0x HTTP API (no ZEROX_API_KEY needed)', async () => {
+    const originalKey = process.env.ZEROX_API_KEY;
+    delete process.env.ZEROX_API_KEY;
+    const originalFetch = globalThis.fetch;
+    const fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as any;
+
+    const wc = makeWalletClient();
+    wc.mockGetSwapPrice.mockResolvedValue({ toAmount: 1900000000000000000n, liquidityAvailable: true });
+    const service = new SwapService(wc as any);
+
+    const impact = await service.getQuoteImpactPct(TOKEN_ADDR, 2, 1);
+
+    expect(impact).not.toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    globalThis.fetch = originalFetch;
+    if (originalKey !== undefined) process.env.ZEROX_API_KEY = originalKey;
   });
 });

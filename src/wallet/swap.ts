@@ -2,6 +2,8 @@ import type { CdpWalletClient } from './client.js';
 import { logger } from '../core/logger.js';
 import { ASSET_REGISTRY } from '../assets/registry.js';
 import { getPublicClient } from './erc20.js';
+import { botState } from '../core/state.js';
+import { queries } from '../data/db.js';
 
 // C8-followup: bounded wait for the on-chain receipt after submitting a swap. Base blocks
 // land in ~2s, but this caps the worst case so a stuck/never-mined tx can't hang the poll loop.
@@ -125,6 +127,21 @@ export class SwapService {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`Swap receipt wait failed/timed out for ${txHash} — treating as executed (best-effort, unconfirmed): ${msg}`);
+      // Operator visibility: this degrade path reports 'executed' on a tx we never actually
+      // confirmed on-chain. If it reverted, callers (P&L, position tracking) will still record
+      // it as a real fill. Surface this loudly so an operator can manually verify the tx rather
+      // than silently trusting an unconfirmed result.
+      try {
+        queries.insertEvent.run(
+          'swap_settlement_timeout',
+          `txHash=${txHash} network=${network} — receipt wait failed/timed out, reported as executed (best-effort, unconfirmed): ${msg}`,
+        );
+        botState.emitAlert(
+          `⚠️ Swap settlement unconfirmed — treated as executed (best-effort) but not verified on-chain.\ntxHash: ${txHash}\nnetwork: ${network}\nReason: ${msg}\nPlease verify this tx manually.`,
+        );
+      } catch (alertErr) {
+        logger.warn(`Failed to emit swap_settlement_timeout alert: ${alertErr instanceof Error ? alertErr.message : String(alertErr)}`);
+      }
       return 'executed';
     }
   }
@@ -210,45 +227,55 @@ export class SwapService {
 
   /**
    * Returns the estimated price impact (%) for buying `tokenAddress` with `amountUsd` of USDC,
-   * or `null` when a reliable reading cannot be obtained (no 0x key, HTTP error, or the quote
-   * response lacks an impact field). Callers must treat `null` as "unknown" and fail-closed for
-   * non-registry assets — a `0` here previously meant "fail-open", which silenced the guard.
+   * or `null` when a reliable reading cannot be obtained. Callers must treat `null` as "unknown"
+   * and fail-closed for non-registry assets — a `0` here would mean "fail-open", which would
+   * silence the guard.
+   *
+   * S1: the 0x Swap API v2 `/swap/permit2/quote` response does not contain an
+   * `estimatedPriceImpact` field (that was v1-only, removed in v2), and this bot runs with no
+   * `ZEROX_API_KEY` configured — so a 0x-based impact read is permanently unavailable here.
+   * Instead this computes impact via the CDP SDK quote path (`getSwapPrice`, no 0x key needed —
+   * the same path the C7 promotion gate already relies on) compared against the latest known
+   * spot price for the asset ("quote-vs-spot"). This is the most robust option for our tiny
+   * (~$2) trade sizes, where a second reference quote would add noise rather than signal.
+   *
+   * `spotPriceUsd` must be a recent USD/token reference price (e.g. the latest `asset_snapshots`
+   * row) supplied by the caller — this class has no DB access. If it's missing or <= 0, we
+   * cannot compute a meaningful impact and return `null`.
    */
-  async getQuoteImpactPct(tokenAddress: string, amountUsd: number): Promise<number | null> {
+  async getQuoteImpactPct(tokenAddress: string, amountUsd: number, spotPriceUsd: number): Promise<number | null> {
+    if (!(spotPriceUsd > 0)) {
+      logger.debug(`getQuoteImpactPct: no valid spot price for ${tokenAddress} — returning null (cannot assess slippage)`);
+      return null;
+    }
+
     const network = this.walletClient.network;
-    const chainId = network === 'base-mainnet' ? 8453 : 84532;
     const usdcAddress = network === 'base-mainnet'
       ? '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
       : '0x036CbD53842c5426634e7929541eC2318f3dCF7e';
-    const usdcDecimals = 6;
-    const fromAmountWei = BigInt(Math.round(amountUsd * 10 ** usdcDecimals));
 
-    const zeroXKey = process.env.ZEROX_API_KEY;
-    if (!zeroXKey) {
-      logger.debug(`getQuoteImpactPct: no ZEROX_API_KEY — returning null (cannot assess slippage)`);
+    try {
+      const quote = await this.getSwapPrice(usdcAddress, tokenAddress, String(amountUsd), network);
+      // No liquidity for this pair is an unconditional "can't assess" signal.
+      if (quote.priceImpact === 'no_liquidity') {
+        logger.warn(`getQuoteImpactPct: no liquidity for ${tokenAddress} — returning null`);
+        return null;
+      }
+      const toAmountHuman = parseFloat(quote.toAmount);
+      if (!(toAmountHuman > 0)) {
+        logger.warn(`getQuoteImpactPct: quote returned zero/invalid toAmount for ${tokenAddress} — returning null`);
+        return null;
+      }
+      const executionPriceUsd = amountUsd / toAmountHuman; // USDC paid per token received
+      // Impact is how much worse the execution price is vs. spot. Clamp to >= 0 — a quote
+      // "better" than the last snapshot just means the snapshot is stale, not negative slippage.
+      const impactPct = Math.max(0, (executionPriceUsd / spotPriceUsd - 1) * 100);
+      return impactPct;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      logger.warn(`getQuoteImpactPct: quote failed for ${tokenAddress} — returning null (${msg})`);
       return null;
     }
-
-    const address = this.walletClient.address ?? '';
-    const url = `https://api.0x.org/swap/permit2/quote?chainId=${chainId}` +
-      `&sellToken=${usdcAddress}&buyToken=${tokenAddress}` +
-      `&sellAmount=${fromAmountWei.toString()}&taker=${address}`;
-
-    const res = await fetch(url, { headers: { '0x-api-key': zeroXKey, '0x-version': 'v2' } });
-    if (!res.ok) {
-      logger.warn(`getQuoteImpactPct: 0x quote failed ${res.status} — returning null`);
-      return null;
-    }
-    const quote = await res.json() as { estimatedPriceImpact?: string; liquidityAvailable?: boolean };
-    // No liquidity for this pair is an unconditional block signal.
-    if (quote.liquidityAvailable === false) return 100;
-    // TODO(S1): the 0x v2 /swap/permit2/quote response may NOT include `estimatedPriceImpact`
-    // (that field is v1-era). If it is absent we cannot derive impact from this response, so
-    // return null (→ callers fail-closed for non-registry assets) rather than a false 0%.
-    // Confirm the v2 field name against a live response and parse the real impact here.
-    if (quote.estimatedPriceImpact === undefined) return null;
-    // estimatedPriceImpact is a string like "0.0123" meaning 1.23%
-    return parseFloat(quote.estimatedPriceImpact) * 100;
   }
 
   private async swapVia0x(
