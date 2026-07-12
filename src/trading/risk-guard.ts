@@ -56,12 +56,20 @@ export class RiskGuard {
   checkRotation(proposal: RotationProposal, network: string, portfolioUsd: number): RiskDecision {
     const detail = JSON.stringify({ ...proposal, network, portfolioUsd });
 
+    // Only alert on the running → paused transition. checkRotation is called every
+    // optimizer/asset tick, so emitting on every breach spams Telegram with identical
+    // "trading paused" messages until the condition clears. The owner wants one alert
+    // per state change, not a reminder every tick.
+    const alreadyPaused = botState.isPaused;
+
     // 1. Portfolio floor
     const floor = this.runtimeConfig.get('PORTFOLIO_FLOOR_USD') as number;
     if (portfolioUsd < floor) {
       this.logDecision('risk_halt', `Portfolio floor breached: $${portfolioUsd} < $${floor}`);
       botState.setStatus('paused');
-      botState.emitAlert(`PORTFOLIO FLOOR BREACHED ($${portfolioUsd.toFixed(2)} < $${floor}). ALL TRADING HALTED.`);
+      if (!alreadyPaused) {
+        botState.emitAlert(`PORTFOLIO FLOOR BREACHED ($${portfolioUsd.toFixed(2)} < $${floor}). ALL TRADING HALTED.`);
+      }
       return { approved: false, vetoReason: `Portfolio floor breached ($${portfolioUsd} < $${floor})` };
     }
 
@@ -73,7 +81,9 @@ export class RiskGuard {
       if (lossPct > maxLossPct) {
         this.logDecision('risk_halt', `Daily loss: ${lossPct.toFixed(1)}% > ${maxLossPct}%`);
         botState.setStatus('paused');
-        botState.emitAlert(`Daily loss limit hit (${lossPct.toFixed(1)}%). Trading paused.`);
+        if (!alreadyPaused) {
+          botState.emitAlert(`Daily loss limit hit (${lossPct.toFixed(1)}%). Trading paused.`);
+        }
         return { approved: false, vetoReason: `Daily loss ${lossPct.toFixed(1)}% exceeds ${maxLossPct}%` };
       }
     }
