@@ -31,7 +31,9 @@ export function registerTradingRoutes(router: Router, ctx: RouteContext): void {
     }
     try {
       const result = await executor.executeManual(from as any, to as any, fromAmount);
-      res.json({ ok: true, ...result });
+      // Nit3: result.status can be 'failed' when swap() settles but the tx reverted on-chain
+      // (see C8-followup in executor.ts). Report ok:false in that case rather than always true.
+      res.json({ ok: result.status !== 'failed', ...result });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`Manual trade rejected: ${msg}`);
@@ -59,7 +61,8 @@ export function registerTradingRoutes(router: Router, ctx: RouteContext): void {
     }
     try {
       const result = await executor.executeEnso(tokenIn, tokenOut, amountIn);
-      res.json({ ok: true, ...result });
+      // Nit3: same reverted-tx honesty fix as /api/trade above.
+      res.json({ ok: result.status !== 'failed', ...result });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       logger.warn(`Enso trade rejected: ${msg}`);

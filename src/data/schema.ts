@@ -3,8 +3,6 @@ import { db } from './connection.js';
 import { runMigrations } from './migrations.js';
 
 export function initSchema(db: DB): void {
-  runMigrations(db);
-
   db.exec(`
     CREATE TABLE IF NOT EXISTS price_snapshots (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -158,6 +156,18 @@ export function initSchema(db: DB): void {
       label           TEXT NOT NULL DEFAULT 'default'
     );
   `);
+
+  // Nit4 fix: run migrations (mostly ALTER TABLE ... ADD COLUMN) only after every base table
+  // above has actually been created. Previously this ran FIRST, so on a genuinely fresh/empty
+  // DB every ALTER TABLE silently failed (target table didn't exist yet) — caught by each
+  // migration's try/catch as if the column already existed — and was still recorded as
+  // "applied" in schema_version, permanently skipping it thereafter even once CREATE TABLE
+  // IF NOT EXISTS ran below. That silently dropped columns like trades.entry_price/
+  // realized_pnl/strategy/symbol, discovered_assets grid/SMA/memecoin columns, rotations.
+  // score_delta, and daily_pnl.open_usd on any brand-new install (fresh DATA_DIR, new NAS
+  // deployment, or an isolated ephemeral test DB). This never surfaced against the long-lived
+  // dev/prod DB because its tables already existed before these migrations were added.
+  runMigrations(db);
 
   // Seeds these defaults on first run only — manual changes via dashboard are preserved
   const SETTINGS_DEFAULTS: Array<{ key: string; value: string }> = [

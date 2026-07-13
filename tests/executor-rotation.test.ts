@@ -37,6 +37,12 @@ const mockTools = {
   swap: vi.fn().mockResolvedValue({ txHash: '0xabc', status: 'success' }),
   getTokenAddress: vi.fn().mockReturnValue('0xnative'),
   getErc20Balance: vi.fn().mockResolvedValue(1_000_000),
+  // Nit1: mirrors the real SwapService.getQuoteImpactPct contract (see src/wallet/swap.ts) —
+  // a non-positive spotPriceUsd means "no reliable reference price" and must resolve null
+  // (fail-closed), otherwise resolve a fixed low-impact value so the check passes.
+  getQuoteImpactPct: vi.fn().mockImplementation(
+    async (_addr: string, _amountUsd: number, spotPriceUsd: number) => (spotPriceUsd > 0 ? 0.5 : null)
+  ),
 };
 
 // Minimal mock for queries
@@ -72,6 +78,7 @@ vi.mock('../src/data/db.js', () => ({
     insertTrade: { run: (...args: unknown[]) => mockQueries.insertTrade.run(...args) },
     recentAssetSnapshots: { all: (...args: unknown[]) => mockQueries.recentAssetSnapshots.all(...args) },
     getLatestAssetSnapshot: { get: vi.fn().mockReturnValue(undefined) },
+    insertEvent: { run: vi.fn() },
   },
   discoveredAssetQueries: {
     getAddressBySymbol: { get: (...args: unknown[]) => mockDiscoveredAssetQueries.getAddressBySymbol.get(...args) },
@@ -97,6 +104,9 @@ describe('TradeExecutor.executeRotation()', () => {
     mockTools.swap.mockReset().mockResolvedValue({ txHash: '0xabc', status: 'success' });
     mockTools.getTokenAddress.mockReturnValue('0xnative');
     mockTools.getErc20Balance.mockResolvedValue(1_000_000);
+    mockTools.getQuoteImpactPct.mockReset().mockImplementation(
+      async (_addr: string, _amountUsd: number, spotPriceUsd: number) => (spotPriceUsd > 0 ? 0.5 : null)
+    );
     mockDiscoveredAssetQueries.getAddressBySymbol.get.mockReturnValue(undefined);
   });
 
@@ -208,7 +218,9 @@ describe('TradeExecutor.executeRotation()', () => {
   });
 
   it('C9: clamps leg-1 sell amount down to the fresh on-chain balance when lower than intended', async () => {
-    // Intended sellTokenAmount = 0.05 / 3000 ≈ 0.0000167 ETH — fresh balance is smaller.
+    // Sell side is CBETH (an ERC20, not native ETH) so this test isolates C9's balance clamp
+    // from Nit2's ETH-only gas reserve, which is covered by its own tests below.
+    // Intended sellTokenAmount = 0.05 / 1.5 (mocked asset price) ≈ 0.0333 — fresh balance is smaller.
     mockTools.getErc20Balance.mockResolvedValueOnce(0.00001);
     mockTools.swap
       .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
@@ -216,11 +228,118 @@ describe('TradeExecutor.executeRotation()', () => {
 
     const rc = makeRc({ DRY_RUN: false });
     const executor = new TradeExecutor(mockTools as any, rc as any);
-    const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+    const result = await executor.executeRotation('CBETH', 'CBBTC', 0.05);
 
     expect(result.status).toBe('executed');
     const sellAmountArg = mockTools.swap.mock.calls[0][2] as string;
     expect(parseFloat(sellAmountArg)).toBeCloseTo(0.00001, 8);
+  });
+
+  // Nit2 — reserve a small ETH buffer for gas when C9 clamps a native-ETH sell leg
+  describe('Nit2: gas reserve on native-ETH sell clamp', () => {
+    it('subtracts the gas reserve from the fresh ETH balance when clamping', async () => {
+      // sellAmountUsd=3000 at price=3000 => intended sellTokenAmount = 1 ETH.
+      // Fresh on-chain balance is 0.5 ETH — below intended, so it clamps, but the clamped
+      // amount must be (0.5 - GAS_RESERVE_ETH), not the full 0.5. Give leg 2 plenty of mocked
+      // USDC so the (unrelated) leg-2 insufficient-balance guard doesn't short-circuit first.
+      mockState.lastUsdcBalance = 10_000;
+      mockTools.getErc20Balance.mockResolvedValueOnce(0.5);
+      mockTools.swap
+        .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+        .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('ETH', 'CBBTC', 3000);
+
+      expect(result.status).toBe('executed');
+      const sellAmountArg = mockTools.swap.mock.calls[0][2] as string;
+      expect(parseFloat(sellAmountArg)).toBeCloseTo(0.5 - 0.0002, 8);
+    });
+
+    it('aborts leg 1 cleanly when the ETH balance leaves ~0 after the gas reserve', async () => {
+      // Fresh balance (0.0001 ETH) is comfortably > 1e-9 (passes the ~0 check) but smaller
+      // than GAS_RESERVE_ETH (0.0002) — nothing usable remains after reserving gas.
+      mockTools.getErc20Balance.mockResolvedValueOnce(0.0001);
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('ETH', 'CBBTC', 0.05);
+
+      expect(result.status).toBe('failed');
+      expect(result.failureReason).toMatch(/gas reserve/);
+      expect(mockTools.swap).not.toHaveBeenCalled();
+    });
+
+    it('does not reserve gas for an ERC20 (non-ETH) sell leg', async () => {
+      // Same shape as the gas-reserve-subtraction test above but selling CBETH instead of ETH —
+      // the clamp must land exactly on the fresh balance, with nothing subtracted for gas.
+      mockState.lastUsdcBalance = 10_000;
+      mockTools.getErc20Balance.mockResolvedValueOnce(0.5);
+      mockTools.swap
+        .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+        .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('CBETH', 'CBBTC', 3000);
+
+      expect(result.status).toBe('executed');
+      const sellAmountArg = mockTools.swap.mock.calls[0][2] as string;
+      expect(parseFloat(sellAmountArg)).toBeCloseTo(0.5, 8);
+    });
+  });
+
+  // Nit1 — rotation leg-2 slippage spot read must respect the same 30-min freshness window
+  // as C1's single-asset BUY guard. checkSlippage() only runs for a non-registry buy target
+  // with a resolvable address, so buySymbol is a discovered token throughout this block.
+  describe('Nit1: rotation leg-2 slippage freshness gate', () => {
+    beforeEach(() => {
+      mockDiscoveredAssetQueries.getAddressBySymbol.get.mockReturnValue({ address: '0xbuytoken' });
+    });
+
+    it('vetoes leg 2 when there is no spot snapshot at all (missing = fail-closed)', async () => {
+      const { queries } = await import('../src/data/db.js');
+      (queries.getLatestAssetSnapshot.get as ReturnType<typeof vi.fn>).mockReturnValue(undefined);
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('ETH', 'NEWTOKEN', 5);
+
+      expect(result.status).toBe('leg1_done');
+      expect(mockTools.getQuoteImpactPct).toHaveBeenCalledWith('0xbuytoken', expect.any(Number), 0);
+    });
+
+    it('vetoes leg 2 when the latest spot snapshot is stale (>30 min old)', async () => {
+      const { queries } = await import('../src/data/db.js');
+      const staleTs = new Date(Date.now() - 31 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+      (queries.getLatestAssetSnapshot.get as ReturnType<typeof vi.fn>).mockReturnValue({ price_usd: 2.5, timestamp: staleTs });
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('ETH', 'NEWTOKEN', 5);
+
+      // A stale snapshot must be treated as spotPriceUsd=0 (unavailable), same as no snapshot —
+      // getQuoteImpactPct then returns null and the buy leg is vetoed (fail-closed).
+      expect(result.status).toBe('leg1_done');
+      expect(mockTools.getQuoteImpactPct).toHaveBeenCalledWith('0xbuytoken', expect.any(Number), 0);
+    });
+
+    it('allows leg 2 when the latest spot snapshot is fresh (<30 min old)', async () => {
+      const { queries } = await import('../src/data/db.js');
+      const freshTs = new Date(Date.now() - 5 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ');
+      (queries.getLatestAssetSnapshot.get as ReturnType<typeof vi.fn>).mockReturnValue({ price_usd: 2.5, timestamp: freshTs });
+      mockTools.swap
+        .mockResolvedValueOnce({ txHash: '0xsell', status: 'success' })
+        .mockResolvedValueOnce({ txHash: '0xbuy', status: 'success' });
+
+      const rc = makeRc({ DRY_RUN: false });
+      const executor = new TradeExecutor(mockTools as any, rc as any);
+      const result = await executor.executeRotation('ETH', 'NEWTOKEN', 5);
+
+      expect(result.status).toBe('executed');
+      expect(mockTools.getQuoteImpactPct).toHaveBeenCalledWith('0xbuytoken', expect.any(Number), 2.5);
+    });
   });
 
   // C8 — size leg 2 from measured leg-1 proceeds, not the intended amount

@@ -14,10 +14,31 @@ const MAX_SHADOW_PERIOD_MS = 48 * 60 * 60 * 1000; // sanity cap — stale/corrup
 const LOSING_STREAK_THRESHOLD = 3;              // consecutive realized losses before auto-pause
 const LOSING_STREAK_SHADOW_MS = 7 * 24 * 60 * 60 * 1000; // pause the asset for 7 days
 
+// C1 — stale-price freshness window. Shared by the BUY guard below and (Nit1) the rotation
+// leg-2 slippage spot read in checkSlippage(): a snapshot older than this is treated as
+// unavailable rather than trusted.
+const MAX_PRICE_AGE_MS = 30 * 60 * 1000;
+
+// Nit2 — reserve a small ETH buffer for gas when a rotation clamps a native-ETH sell leg to
+// the fresh on-chain balance (C9). Base gas is cheap; this is comfortably above a typical
+// swap's gas cost while staying negligible relative to any real position size.
+const GAS_RESERVE_ETH = 0.0002;
+
 export function isShadowPeriod(shadowUntil: number | null | undefined): boolean {
   if (!shadowUntil) return false;
   if (shadowUntil > Date.now() + MAX_SHADOW_PERIOD_MS) return false; // value is stale or was set incorrectly
   return Date.now() < shadowUntil;
+}
+
+/**
+ * Parses a SQLite `datetime('now')`-style timestamp ('YYYY-MM-DD HH:MM:SS', UTC, no timezone
+ * suffix) and returns its age in ms relative to now. Returns `Infinity` for a missing/undefined
+ * timestamp so callers' `age > MAX_PRICE_AGE_MS` freshness checks fail closed.
+ */
+function snapshotAgeMs(ts: string | null | undefined): number {
+  if (!ts) return Infinity;
+  const iso = /Z$|[+-]\d{2}:?\d{2}$/.test(ts) ? ts : ts.replace(' ', 'T') + 'Z';
+  return Date.now() - new Date(iso).getTime();
 }
 
 export class TradeExecutor {
@@ -87,8 +108,15 @@ export class TradeExecutor {
       // S1: impact is derived from a CDP-SDK quote (getQuoteImpactPct) compared against the
       // latest known spot price for this asset — no 0x key required/used. If we have no recent
       // priced snapshot, spotPriceUsd is 0 and getQuoteImpactPct returns null (fail-closed).
-      const spotRow = queries.getLatestAssetSnapshot.get(symbol) as { price_usd: number } | undefined;
-      const spotPriceUsd = spotRow?.price_usd ?? 0;
+      // Nit1: this is shared by the single-asset BUY pre-check and the rotation leg-2 buy
+      // check — the BUY path is separately protected by C1's 30-min freshness guard on its own
+      // read, but that guard never covered this spot read. An inflated STALE snapshot here could
+      // mask real impact on the rotation path, so apply the same freshness window directly: a
+      // missing or >30min-old snapshot is treated as unavailable (spotPriceUsd=0), which routes
+      // through the existing fail-closed impact===null branch below.
+      const spotRow = queries.getLatestAssetSnapshot.get(symbol) as { price_usd: number; timestamp: string } | undefined;
+      const spotAgeMs = snapshotAgeMs(spotRow?.timestamp);
+      const spotPriceUsd = (spotRow && spotRow.price_usd > 0 && spotAgeMs <= MAX_PRICE_AGE_MS) ? spotRow.price_usd : 0;
       const impact = await this.tools.getQuoteImpactPct(address, amountUsd, spotPriceUsd);
       // C4: fail-CLOSED for non-registry assets. A null impact means we could not obtain a
       // reliable slippage reading (no liquidity, no spot price, or the quote failed). We must
@@ -397,10 +425,7 @@ export class TradeExecutor {
     // (ETH/CBBTC/CBETH/USDC) are exempt — they price via Pyth/fixed and keep their flow.
     if (signal === 'buy' && !this.isRegistryAsset(symbol)) {
       const buySnap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number; timestamp: string }[])[0];
-      const MAX_PRICE_AGE_MS = 30 * 60 * 1000; // stale price (>30min) = don't buy
-      const buyPriceAgeMs = buySnap?.timestamp
-        ? Date.now() - new Date(/Z$|[+-]\d{2}:?\d{2}$/.test(buySnap.timestamp) ? buySnap.timestamp : buySnap.timestamp.replace(' ', 'T') + 'Z').getTime()
-        : Infinity;
+      const buyPriceAgeMs = snapshotAgeMs(buySnap?.timestamp);
       if (!buySnap || !(buySnap.price_usd > 0) || buyPriceAgeMs > MAX_PRICE_AGE_MS) {
         logger.warn(`[${symbol}] BUY rejected — no fresh price (price=$${buySnap?.price_usd ?? 'none'}, age=${Number.isFinite(buyPriceAgeMs) ? Math.round(buyPriceAgeMs / 1000) + 's' : 'n/a'})`);
         queries.insertEvent.run('buy_no_price_veto', `${symbol}: price=${buySnap?.price_usd ?? 'none'}`);
@@ -705,9 +730,20 @@ export class TradeExecutor {
           logger.warn(`Rotation leg 1 aborted — fresh on-chain balance of ${sellSymbol} is ~0`);
           return { status: 'failed', failureReason: `leg1: ${sellSymbol} on-chain balance is ~0` };
         }
-        if (freshSellBalance < sellTokenAmount) {
-          logger.info(`Rotation leg 1: clamping ${sellSymbol} sell amount ${sellTokenAmount.toFixed(8)} → fresh balance ${freshSellBalance.toFixed(8)}`);
-          sellTokenAmount = freshSellBalance;
+        // Nit2: for a native-ETH sell only, reserve a small gas buffer. C9's clamp above (to
+        // the full fresh balance) could otherwise sell every wei of ETH, leaving nothing to pay
+        // for the swap tx's own gas. ERC20 sells (CBBTC/CBETH/discovered tokens) pay gas from a
+        // separate ETH balance and are unaffected.
+        const availableSellBalance = sellSymbol === 'ETH'
+          ? Math.max(0, freshSellBalance - GAS_RESERVE_ETH)
+          : freshSellBalance;
+        if (sellSymbol === 'ETH' && availableSellBalance <= 1e-9) {
+          logger.warn(`Rotation leg 1 aborted — ETH balance ${freshSellBalance.toFixed(8)} leaves ~0 after reserving ${GAS_RESERVE_ETH} for gas`);
+          return { status: 'failed', failureReason: `leg1: ETH balance too small after ${GAS_RESERVE_ETH} gas reserve` };
+        }
+        if (availableSellBalance < sellTokenAmount) {
+          logger.info(`Rotation leg 1: clamping ${sellSymbol} sell amount ${sellTokenAmount.toFixed(8)} → available ${availableSellBalance.toFixed(8)}${sellSymbol === 'ETH' ? ` (reserved ${GAS_RESERVE_ETH} ETH for gas)` : ''}`);
+          sellTokenAmount = availableSellBalance;
         }
 
         // C8: measure USDC balance immediately before/after the swap to know the real proceeds.
