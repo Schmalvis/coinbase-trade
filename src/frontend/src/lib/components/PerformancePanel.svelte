@@ -4,95 +4,130 @@
 
   declare const Chart: any;
 
-  let portfolioCanvas: HTMLCanvasElement;
-  let portfolioChart: any;
+  let canvas: HTMLCanvasElement;
+  let chart: any;
+  type Range = '7d' | '30d' | 'all';
+  let range: Range = '30d';
 
-  function chartOpts(label: string, color: string) {
+  function setRange(r: Range) {
+    range = r;
+  }
+
+  function cssVar(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function hexToRgba(hex: string, alpha: number): string {
+    if (hex.startsWith('rgba') || hex.startsWith('rgb')) return hex;
+    const h = hex.replace('#', '');
+    const bigint = parseInt(h.length === 3 ? h.split('').map(c => c + c).join('') : h, 16);
+    const r = (bigint >> 16) & 255, g = (bigint >> 8) & 255, b = bigint & 255;
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+
+  function currentColors() {
+    const accent = cssVar('--accent') || '#C15F3C';
+    const muted = cssVar('--text-muted') || '#8A867B';
+    const border = cssVar('--border') || 'rgba(0,0,0,0.1)';
+    return { accent, muted, border, fill: hexToRgba(accent, 0.12) };
+  }
+
+  function buildOptions() {
+    const { muted, border } = currentColors();
     return {
-      type: 'line',
-      data: {
-        labels: [],
-        datasets: [
-          {
-            label,
-            data: [],
-            borderColor: color,
-            borderWidth: 1.5,
-            pointRadius: 0,
-            tension: 0.3,
-            fill: true,
-            backgroundColor: color + '15',
-          },
-        ],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { display: false },
-          y: {
-            ticks: { color: '#888', font: { size: 10 } },
-            grid: { color: 'rgba(128,128,128,0.1)' },
-          },
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: { display: false },
+        y: {
+          ticks: { color: muted, font: { size: 10 } },
+          grid: { color: border },
         },
-        plugins: { legend: { display: false } },
-        animation: false,
       },
+      plugins: { legend: { display: false } },
+      animation: false,
     };
   }
 
+  function filteredHistory() {
+    const ph = $performance?.portfolio_history ?? [];
+    if (range === 'all') return ph;
+    const days = range === '7d' ? 7 : 30;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    return ph.filter((p: { timestamp: string; portfolio_usd: number }) => new Date(p.timestamp).getTime() >= cutoff);
+  }
+
+  function renderChart() {
+    if (!chart) return;
+    const ph = filteredHistory();
+    chart.data.labels = ph.map((p: { timestamp: string }) => p.timestamp);
+    chart.data.datasets[0].data = ph.map((p: { portfolio_usd: number }) => p.portfolio_usd);
+    chart.update('none');
+  }
+
+  function recolor() {
+    if (!chart) return;
+    const { accent, fill } = currentColors();
+    chart.data.datasets[0].borderColor = accent;
+    chart.data.datasets[0].backgroundColor = fill;
+    Object.assign(chart.options, buildOptions());
+    chart.update('none');
+  }
+
+  function onThemeChange() {
+    recolor();
+  }
+
   onMount(() => {
-    portfolioChart = new Chart(portfolioCanvas, chartOpts('Portfolio', '#4ade80'));
+    const { accent, fill } = currentColors();
+    chart = new Chart(canvas, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [{
+          label: 'Portfolio',
+          data: [],
+          borderColor: accent,
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: true,
+          backgroundColor: fill,
+        }],
+      },
+      options: buildOptions(),
+    });
+    renderChart();
+    window.addEventListener('themechange', onThemeChange);
   });
 
-  $: if (portfolioChart && $performance) {
-    const ph = $performance.portfolio_history ?? [];
-    portfolioChart.data.labels = ph.map((p: { timestamp: string; portfolio_usd: number }) => p.timestamp);
-    portfolioChart.data.datasets[0].data = ph.map((p: { timestamp: string; portfolio_usd: number }) => p.portfolio_usd);
-    portfolioChart.update('none');
+  $: if (chart && $performance) {
+    renderChart();
+  }
+  $: if (chart && range) {
+    renderChart();
   }
 
   onDestroy(() => {
-    portfolioChart?.destroy();
+    chart?.destroy();
+    window.removeEventListener('themechange', onThemeChange);
   });
-
-  function fmtPnl(v: number | null | undefined): string {
-    if (v == null) return '--';
-    return (v >= 0 ? '+$' : '-$') + Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  }
-
-  function fmtPct(v: number | null | undefined): string {
-    if (v == null) return '--';
-    return (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
-  }
 </script>
 
-<div class="space-y-4">
-  <!-- P&L summary row -->
-  {#if $performance}
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {#each [
-        { label: 'Today', pnl: $performance.today?.change, pct: $performance.today?.change_pct },
-        { label: '7 Days', pnl: $performance.week?.change, pct: $performance.week?.change_pct },
-        { label: '30 Days', pnl: $performance.month?.change, pct: $performance.month?.change_pct },
-        { label: 'Total', pnl: $performance.total?.change, pct: $performance.total?.change_pct },
-      ] as item}
-        <div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4">
-          <div class="text-xs text-[var(--text-muted)] mb-1">{item.label}</div>
-          <div class="text-lg font-bold {(item.pnl ?? 0) >= 0 ? 'text-accent-green' : 'text-red-400'}">
-            {fmtPnl(item.pnl)}
-          </div>
-          <div class="text-xs {(item.pct ?? 0) >= 0 ? 'text-accent-green' : 'text-red-400'}">
-            {fmtPct(item.pct)}
-          </div>
-        </div>
+<div class="bg-[var(--bg-card)] rounded-[var(--radius-card)] border border-[var(--border)] shadow-[var(--shadow)] p-4">
+  <div class="flex items-center justify-between mb-2">
+    <h2 class="text-sm font-semibold font-display text-[var(--text-primary)]">Portfolio value</h2>
+    <div class="flex gap-1 bg-[var(--bg-inset)] rounded-[var(--radius-btn)] p-0.5">
+      {#each [['7d','7d'],['30d','30d'],['all','All']] as [id, lbl]}
+        <button
+          class="px-2.5 py-1 rounded-md text-xs font-medium transition-colors"
+          class:bg-clay-soft={range === id}
+          class:text-clay={range === id}
+          class:text-[var(--text-secondary)]={range !== id}
+          on:click={() => setRange(id)}
+        >{lbl}</button>
       {/each}
     </div>
-  {/if}
-
-  <!-- Chart -->
-  <div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4">
-    <div class="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">Portfolio Value</div>
-    <div class="h-40"><canvas bind:this={portfolioCanvas}></canvas></div>
   </div>
+  <div class="h-40"><canvas bind:this={canvas}></canvas></div>
 </div>

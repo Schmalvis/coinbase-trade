@@ -6,7 +6,7 @@ export const trades = writable<TradeData[]>([]);
 
 export async function loadTrades() {
   try {
-    const data = await fetchTrades(30);
+    const data = await fetchTrades(50);
     trades.set(data);
   } catch (e) {
     console.warn('loadTrades failed', e);

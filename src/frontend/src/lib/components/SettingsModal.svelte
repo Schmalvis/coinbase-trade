@@ -136,11 +136,11 @@
 
   function tabClass(tab: string) {
     return activeTab === tab
-      ? 'px-3 py-1.5 rounded-md text-sm font-medium bg-blue-500/20 text-blue-400'
+      ? 'px-3 py-1.5 rounded-md text-sm font-medium bg-clay-soft text-clay'
       : 'px-3 py-1.5 rounded-md text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]';
   }
 
-  const numInput = 'w-full bg-[var(--bg-primary)] border border-[var(--border-hi)] rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500';
+  const numInput = 'w-full bg-[var(--bg-inset)] border border-[var(--border-hi)] rounded-[var(--radius-btn)] px-3 py-1.5 text-sm focus:outline-none focus:border-clay';
   const label = 'block text-xs text-[var(--text-secondary)] mb-1';
   const fieldGroup = 'mb-3';
 </script>
@@ -160,12 +160,12 @@
     <!-- svelte-ignore a11y-click-events-have-key-events a11y-no-static-element-interactions -->
     <!-- Card -->
     <div
-      class="bg-[var(--bg-card)] rounded-2xl border border-[var(--border)] w-full max-w-lg max-h-[80vh] overflow-y-auto p-6 shadow-xl"
+      class="bg-[var(--bg-card)] rounded-none sm:rounded-2xl border border-[var(--border)] w-full max-w-lg max-h-[100dvh] sm:max-h-[80vh] overflow-y-auto p-6 shadow-[var(--shadow)]"
       on:click|stopPropagation
       role="document"
     >
       <div class="flex items-center justify-between mb-4">
-        <h2 class="text-base font-semibold">Settings</h2>
+        <h2 class="text-base font-semibold font-display">Settings</h2>
         <button
           class="text-[var(--text-muted)] hover:text-[var(--text-primary)] text-lg leading-none"
           on:click={() => dispatch('close')}
@@ -174,7 +174,7 @@
       </div>
 
       <!-- Tabs -->
-      <div class="flex gap-1 bg-[var(--bg-primary)] rounded-lg p-0.5 mb-5">
+      <div class="flex gap-1 bg-[var(--bg-inset)] rounded-[var(--radius-btn)] p-0.5 mb-5 flex-wrap">
         {#each ['strategy','trading','optimizer','notifications'] as tab}
           <button class={tabClass(tab)} on:click={() => { activeTab = tab; }}>
             {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -189,7 +189,7 @@
           <div class="flex gap-1">
             {#each ['threshold','sma'] as opt}
               <button
-                class="px-3 py-1 rounded-md text-sm border transition-colors {strategy === opt ? 'bg-blue-500/20 text-blue-400 border-blue-500/40' : 'border-[var(--border-hi)] text-[var(--text-secondary)]'}"
+                class="px-3 py-1 rounded-md text-sm border transition-colors {strategy === opt ? 'bg-clay-soft text-clay border-clay' : 'border-[var(--border-hi)] text-[var(--text-secondary)]'}"
                 on:click={() => strategy = opt}
               >{opt}</button>
             {/each}
@@ -293,7 +293,7 @@
           <div class="flex gap-1 flex-wrap">
             {#each ['all','important_only','digest','off'] as mode}
               <button
-                class="px-3 py-1 rounded-md text-sm border transition-colors {telegramMode === mode ? 'bg-blue-500/20 text-blue-400 border-blue-500/40' : 'border-[var(--border-hi)] text-[var(--text-secondary)]'}"
+                class="px-3 py-1 rounded-md text-sm border transition-colors {telegramMode === mode ? 'bg-clay-soft text-clay border-clay' : 'border-[var(--border-hi)] text-[var(--text-secondary)]'}"
                 on:click={() => telegramMode = mode}
               >{mode}</button>
             {/each}
@@ -314,7 +314,7 @@
       {/if}
 
       {#if errorMsg}
-        <p class="text-red-400 text-xs mt-2">{errorMsg}</p>
+        <p class="text-loss text-xs mt-2">{errorMsg}</p>
       {/if}
 
       <!-- Actions -->
@@ -324,7 +324,7 @@
           on:click={() => dispatch('close')}
         >Cancel</button>
         <button
-          class="px-4 py-1.5 rounded-lg text-sm font-semibold bg-blue-500 hover:bg-blue-600 text-white transition-colors disabled:opacity-50"
+          class="px-4 py-1.5 rounded-[var(--radius-btn)] text-sm font-semibold bg-clay hover:bg-clay-hover text-white transition-colors disabled:opacity-50"
           on:click={handleSave}
           disabled={saving}
         >{saving ? 'Saving…' : 'Save'}</button>

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { trades } from '../stores/trades';
-  import type { TradeData } from '../types';
 
   function formatTime(ts: string): string {
     const d = new Date(ts);
@@ -9,15 +8,15 @@
 
   function actionClass(action: string): string {
     return action === 'buy'
-      ? 'text-green-400'
+      ? 'text-gain'
       : action === 'sell'
-      ? 'text-red-400'
+      ? 'text-loss'
       : 'text-[var(--text-secondary)]';
   }
 </script>
 
-<div class="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-4">
-  <h2 class="text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Trade History</h2>
+<div class="rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--bg-card)] shadow-[var(--shadow)] p-4">
+  <h2 class="text-sm font-semibold font-display text-[var(--text-primary)] mb-3">Trade history</h2>
 
   {#if $trades.length === 0}
     <p class="text-sm text-[var(--text-secondary)]">No trades yet.</p>
@@ -40,17 +39,17 @@
           {#each $trades as t (t.id)}
             <tr class="border-b border-[var(--border)] last:border-0">
               <td class="py-1.5 pr-4 text-[var(--text-secondary)] whitespace-nowrap">{formatTime(t.timestamp)}</td>
-              <td class="py-1.5 pr-4 font-medium uppercase {actionClass(t.action)}">{t.action}</td>
+              <td class="py-1.5 pr-4 font-medium capitalize {actionClass(t.action)}">{t.action}</td>
               <td class="py-1.5 pr-4 font-medium">{t.symbol ?? '—'}</td>
-              <td class="py-1.5 pr-4 text-right font-mono">{(t.amount_eth ?? 0).toFixed(6)}</td>
-              <td class="py-1.5 pr-4 text-right font-mono">${(t.price_usd ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+              <td class="py-1.5 pr-4 text-right font-mono tabular-nums">{(t.amount_eth ?? 0).toFixed(6)}</td>
+              <td class="py-1.5 pr-4 text-right font-mono tabular-nums">${(t.price_usd ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
               <td class="py-1.5 pr-4 text-[var(--text-secondary)] hidden sm:table-cell max-w-[180px] truncate">{t.reason ?? '—'}</td>
               <td class="py-1.5 pr-4 text-[var(--text-secondary)] hidden sm:table-cell">{t.strategy ?? '—'}</td>
               <td class="py-1.5 text-center">
                 {#if t.dry_run}
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">dry</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-warn-soft text-warn">dry</span>
                 {:else}
-                  <span class="text-xs px-1.5 py-0.5 rounded bg-green-500/20 text-green-400">live</span>
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gain-soft text-gain">live</span>
                 {/if}
               </td>
             </tr>

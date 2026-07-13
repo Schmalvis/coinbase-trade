@@ -21,11 +21,13 @@
   let gridLower = asset.strategyConfig?.gridLowerBound != null ? String(asset.strategyConfig.gridLowerBound) : '';
 
   let saving = false;
+  let errorMsg = '';
 
   const strategies = ['threshold', 'sma', 'grid'] as const;
 
   async function handleSave() {
     saving = true;
+    errorMsg = '';
     try {
       const config = {
         strategyType: selectedStrategy,
@@ -45,7 +47,7 @@
         await loadAssets();
         dispatch('saved');
       } else {
-        alert('Error: ' + (res.error || 'Unknown error'));
+        errorMsg = res.error || 'Unknown error';
       }
     } finally {
       saving = false;
@@ -54,6 +56,7 @@
 
   async function handleEnable() {
     saving = true;
+    errorMsg = '';
     try {
       const config = {
         strategyType: selectedStrategy,
@@ -73,7 +76,7 @@
         await loadAssets();
         dispatch('saved');
       } else {
-        alert('Error: ' + (res.error || 'Unknown error'));
+        errorMsg = res.error || 'Unknown error';
       }
     } finally {
       saving = false;
@@ -105,17 +108,16 @@
 
 <div class="p-4 bg-[var(--bg-primary)] border-t border-[var(--border)]">
   <!-- Strategy pills -->
-  <div class="flex items-center gap-2 mb-4">
+  <div class="flex items-center gap-2 mb-4 flex-wrap">
     <span class="text-xs font-medium text-[var(--text-secondary)] mr-2">Strategy</span>
     {#each strategies as s}
       <button
-        class="px-3 py-1 text-xs font-semibold rounded-lg border transition-colors uppercase"
-        class:bg-accent-blue={selectedStrategy === s}
+        class="px-3 py-1 text-xs font-semibold rounded-[var(--radius-btn)] border transition-colors"
+        class:bg-clay={selectedStrategy === s}
         class:text-white={selectedStrategy === s}
-        class:border-accent-blue={selectedStrategy === s}
-        class:border-[var(--border)]={selectedStrategy !== s}
+        class:border-clay={selectedStrategy === s}
+        class:border-[var(--border-hi)]={selectedStrategy !== s}
         class:text-[var(--text-secondary)]={selectedStrategy !== s}
-        class:hover:border-accent-blue={selectedStrategy !== s}
         on:click={() => (selectedStrategy = s)}
       >
         {s}
@@ -129,35 +131,35 @@
       <label class="text-xs text-[var(--text-secondary)]">
         Buy on drop %
         <input type="number" step="0.1" bind:value={dropPct}
-          class="block w-20 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-20 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
       <label class="text-xs text-[var(--text-secondary)]">
         Sell on rise %
         <input type="number" step="0.1" bind:value={risePct}
-          class="block w-20 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-20 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
     {:else if selectedStrategy === 'sma'}
       <label class="text-xs text-[var(--text-secondary)]">
         Short window
         <input type="number" step="1" bind:value={smaShort}
-          class="block w-20 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-20 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
       <label class="text-xs text-[var(--text-secondary)]">
         Long window
         <input type="number" step="1" bind:value={smaLong}
-          class="block w-20 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-20 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
       <div class="flex items-center gap-3 ml-2">
         <label class="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer">
-          <input type="checkbox" bind:checked={useEma} class="accent-accent-green" />
+          <input type="checkbox" bind:checked={useEma} style="accent-color: var(--gain)" />
           Use EMA
         </label>
         <label class="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer">
-          <input type="checkbox" bind:checked={volumeFilter} class="accent-accent-green" />
+          <input type="checkbox" bind:checked={volumeFilter} style="accent-color: var(--gain)" />
           Volume filter
         </label>
         <label class="flex items-center gap-1.5 text-xs text-[var(--text-secondary)] cursor-pointer">
-          <input type="checkbox" bind:checked={rsiFilter} class="accent-accent-green" />
+          <input type="checkbox" bind:checked={rsiFilter} style="accent-color: var(--gain)" />
           RSI filter
         </label>
       </div>
@@ -165,17 +167,17 @@
       <label class="text-xs text-[var(--text-secondary)]">
         Grid Levels
         <input type="number" step="1" bind:value={gridLevels}
-          class="block w-20 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-20 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
       <label class="text-xs text-[var(--text-secondary)]">
         Upper Bound
         <input type="number" step="0.01" bind:value={gridUpper} placeholder="auto"
-          class="block w-24 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-24 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
       <label class="text-xs text-[var(--text-secondary)]">
         Lower Bound
         <input type="number" step="0.01" bind:value={gridLower} placeholder="auto"
-          class="block w-24 mt-1 bg-[var(--bg-primary)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm" />
+          class="block w-24 mt-1 bg-[var(--bg-inset)] border border-[var(--border-hi)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay" />
       </label>
     {/if}
   </div>
@@ -184,34 +186,38 @@
   <div class="flex items-center gap-3">
     {#if asset.status === 'pending'}
       <button
-        class="border border-accent-green text-accent-green hover:bg-accent-green/10 font-semibold rounded-lg px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
+        class="bg-gain-soft text-gain border border-gain hover:bg-gain/20 font-semibold rounded-[var(--radius-btn)] px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
         on:click={handleEnable}
         disabled={saving}
       >
-        {saving ? 'Saving...' : 'ENABLE'}
+        {saving ? 'Saving…' : 'Enable'}
       </button>
       <button
-        class="border border-accent-red text-accent-red hover:bg-accent-red/10 font-semibold rounded-lg px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
+        class="text-loss hover:bg-loss-soft font-semibold rounded-[var(--radius-btn)] px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
         on:click={handleDismiss}
         disabled={saving}
       >
-        DISMISS
+        Dismiss
       </button>
     {:else}
       <button
-        class="border border-accent-green text-accent-green hover:bg-accent-green/10 font-semibold rounded-lg px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
+        class="bg-clay hover:bg-clay-hover text-white font-semibold rounded-[var(--radius-btn)] px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
         on:click={handleSave}
         disabled={saving}
       >
-        {saving ? 'Saving...' : 'SAVE'}
+        {saving ? 'Saving…' : 'Save'}
       </button>
       <button
-        class="border border-accent-red text-accent-red hover:bg-accent-red/10 font-semibold rounded-lg px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
+        class="text-loss hover:bg-loss-soft font-semibold rounded-[var(--radius-btn)] px-4 py-1.5 text-sm transition-colors disabled:opacity-50"
         on:click={handleDisable}
         disabled={saving}
       >
-        DISABLE STRATEGY
+        Disable strategy
       </button>
     {/if}
   </div>
+
+  {#if errorMsg}
+    <p class="text-xs text-loss mt-2">{errorMsg}</p>
+  {/if}
 </div>

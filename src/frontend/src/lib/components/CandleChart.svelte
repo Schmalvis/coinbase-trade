@@ -17,6 +17,34 @@
   $: symbols = [...new Set(($assets || []).filter(a => a.status === 'active').map(a => a.symbol))];
   $: if (symbols.length && !symbols.includes(selectedSymbol)) selectedSymbol = symbols[0];
 
+  function cssVar(name: string): string {
+    return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  }
+
+  function currentColors() {
+    return {
+      gain: cssVar('--gain') || '#1E7B53',
+      loss: cssVar('--loss') || '#B3372E',
+      muted: cssVar('--text-muted') || '#8A867B',
+      border: cssVar('--border') || 'rgba(0,0,0,0.1)',
+    };
+  }
+
+  function recolor() {
+    if (!chart) return;
+    const { gain, loss, muted, border } = currentColors();
+    chart.data.datasets[0].color = { up: gain, down: loss, unchanged: muted };
+    chart.options.scales.x.ticks.color = muted;
+    chart.options.scales.x.grid.color = border;
+    chart.options.scales.y.ticks.color = muted;
+    chart.options.scales.y.grid.color = border;
+    chart.update('none');
+  }
+
+  function onThemeChange() {
+    recolor();
+  }
+
   // Derived indicators from last candle
   $: rsi = lastCandle ? null : null; // RSI not directly in CandleData; show volume info instead
   $: priceChange = candleData.length >= 2
@@ -47,6 +75,7 @@
   }
 
   onMount(() => {
+    const { gain, loss, muted, border } = currentColors();
     chart = new Chart(canvas, {
       type: 'candlestick',
       data: {
@@ -54,9 +83,9 @@
           label: selectedSymbol,
           data: candleData,
           color: {
-            up: '#4ade80',
-            down: '#f87171',
-            unchanged: '#888',
+            up: gain,
+            down: loss,
+            unchanged: muted,
           },
         }],
       },
@@ -66,12 +95,12 @@
         scales: {
           x: {
             type: 'timeseries',
-            ticks: { color: '#888', maxTicksLimit: 8 },
-            grid: { color: 'rgba(128,128,128,0.1)' },
+            ticks: { color: muted, maxTicksLimit: 8 },
+            grid: { color: border },
           },
           y: {
-            ticks: { color: '#888' },
-            grid: { color: 'rgba(128,128,128,0.1)' },
+            ticks: { color: muted },
+            grid: { color: border },
           },
         },
         plugins: { legend: { display: false } },
@@ -79,9 +108,13 @@
       },
     });
     loadChart();
+    window.addEventListener('themechange', onThemeChange);
   });
 
-  onDestroy(() => chart?.destroy());
+  onDestroy(() => {
+    chart?.destroy();
+    window.removeEventListener('themechange', onThemeChange);
+  });
 
   function switchInterval(iv: string) {
     selectedInterval = iv;
@@ -89,16 +122,16 @@
   }
 </script>
 
-<div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4">
+<div class="bg-[var(--bg-card)] rounded-[var(--radius-card)] border border-[var(--border)] shadow-[var(--shadow)] p-4">
   <!-- Header row -->
-  <div class="flex items-center justify-between mb-3">
+  <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
     <div class="flex items-center gap-2">
-      <span class="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">Candle Chart</span>
+      <span class="text-sm font-semibold font-display text-[var(--text-primary)]">Candle chart</span>
       {#if symbols.length > 0}
         <select
           bind:value={selectedSymbol}
           on:change={() => loadChart()}
-          class="bg-[var(--bg-primary)] border border-[var(--border)] text-[var(--text-primary)] rounded-lg px-2 py-1 text-sm"
+          class="bg-[var(--bg-inset)] border border-[var(--border)] text-[var(--text-primary)] rounded-[var(--radius-btn)] px-2 py-1 text-sm focus:outline-none focus:border-clay"
         >
           {#each symbols as sym}
             <option value={sym}>{sym}</option>
@@ -111,12 +144,12 @@
     </div>
 
     <!-- Timeframe pills -->
-    <div class="flex gap-1 bg-[var(--bg-primary)] rounded-lg p-0.5">
+    <div class="flex gap-1 bg-[var(--bg-inset)] rounded-[var(--radius-btn)] p-0.5">
       {#each ['15m', '1h', '24h'] as iv}
         <button
           class="px-3 py-1 rounded-md text-xs font-medium transition-colors"
-          class:bg-blue-500={selectedInterval === iv}
-          class:text-white={selectedInterval === iv}
+          class:bg-clay-soft={selectedInterval === iv}
+          class:text-clay={selectedInterval === iv}
           class:text-[var(--text-secondary)]={selectedInterval !== iv}
           on:click={() => switchInterval(iv)}
         >
@@ -158,8 +191,8 @@
         <span>
           Chg
           <span class="font-mono font-semibold"
-            class:text-green-400={priceChange >= 0}
-            class:text-red-400={priceChange < 0}
+            class:text-gain={priceChange >= 0}
+            class:text-loss={priceChange < 0}
           >
             {priceChange >= 0 ? '+' : ''}{priceChange.toFixed(2)}%
           </span>

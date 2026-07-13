@@ -35,15 +35,15 @@
 
   function gainClass(v: number | null): string {
     if (v == null) return 'text-[var(--text-secondary)]';
-    return v >= 0 ? 'text-green-400' : 'text-red-400';
+    return v >= 0 ? 'text-gain' : 'text-loss';
   }
 
   function statusBadge(s: string): string {
-    if (s === 'executed') return 'bg-green-500/20 text-green-400';
-    if (s === 'vetoed') return 'bg-yellow-500/20 text-yellow-400';
-    if (s === 'failed') return 'bg-red-500/20 text-red-400';
-    if (s === 'leg1_done') return 'bg-orange-500/20 text-orange-400';
-    return 'bg-gray-500/20 text-gray-400';
+    if (s === 'executed') return 'bg-gain-soft text-gain';
+    if (s === 'vetoed') return 'bg-warn-soft text-warn';
+    if (s === 'failed') return 'bg-loss-soft text-loss';
+    if (s === 'leg1_done') return 'bg-clay-soft text-clay';
+    return 'bg-[var(--bg-inset)] text-[var(--text-muted)]';
   }
 
   $: executed = rows.filter(r => r.status === 'executed' && r.actual_gain_pct != null);
@@ -59,15 +59,18 @@
     : null;
 </script>
 
-<div class="rounded-xl border border-[var(--border)] bg-[var(--card-bg)] p-4">
-  <h2 class="text-sm font-semibold text-[var(--text-secondary)] uppercase tracking-wider mb-3">Rotation Calibration</h2>
+<div class="rounded-[var(--radius-card)] border border-[var(--border)] bg-[var(--bg-card)] shadow-[var(--shadow)] p-4">
+  <div class="mb-3">
+    <h2 class="text-sm font-semibold font-display text-[var(--text-primary)]">Rotation calibration</h2>
+    <p class="text-xs text-[var(--text-muted)] mt-0.5">Estimated vs. realized gains from cross-asset rotations.</p>
+  </div>
 
   {#if rows.length === 0}
     <p class="text-sm text-[var(--text-secondary)]">No rotation data yet.</p>
   {:else}
     <!-- Summary stats for executed rotations -->
     {#if executed.length > 0}
-      <div class="flex gap-6 mb-4 text-sm">
+      <div class="flex flex-wrap gap-x-6 gap-y-2 mb-4 text-sm">
         <div>
           <span class="text-[var(--text-secondary)]">Executions: </span>
           <span class="font-medium">{executed.length}</span>

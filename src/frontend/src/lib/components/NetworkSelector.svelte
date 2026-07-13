@@ -33,9 +33,9 @@
     {@const shortName = network.replace('base-', '').replace(/^\w/, (c) => c.toUpperCase())}
     <button
       on:click={() => select(network)}
-      class="px-2 py-1 sm:px-3 rounded-lg border text-sm font-medium transition-colors
+      class="px-2 py-1 sm:px-3 rounded-[var(--radius-btn)] border text-sm font-medium transition-colors
         {network === active
-          ? 'border-accent-green text-accent-green'
+          ? 'border-clay text-clay'
           : 'border-[var(--border)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'}"
     >
       <span class="hidden sm:inline">{network}</span>

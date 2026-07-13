@@ -44,18 +44,18 @@
     : r?.optimizer_status ?? 'Unknown';
 
   $: optimizerColor =
-    optimizerLabel === 'Active' ? 'text-accent-green'
-    : optimizerLabel === 'Risk-Off' ? 'text-yellow-400'
+    optimizerLabel === 'Active' ? 'text-gain'
+    : optimizerLabel === 'Risk-Off' ? 'text-warn'
     : 'text-[var(--text-muted)]';
 
   $: optimizerDot =
-    optimizerLabel === 'Active' ? 'bg-accent-green'
-    : optimizerLabel === 'Risk-Off' ? 'bg-yellow-400'
-    : 'bg-gray-500';
+    optimizerLabel === 'Active' ? 'bg-gain'
+    : optimizerLabel === 'Risk-Off' ? 'bg-warn'
+    : 'bg-[var(--text-muted)]';
 </script>
 
-<div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4">
-  <div class="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-3">Risk Monitor</div>
+<div class="bg-[var(--bg-card)] rounded-[var(--radius-card)] border border-[var(--border)] shadow-[var(--shadow)] p-4">
+  <h2 class="text-sm font-semibold font-display text-[var(--text-primary)] mb-3">Risk monitor</h2>
 
   {#if isEmpty}
     <div class="text-xs text-[var(--text-muted)] py-2">
@@ -70,11 +70,13 @@
         {#if r && r.has_data}
           {@const v = r.daily_pnl_pct ?? 0}
           {@const lim = r.daily_pnl_limit ?? 5}
-          <div class="text-xl font-bold {v >= 0 ? 'text-accent-green' : 'text-red-400'}">{fmtPct(v)}</div>
+          <div class="text-xl font-bold font-mono tabular-nums" class:text-gain={v >= 0} class:text-loss={v < 0}>{fmtPct(v)}</div>
           <div class="text-[10px] text-[var(--text-muted)] mt-1">limit: -{lim}%</div>
           <div class="w-full h-1 bg-[var(--border)] rounded-full mt-2">
             <div
-              class="h-full rounded-full {v >= 0 ? 'bg-accent-green' : 'bg-red-400'}"
+              class="h-full rounded-full"
+              class:bg-gain={v >= 0}
+              class:bg-loss={v < 0}
               style="width: {dailyPnlBar(v, lim)}%"
             ></div>
           </div>
@@ -89,11 +91,11 @@
         {#if r}
           {@const c = r.rotations_today ?? 0}
           {@const lim = r.max_daily_rotations ?? 10}
-          <div class="text-xl font-bold text-[var(--text-primary)]">{c} / {lim}</div>
+          <div class="text-xl font-bold font-mono tabular-nums text-[var(--text-primary)]">{c} / {lim}</div>
           <div class="text-[10px] text-[var(--text-muted)] mt-1">daily max</div>
           <div class="w-full h-1 bg-[var(--border)] rounded-full mt-2">
             <div
-              class="h-full rounded-full bg-blue-400"
+              class="h-full rounded-full bg-clay"
               style="width: {rotationsBar(c, lim)}%"
             ></div>
           </div>
@@ -109,13 +111,15 @@
           {@const pct = r.max_position_pct ?? 0}
           {@const lim = r.max_position_limit ?? 40}
           {@const warn = pct > lim * 0.8}
-          <div class="text-xl font-bold {warn ? 'text-yellow-400' : 'text-[var(--text-primary)]'}">
+          <div class="text-xl font-bold font-mono tabular-nums" class:text-warn={warn} class:text-[var(--text-primary)]={!warn}>
             {pct.toFixed(1)}%
           </div>
           <div class="text-[10px] text-[var(--text-muted)] mt-1">limit: {lim}%</div>
           <div class="w-full h-1 bg-[var(--border)] rounded-full mt-2">
             <div
-              class="h-full rounded-full {warn ? 'bg-yellow-400' : 'bg-blue-400'}"
+              class="h-full rounded-full"
+              class:bg-warn={warn}
+              class:bg-clay={!warn}
               style="width: {positionBar(pct, lim)}%"
             ></div>
           </div>
@@ -131,11 +135,13 @@
           {@const val = r.portfolio_usd ?? 0}
           {@const fl = r.portfolio_floor ?? 100}
           {@const nearFloor = val < fl * 1.2}
-          <div class="text-xl font-bold {nearFloor ? 'text-red-400' : 'text-accent-green'}">{fmtUsd(val)}</div>
+          <div class="text-xl font-bold font-mono tabular-nums" class:text-loss={nearFloor} class:text-gain={!nearFloor}>{fmtUsd(val)}</div>
           <div class="text-[10px] text-[var(--text-muted)] mt-1">floor: {fmtUsd(fl)}</div>
           <div class="w-full h-1 bg-[var(--border)] rounded-full mt-2">
             <div
-              class="h-full rounded-full {nearFloor ? 'bg-red-400' : 'bg-accent-green'}"
+              class="h-full rounded-full"
+              class:bg-loss={nearFloor}
+              class:bg-gain={!nearFloor}
               style="width: {floorBar(val, fl)}%"
             ></div>
           </div>

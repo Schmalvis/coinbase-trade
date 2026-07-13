@@ -83,8 +83,8 @@
   }
 </script>
 
-<div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] overflow-hidden">
-  <div class="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] p-4 pb-2">
+<div class="bg-[var(--bg-card)] rounded-[var(--radius-card)] border border-[var(--border)] shadow-[var(--shadow)] overflow-hidden">
+  <div class="text-sm font-semibold font-display text-[var(--text-primary)] p-4 pb-2">
     Assets
   </div>
 
@@ -98,7 +98,8 @@
             checked={allPendingSelected}
             bind:indeterminate={somePendingSelected}
             on:change={toggleSelectAll}
-            class="cursor-pointer accent-accent-blue"
+            class="cursor-pointer"
+            style="accent-color: var(--accent)"
             title="Select all pending"
           />
         </th>
@@ -110,6 +111,7 @@
         <th class="hidden sm:table-cell px-4 py-2 text-right">Score</th>
         <th class="px-4 py-2 text-right">24H</th>
         <th class="px-4 py-2 text-left">Strategy</th>
+        <th class="px-2 py-2 w-6"></th>
       </tr>
     </thead>
     <tbody>
@@ -129,7 +131,8 @@
                 checked={selected.has(asset.address)}
                 on:click|stopPropagation
                 on:change={() => toggleAsset(asset.address)}
-                class="cursor-pointer accent-accent-blue"
+                class="cursor-pointer"
+                style="accent-color: var(--accent)"
               />
             {/if}
           </td>
@@ -149,40 +152,49 @@
           <td class="hidden sm:table-cell px-4 py-3 text-sm">
             <span class="text-[var(--text-primary)]">{weight.toFixed(1)}%</span>
             <div class="w-16 h-1 bg-[var(--border)] rounded-full mt-1 inline-block ml-1 align-middle">
-              <div class="h-full bg-accent-blue rounded-full" style="width: {Math.min(weight, 100)}%"></div>
+              <div class="h-full bg-clay rounded-full" style="width: {Math.min(weight, 100)}%"></div>
             </div>
           </td>
           <td
             class="hidden sm:table-cell px-4 py-3 text-sm text-right font-semibold"
-            class:text-accent-green={score != null && score > 0}
-            class:text-accent-red={score != null && score < 0}
+            class:text-gain={score != null && score > 0}
+            class:text-loss={score != null && score < 0}
             class:text-[var(--text-muted)]={score == null || score === 0}
           >
             {score != null ? score.toFixed(1) : '--'}
           </td>
           <td
             class="px-4 py-3 text-sm text-right"
-            class:text-accent-green={asset.change24h != null && asset.change24h > 0}
-            class:text-accent-red={asset.change24h != null && asset.change24h < 0}
+            class:text-gain={asset.change24h != null && asset.change24h > 0}
+            class:text-loss={asset.change24h != null && asset.change24h < 0}
             class:text-[var(--text-muted)]={asset.change24h == null}
           >
             {formatChange(asset.change24h)}
           </td>
           <td class="px-4 py-3 text-sm">
             {#if asset.status === 'pending'}
-              <span class="text-xs font-bold px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">PENDING</span>
+              <span class="text-xs font-bold px-1.5 py-0.5 rounded bg-warn-soft text-warn">PENDING</span>
             {:else}
-              <span class="inline-block w-2 h-2 rounded-full bg-accent-green mr-1"></span>
+              <span class="inline-block w-2 h-2 rounded-full bg-gain mr-1"></span>
               <span class="text-[var(--text-primary)]">{strategy}</span>
               {#if strategy === 'grid'}
-                <span class="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-accent-blue/20 text-accent-blue">GRID</span>
+                <span class="ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded bg-clay-soft text-clay">GRID</span>
               {/if}
             {/if}
+          </td>
+          <td class="px-2 py-3 text-center">
+            <svg
+              class="w-3.5 h-3.5 inline-block text-[var(--text-muted)] transition-transform"
+              style="transform: rotate({expandedAddress === asset.address ? 180 : 0}deg)"
+              viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+            >
+              <path d="M6 9l6 6 6-6" />
+            </svg>
           </td>
         </tr>
         {#if expandedAddress === asset.address}
           <tr>
-            <td colspan="9" class="p-0">
+            <td colspan="10" class="p-0">
               <AssetConfigPanel {asset} on:saved={onSaved} on:dismissed={onDismissed} />
             </td>
           </tr>

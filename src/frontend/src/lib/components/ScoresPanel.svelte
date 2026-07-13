@@ -5,21 +5,26 @@
   $: sorted = ($scores || []).slice().sort((a: ScoreData, b: ScoreData) => (b.score ?? 0) - (a.score ?? 0));
 
   function signalClass(signal: string): string {
-    if (signal === 'buy') return 'bg-green-500/20 text-green-400';
-    if (signal === 'sell') return 'bg-red-500/20 text-red-400';
-    return 'bg-[var(--border)] text-[var(--text-muted)]';
+    if (signal === 'buy') return 'bg-gain-soft text-gain';
+    if (signal === 'sell') return 'bg-loss-soft text-loss';
+    return 'bg-[var(--bg-inset)] text-[var(--text-muted)]';
   }
 
-  function scoreColor(score: number): string {
-    if (score > 20) return 'text-green-400';
-    if (score < -20) return 'text-red-400';
-    if (score > 0) return 'text-green-300';
-    if (score < 0) return 'text-red-300';
+  function scoreClass(score: number): string {
+    if (score > 0) return 'text-gain';
+    if (score < 0) return 'text-loss';
     return 'text-[var(--text-muted)]';
   }
 
-  function scoreBar(score: number): number {
-    return Math.round((Math.max(-100, Math.min(100, score)) + 100) / 2);
+  // Center-anchored bar: score in [-100,100] maps to a bar that grows from
+  // the 50% midline toward the right (positive) or left (negative).
+  function barStyle(score: number): string {
+    const clamped = Math.max(-100, Math.min(100, score ?? 0));
+    const half = Math.abs(clamped) / 2; // 0..50
+    if (clamped >= 0) {
+      return `left: 50%; width: ${half}%;`;
+    }
+    return `left: ${50 - half}%; width: ${half}%;`;
   }
 
   // Extract signals as [label, signal] pairs from the candle signals object
@@ -33,9 +38,10 @@
   }
 </script>
 
-<div class="bg-[var(--bg-card)] rounded-xl border border-[var(--border)] p-4">
-  <div class="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-3">
-    Opportunity Scores
+<div class="bg-[var(--bg-card)] rounded-[var(--radius-card)] border border-[var(--border)] shadow-[var(--shadow)] p-4">
+  <div class="mb-3">
+    <h2 class="text-sm font-semibold font-display text-[var(--text-primary)]">Opportunity scores</h2>
+    <p class="text-xs text-[var(--text-muted)] mt-0.5">Internal optimizer signals. Higher = stronger buy case.</p>
   </div>
 
   {#if sorted.length === 0}
@@ -47,16 +53,17 @@
           <!-- Symbol + score row -->
           <div class="flex items-center gap-3 mb-1.5">
             <span class="font-semibold text-sm w-14 text-[var(--text-primary)]">{item.symbol}</span>
-            <span class="font-bold text-sm w-12 text-right font-mono {scoreColor(item.score ?? 0)}">
+            <span class="font-bold text-sm w-12 text-right font-mono tabular-nums {scoreClass(item.score ?? 0)}">
               {(item.score ?? 0) > 0 ? '+' : ''}{(item.score ?? 0).toFixed(1)}
             </span>
-            <!-- Mini score bar -->
-            <div class="flex-1 h-1.5 bg-[var(--bg-primary)] rounded-full overflow-hidden">
+            <!-- Center-anchored score bar -->
+            <div class="relative flex-1 h-1.5 bg-[var(--bg-inset)] rounded-full overflow-hidden">
+              <span class="absolute left-1/2 top-0 bottom-0 w-px bg-[var(--border-hi)]"></span>
               <div
-                class="h-full rounded-full transition-all duration-500"
-                class:bg-green-400={(item.score ?? 0) >= 0}
-                class:bg-red-400={(item.score ?? 0) < 0}
-                style="width: {scoreBar(item.score ?? 0)}%; margin-left: {(item.score ?? 0) < 0 ? scoreBar(item.score ?? 0) + '%' : '50%'}; {(item.score ?? 0) < 0 ? 'margin-left:' + scoreBar(item.score ?? 0) + '%; width:' + (50 - scoreBar(item.score ?? 0)) + '%' : 'margin-left:50%; width:' + (scoreBar(item.score ?? 0) - 50) + '%'}"
+                class="absolute top-0 bottom-0 rounded-full transition-all duration-500"
+                class:bg-gain={(item.score ?? 0) >= 0}
+                class:bg-loss={(item.score ?? 0) < 0}
+                style={barStyle(item.score ?? 0)}
               ></div>
             </div>
           </div>
