@@ -5,6 +5,7 @@ import type { DiscoveredAssetRow } from '../../data/db.js';
 import { TCP_MIN_1H_CANDLES } from '../../strategy/constants.js';
 import { assetsForNetwork } from '../../assets/registry.js';
 import type { RouteContext } from '../route-context.js';
+import { rowToAssetParams } from '../../trading/engine.js';
 
 function validateAssetParams(p: Record<string, unknown>): string[] {
   const errors: string[] = [];
@@ -188,13 +189,7 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     });
 
     for (const row of toEnable) {
-      engine.startAssetLoop(row.address, row.symbol, {
-        strategyType: row.strategy as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
-        dropPct: row.drop_pct,
-        risePct: row.rise_pct,
-        smaShort: row.sma_short,
-        smaLong: row.sma_long,
-      });
+      engine.startAssetLoop(row.address, row.symbol, rowToAssetParams(row));
     }
 
     const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
@@ -299,13 +294,10 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
     if (!isRegistrySymbol(row.symbol, network)) {
       discoveredAssetQueries.setShadowUntil.run({ shadow_until: Date.now() + PROMOTION_SHADOW_MS, symbol: row.symbol, network });
     }
-    engine.startAssetLoop(dbAddress, row.symbol, {
-      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
-      dropPct: params.dropPct,
-      risePct: params.risePct,
-      smaShort: params.smaShort,
-      smaLong: params.smaLong,
-    });
+    // Re-read AFTER all writes so the live loop matches persisted state exactly
+    // (sma flags, grid bounds incl. nulled-to-auto, defaulting applied by the write).
+    const fresh = (discoveredAssetQueries.getAssetByAddress.get(dbAddress, network) as DiscoveredAssetRow | undefined) ?? row;
+    engine.startAssetLoop(dbAddress, fresh.symbol, rowToAssetParams(fresh));
     const allDiscovered = discoveredAssetQueries.getDiscoveredAssets.all(network) as DiscoveredAssetRow[];
     botState.setPendingTokenCount(allDiscovered.filter(r => r.status === 'pending').length);
     return res.json({ ok: true });
@@ -379,13 +371,10 @@ export function registerAssetsRoutes(router: Router, ctx: RouteContext): void {
         address: dbAddress, network,
       });
     }
-    engine.reloadAssetConfig(dbAddress, row.symbol, {
-      strategyType: params.strategyType as 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation',
-      dropPct: params.dropPct,
-      risePct: params.risePct,
-      smaShort: params.smaShort,
-      smaLong: params.smaLong,
-    });
+    // Re-read AFTER all writes so the live loop matches persisted state exactly
+    // (sma flags, grid bounds incl. nulled-to-auto, defaulting applied by the write).
+    const fresh = (discoveredAssetQueries.getAssetByAddress.get(dbAddress, network) as DiscoveredAssetRow | undefined) ?? row;
+    engine.reloadAssetConfig(dbAddress, fresh.symbol, rowToAssetParams(fresh));
     return res.json({ ok: true });
   });
 }

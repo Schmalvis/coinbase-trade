@@ -148,13 +148,19 @@ vi.mock('../src/web/auth.js', () => ({
 vi.mock('../src/wallet/client.js', () => ({ CdpWalletClient: vi.fn() }));
 vi.mock('../src/portfolio/tracker.js', () => ({ PortfolioTracker: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })) }));
 vi.mock('../src/telegram/bot.js', () => ({ TelegramBot: vi.fn(() => ({ start: vi.fn(), stop: vi.fn() })) }));
-vi.mock('../src/trading/engine.js', () => ({
-  TradingEngine: vi.fn(() => ({
-    start: vi.fn(), stop: vi.fn(),
-    startAssetLoop: vi.fn(), stopAssetLoop: vi.fn(),
-    reloadAssetConfig: vi.fn(),
-  })),
-}));
+vi.mock('../src/trading/engine.js', async (importOriginal) => {
+  // Keep the real rowToAssetParams (a pure DB-row → params mapper used by web/routes/assets.ts)
+  // while stubbing out the TradingEngine class itself.
+  const actual = await importOriginal<typeof import('../src/trading/engine.js')>();
+  return {
+    ...actual,
+    TradingEngine: vi.fn(() => ({
+      start: vi.fn(), stop: vi.fn(),
+      startAssetLoop: vi.fn(), stopAssetLoop: vi.fn(),
+      reloadAssetConfig: vi.fn(),
+    })),
+  };
+});
 
 function makeMockEngine() {
   return {

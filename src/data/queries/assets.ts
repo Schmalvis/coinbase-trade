@@ -12,7 +12,7 @@ export interface DiscoveredAssetRow {
   rise_pct:     number;
   sma_short:    number;
   sma_long:     number;
-  strategy:     'threshold' | 'sma' | 'grid';
+  strategy:     'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation';
   discovered_at: string;
   grid_manual_override: number;
   grid_upper_bound: number | null;
@@ -64,7 +64,7 @@ export const discoveredAssetQueries = {
   `) as Statement<{ grid_levels: number; grid_upper_bound: number | null; grid_lower_bound: number | null; grid_manual_override: number; address: string; network: string }>,
 
   dismissAsset: db.prepare(`
-    UPDATE discovered_assets SET status = 'dismissed' WHERE address = ? AND network = ?
+    UPDATE discovered_assets SET status = 'dismissed', shadow_until = NULL WHERE address = ? AND network = ?
   `) as Statement<[string, string]>,
 
   getAssetByAddress: db.prepare(`

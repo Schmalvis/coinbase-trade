@@ -1,5 +1,6 @@
 // src/scripts/apply-change.ts
 import Database from 'better-sqlite3';
+import { callBot, httpFailureReason, BotUnreachableError, buildStrategyEchoBody, type BotApiOptions, type StrategyRowLite } from './bot-api.js';
 
 const GLOBAL_NUMERIC_KEYS = new Set([
   'ROTATION_BUY_THRESHOLD', 'ROTATION_SELL_THRESHOLD', 'MIN_ROTATION_SCORE_DELTA',
@@ -24,8 +25,6 @@ const SESSION_DATE_KEY = 'review_session_date';
 const SESSION_COUNT_KEY = 'review_session_count';
 const MAX_SESSION_CHANGES = 3;
 
-const FETCH_TIMEOUT_MS = 10_000;
-
 export interface ChangeResult {
   accepted: boolean;
   key: string;
@@ -35,30 +34,7 @@ export interface ChangeResult {
   reason: string;
 }
 
-export interface ApplyChangeOptions {
-  baseUrl?: string;         // default `http://localhost:${process.env.WEB_PORT ?? '8080'}`
-  token?: string;           // default process.env.DASHBOARD_SECRET || 'apply-change'
-  fetchImpl?: typeof fetch; // default globalThis.fetch
-}
-
-// Full current-row shape read before a per-asset write, so we can echo back
-// every field the PUT /api/assets/:address/config endpoint expects (it persists
-// ALL fields on every call — missing sma_* flags would silently default to true).
-interface DiscoveredAssetRowLite {
-  address: string;
-  strategy: string;
-  drop_pct: number;
-  rise_pct: number;
-  sma_short: number;
-  sma_long: number;
-  sma_use_ema: number;
-  sma_volume_filter: number;
-  sma_rsi_filter: number;
-  grid_levels: number;
-  grid_upper_bound: number | null;
-  grid_lower_bound: number | null;
-  grid_manual_override: number;
-}
+export type ApplyChangeOptions = BotApiOptions;
 
 function getSessionCount(db: Database.Database): { date: string; count: number } {
   const dateRow = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(SESSION_DATE_KEY) as { value: string } | undefined;
@@ -83,10 +59,6 @@ export async function applyChange(
   network?: string,
   options: ApplyChangeOptions = {},
 ): Promise<ChangeResult> {
-  const baseUrl = options.baseUrl ?? `http://localhost:${process.env.WEB_PORT ?? '8080'}`;
-  const token = options.token ?? (process.env.DASHBOARD_SECRET || 'apply-change');
-  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
-
   const isPerAsset = symbol !== undefined;
 
   if (key === 'DRY_RUN') {
@@ -144,30 +116,17 @@ export async function applyChange(
     // picks it up immediately — writing straight to SQLite (the old behaviour) left
     // the running bot unaware of the change until its next restart.
     try {
-      const res = await fetchImpl(`${baseUrl}/api/settings`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ changes: { [key]: newValue } }),
-        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      });
-      const body = await res.json().catch(() => ({}));
+      const res = await callBot('POST', '/api/settings', { changes: { [key]: newValue } }, options);
       if (res.ok) {
         incrementSessionCount(db, today, sessionCount);
         return { accepted: true, key, oldValue, newValue, reason: 'Applied (live)' };
       }
-      if (res.status === 400) {
-        return { accepted: false, key, oldValue, reason: `Rejected by bot: ${(body as any).error}` };
+      return { accepted: false, key, ...(res.status === 400 ? { oldValue } : {}), reason: httpFailureReason(res) };
+    } catch (err) {
+      if (err instanceof BotUnreachableError) {
+        return { accepted: false, key, reason: `${err.message} — change NOT applied; do not retry with direct DB writes` };
       }
-      if (res.status === 401 || res.status === 403) {
-        return { accepted: false, key, reason: `Bot API auth failed (HTTP ${res.status}): ${(body as any).error ?? ''} — check DASHBOARD_SECRET env` };
-      }
-      return { accepted: false, key, reason: `Bot API returned HTTP ${res.status}` };
-    } catch (err: unknown) {
-      // Bot unreachable (not booted, crashed, DNS/timeout, etc). ABSOLUTELY NO fallback
-      // to a direct DB write here — a silent direct write bypassing the live bot's
-      // RuntimeConfig is the exact bug this rewrite fixes. Fail closed instead.
-      const msg = err instanceof Error ? err.message : String(err);
-      return { accepted: false, key, reason: `Bot unreachable at ${baseUrl} (${msg}) — change NOT applied; do not retry with direct DB writes` };
+      throw err;
     }
   }
 
@@ -186,7 +145,7 @@ export async function applyChange(
   // begin ticking a pending/dismissed (potentially spam) token that was never vetted.
   const row = db.prepare(
     `SELECT * FROM discovered_assets WHERE LOWER(symbol) = LOWER(?) AND network = ? AND status = 'active'`
-  ).get(symbol!, net) as DiscoveredAssetRowLite | undefined;
+  ).get(symbol!, net) as StrategyRowLite | undefined;
 
   if (!row) {
     return { accepted: false, key, symbol, reason: `Asset '${symbol}' not found or not active on ${net}` };
@@ -208,50 +167,25 @@ export async function applyChange(
   // NOTE: the PUT below resolves the asset against botState.activeNetwork server-side,
   // ignoring the --network CLI flag entirely — a pre-existing network-flag mismatch,
   // not something this change fixes.
-  const bodyOut: Record<string, unknown> = {
-    strategyType: row.strategy,
-    dropPct: key === 'drop_pct' ? newValue : row.drop_pct,
-    risePct: key === 'rise_pct' ? newValue : row.rise_pct,
-    smaShort: key === 'sma_short' ? newValue : row.sma_short,
-    smaLong: key === 'sma_long' ? newValue : row.sma_long,
-    smaUseEma: row.sma_use_ema === 1,
-    smaVolumeFilter: row.sma_volume_filter === 1,
-    smaRsiFilter: row.sma_rsi_filter === 1,
+  const bodyOut = buildStrategyEchoBody(row);
+  const FIELD_FOR_KEY: Record<string, string> = {
+    drop_pct: 'dropPct', rise_pct: 'risePct', sma_short: 'smaShort', sma_long: 'smaLong',
   };
-  if (row.strategy === 'grid') {
-    bodyOut.grid_levels = row.grid_levels;
-    if (row.grid_manual_override === 1) {
-      // Only send bounds when override is active — the endpoint recomputes
-      // grid_manual_override from bound presence, so omitting them here
-      // preserves auto-calculated bounds.
-      bodyOut.grid_upper_bound = row.grid_upper_bound;
-      bodyOut.grid_lower_bound = row.grid_lower_bound;
-    }
-  }
+  bodyOut[FIELD_FOR_KEY[key]] = newValue;
 
   try {
-    const res = await fetchImpl(`${baseUrl}/api/assets/${encodeURIComponent(row.address)}/config`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(bodyOut),
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-    const body = await res.json().catch(() => ({}));
+    const res = await callBot('PUT', `/api/assets/${encodeURIComponent(row.address)}/config`, bodyOut, options);
     if (res.ok) {
       incrementSessionCount(db, today, sessionCount);
       return { accepted: true, key, symbol, oldValue, newValue, reason: 'Applied (live)' };
     }
-    if (res.status === 400) {
-      return { accepted: false, key, symbol, oldValue, reason: `Rejected by bot: ${(body as any).error}` };
-    }
-    if (res.status === 401 || res.status === 403) {
-      return { accepted: false, key, symbol, reason: `Bot API auth failed (HTTP ${res.status}): ${(body as any).error ?? ''} — check DASHBOARD_SECRET env` };
-    }
-    return { accepted: false, key, symbol, reason: `Bot API returned HTTP ${res.status}` };
-  } catch (err: unknown) {
+    return { accepted: false, key, symbol, ...(res.status === 400 ? { oldValue } : {}), reason: httpFailureReason(res) };
+  } catch (err) {
     // Same fail-closed rule as the global path — never fall back to a direct DB write.
-    const msg = err instanceof Error ? err.message : String(err);
-    return { accepted: false, key, symbol, reason: `Bot unreachable at ${baseUrl} (${msg}) — change NOT applied; do not retry with direct DB writes` };
+    if (err instanceof BotUnreachableError) {
+      return { accepted: false, key, symbol, reason: `${err.message} — change NOT applied; do not retry with direct DB writes` };
+    }
+    throw err;
   }
 }
 

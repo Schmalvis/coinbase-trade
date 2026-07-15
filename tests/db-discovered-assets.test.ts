@@ -15,8 +15,16 @@ const DDL = `
     sma_long    INTEGER NOT NULL DEFAULT 20,
     strategy    TEXT NOT NULL DEFAULT 'threshold' CHECK(strategy IN ('threshold','sma')),
     discovered_at TEXT NOT NULL DEFAULT (datetime('now')),
+    shadow_until INTEGER,
     PRIMARY KEY (address, network)
   )
+`;
+
+// Mirrors discoveredAssetQueries.dismissAsset in src/data/queries/assets.ts —
+// F1-4: dismissing an asset must also clear shadow_until so a re-enabled token
+// doesn't inherit a stale shadow window from a previous promotion.
+const DISMISS_SQL = `
+  UPDATE discovered_assets SET status = 'dismissed', shadow_until = NULL WHERE address = ? AND network = ?
 `;
 
 describe('discovered_assets DDL', () => {
@@ -50,5 +58,18 @@ describe('discovered_assets DDL', () => {
     expect(count.cnt).toBe(2);  // two networks, same address
     const sepoliaRow = db.prepare(`SELECT * FROM discovered_assets WHERE address = ? AND network = ?`).get('0xabc', 'base-sepolia') as any;
     expect(sepoliaRow.network).toBe('base-sepolia');
+  });
+
+  it('dismissAsset clears shadow_until (F1-4)', () => {
+    const db = new Database(':memory:');
+    db.prepare(DDL).run();
+    db.prepare(`INSERT OR IGNORE INTO discovered_assets (address, network, symbol, name, decimals) VALUES (?, ?, ?, ?, ?)`).run('0xshadow', 'base-mainnet', 'SHADOW', 'Shadow Token', 18);
+    db.prepare(`UPDATE discovered_assets SET status = 'active', shadow_until = ? WHERE address = ? AND network = ?`).run(Date.now() + 3600_000, '0xshadow', 'base-mainnet');
+
+    db.prepare(DISMISS_SQL).run('0xshadow', 'base-mainnet');
+
+    const row = db.prepare(`SELECT status, shadow_until FROM discovered_assets WHERE address = ? AND network = ?`).get('0xshadow', 'base-mainnet') as any;
+    expect(row.status).toBe('dismissed');
+    expect(row.shadow_until).toBeNull();
   });
 });

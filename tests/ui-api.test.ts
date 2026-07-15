@@ -24,7 +24,8 @@ vi.mock('express', async (importOriginal) => {
     return app;
   };
   Object.assign(factory, actual.default);
-  return { default: factory };
+  // Forward all named exports (Router, json, static, etc.) so auth.ts can use them
+  return { ...actual, default: factory };
 });
 
 // ── Mock data fixtures ────────────────────────────────────────────────────────
@@ -46,6 +47,9 @@ const mkRow = (overrides?: Partial<DiscoveredAssetRow>): DiscoveredAssetRow => (
   grid_lower_bound: null,
   grid_manual_override: 0,
   grid_amount_pct: 5.0,
+  sma_use_ema: 1,
+  sma_volume_filter: 1,
+  sma_rsi_filter: 1,
   ...overrides,
 });
 
@@ -58,6 +62,7 @@ const dupRow = mkRow({ address: '0xeth-dup', symbol: 'ETH', name: 'Ethereum Dup'
 // ── Mock DB ───────────────────────────────────────────────────────────────────
 const mockDiscoveredAssetQueries = {
   getAssetByAddress: { get: vi.fn() },
+  getAssetBySymbol: { get: vi.fn(() => undefined) },
   getDiscoveredAssets: { all: vi.fn(() => [ethRow, usdcRow, cbbtcRow, dismissedRow, dupRow]) },
   getActiveAssets: { all: vi.fn(() => [ethRow, cbbtcRow]) },
   updateAssetStatus: { run: vi.fn() },
@@ -114,6 +119,10 @@ vi.mock('../src/data/db.js', () => ({
   rotationQueries: mockRotationQueries,
   dailyPnlQueries: mockDailyPnlQueries,
   portfolioSnapshotQueries: mockPortfolioSnapshotQueries,
+  passkeyQueries: {
+    getPasskey: { get: vi.fn() },
+    upsertPasskey: { run: vi.fn() },
+  },
 }));
 
 vi.mock('../src/config.js', () => ({
@@ -144,6 +153,10 @@ vi.mock('../src/assets/registry.js', () => ({
 
 vi.mock('../src/web/auth.js', () => ({
   createAuthMiddleware: () => (_req: any, _res: any, next: any) => next(),
+  createSessionMiddleware: () => (_req: any, _res: any, next: any) => next(),
+  isIpAllowed: () => true,
+  requireAuth: () => (_req: any, _res: any, next: any) => next(),
+  registerAuthRoutes: () => {},
 }));
 
 // ── Mock botState ─────────────────────────────────────────────────────────────
@@ -484,18 +497,34 @@ describe('UI/API endpoint tests', () => {
       expect(res.body.error).toMatch(/strategyType/);
     });
 
-    it('persists strategy config and reloads asset loop on success', async () => {
-      mockDiscoveredAssetQueries.getAssetByAddress.get.mockReturnValue(ethRow);
+    it('persists strategy config and reloads asset loop with the FULL param set', async () => {
+      const written = { ...ethRow, strategy: 'sma', sma_short: 7, sma_long: 25,
+        sma_use_ema: 1, sma_volume_filter: 0, sma_rsi_filter: 1 };
+      mockDiscoveredAssetQueries.getAssetByAddress.get.mockReturnValue(written);
       const res = await req(capturedApp!, 'PUT', '/api/assets/0xeth/config', {
-        strategyType: 'sma', dropPct: 1.5, risePct: 2.5, smaShort: 7, smaLong: 25,
+        strategyType: 'sma', dropPct: 1.5, risePct: 2.5, smaShort: 7, smaLong: 25, smaVolumeFilter: false,
       });
       expect(res.status).toBe(200);
       expect(res.body.ok).toBe(true);
       expect(mockDiscoveredAssetQueries.updateAssetStrategyConfig.run).toHaveBeenCalled();
-      expect(engine.reloadAssetConfig).toHaveBeenCalledWith(
-        '0xeth', 'ETH',
-        expect.objectContaining({ strategyType: 'sma' }),
-      );
+      expect(engine.reloadAssetConfig).toHaveBeenCalledWith('0xeth', 'ETH', expect.objectContaining({
+        strategyType: 'sma', smaShort: 7, smaLong: 25,
+        smaUseEma: true, smaVolumeFilter: false, smaRsiFilter: true,
+      }));
+    });
+
+    it('grid config with manual bounds reaches the running engine (regression: 5-field subset)', async () => {
+      const written = { ...ethRow, strategy: 'grid', grid_levels: 15,
+        grid_upper_bound: 4000, grid_lower_bound: 2800, grid_manual_override: 1 };
+      mockDiscoveredAssetQueries.getAssetByAddress.get.mockReturnValue(written);
+      const res = await req(capturedApp!, 'PUT', '/api/assets/0xeth/config', {
+        strategyType: 'grid', dropPct: 2, risePct: 3, smaShort: 5, smaLong: 20,
+        grid_levels: 15, grid_upper_bound: 4000, grid_lower_bound: 2800,
+      });
+      expect(res.status).toBe(200);
+      expect(engine.reloadAssetConfig).toHaveBeenCalledWith('0xeth', 'ETH', expect.objectContaining({
+        gridLevels: 15, gridUpperBound: 4000, gridLowerBound: 2800,
+      }));
     });
 
     it('saves grid config when strategy is grid', async () => {
@@ -516,8 +545,12 @@ describe('UI/API endpoint tests', () => {
     });
 
     it('uses case-insensitive address lookup with symbol fallback', async () => {
+      // Address lookup misses → route falls through getDiscoveredAssets (no address match)
+      // → getAssetBySymbol. The post-write re-read (getAssetByAddress) also returns undefined,
+      // so rowToAssetParams runs on the symbol-fallback row via the `?? row` fallback.
       mockDiscoveredAssetQueries.getAssetByAddress.get.mockReturnValue(undefined);
-      mockDiscoveredAssetQueries.getActiveAssets.all.mockReturnValue([ethRow]);
+      mockDiscoveredAssetQueries.getDiscoveredAssets.all.mockReturnValue([]);
+      mockDiscoveredAssetQueries.getAssetBySymbol.get.mockReturnValue(ethRow);
       const res = await req(capturedApp!, 'PUT', '/api/assets/eth/config', {
         strategyType: 'threshold', dropPct: 2, risePct: 3, smaShort: 5, smaLong: 20,
       });
@@ -541,6 +574,24 @@ describe('UI/API endpoint tests', () => {
       });
       expect(res.status).toBe(400);
       expect(res.body.error).toMatch(/smaShort/);
+    });
+  });
+
+  // ══════════════════════════════════════════════════════════════════════════════
+  // 3b. POST /api/assets/:address/enable — full param set reaches the engine
+  // ══════════════════════════════════════════════════════════════════════════════
+
+  describe('POST /api/assets/:address/enable', () => {
+    it('starts the asset loop with the FULL persisted param set (regression: 5-field subset)', async () => {
+      const written = { ...ethRow, strategy: 'grid', grid_levels: 12, sma_use_ema: 1 };
+      mockDiscoveredAssetQueries.getAssetByAddress.get.mockReturnValue(written);
+      const res = await req(capturedApp!, 'POST', '/api/assets/0xeth/enable', {
+        strategyType: 'grid', dropPct: 2, risePct: 3, smaShort: 5, smaLong: 20,
+      });
+      expect(res.status).toBe(200);
+      expect(engine.startAssetLoop).toHaveBeenCalledWith('0xeth', 'ETH', expect.objectContaining({
+        smaUseEma: true, gridLevels: 12,
+      }));
     });
   });
 

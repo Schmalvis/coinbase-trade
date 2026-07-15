@@ -12,7 +12,7 @@ import type { TradeExecutor } from './executor.js';
 import type { RuntimeConfig } from '../core/runtime-config.js';
 import type { PortfolioOptimizer } from './optimizer.js';
 
-interface AssetStrategyParams {
+export interface AssetStrategyParams {
   strategyType: 'threshold' | 'sma' | 'grid' | 'momentum-burst' | 'volatility-breakout' | 'trend-continuation';
   dropPct: number;
   risePct: number;
@@ -24,6 +24,26 @@ interface AssetStrategyParams {
   smaUseEma?: boolean;
   smaVolumeFilter?: boolean;
   smaRsiFilter?: boolean;
+}
+
+/** Single source of truth: DB row → the FULL AssetStrategyParams set.
+ *  Any call site that starts/reloads an asset loop from a discovered_assets row
+ *  MUST use this — passing a hand-built subset caused live strategy instances to
+ *  run with sma flags/grid bounds diverging from the DB until restart. */
+export function rowToAssetParams(row: DiscoveredAssetRow): AssetStrategyParams {
+  return {
+    strategyType: row.strategy,
+    dropPct: row.drop_pct,
+    risePct: row.rise_pct,
+    smaShort: row.sma_short,
+    smaLong: row.sma_long,
+    gridLevels: row.grid_levels,
+    gridUpperBound: row.grid_upper_bound ?? undefined,
+    gridLowerBound: row.grid_lower_bound ?? undefined,
+    smaUseEma: !!row.sma_use_ema,
+    smaVolumeFilter: !!row.sma_volume_filter,
+    smaRsiFilter: !!row.sma_rsi_filter,
+  };
 }
 
 const STRATEGY_KEYS = [
@@ -45,17 +65,7 @@ export class TradingEngine {
     runtimeConfig.subscribeMany([...STRATEGY_KEYS], () => {
       const activeAssets = discoveredAssetQueries.getActiveAssets.all(botState.activeNetwork) as DiscoveredAssetRow[];
       for (const row of activeAssets) {
-        this.reloadAssetConfig(row.address, row.symbol, {
-          strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
-          dropPct: row.drop_pct, risePct: row.rise_pct,
-          smaShort: row.sma_short, smaLong: row.sma_long,
-          gridLevels: row.grid_levels,
-          gridUpperBound: row.grid_upper_bound ?? undefined,
-          gridLowerBound: row.grid_lower_bound ?? undefined,
-          smaUseEma: !!row.sma_use_ema,
-          smaVolumeFilter: !!row.sma_volume_filter,
-          smaRsiFilter: !!row.sma_rsi_filter,
-        });
+        this.reloadAssetConfig(row.address, row.symbol, rowToAssetParams(row));
       }
       logger.info('All asset loops reloaded due to config change');
     });
@@ -78,17 +88,7 @@ export class TradingEngine {
         continue;
       }
       seen.add(row.symbol);
-      this.startAssetLoop(row.address, row.symbol, {
-        strategyType: row.strategy as 'threshold' | 'sma' | 'grid',
-        dropPct: row.drop_pct, risePct: row.rise_pct,
-        smaShort: row.sma_short, smaLong: row.sma_long,
-        gridLevels: row.grid_levels,
-        gridUpperBound: row.grid_upper_bound ?? undefined,
-        gridLowerBound: row.grid_lower_bound ?? undefined,
-        smaUseEma: !!row.sma_use_ema,
-        smaVolumeFilter: !!row.sma_volume_filter,
-        smaRsiFilter: !!row.sma_rsi_filter,
-      });
+      this.startAssetLoop(row.address, row.symbol, rowToAssetParams(row));
     }
     logger.info(`Started ${activeAssets.length} asset loops`);
   }
