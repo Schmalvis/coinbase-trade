@@ -24,6 +24,8 @@ const SESSION_DATE_KEY = 'review_session_date';
 const SESSION_COUNT_KEY = 'review_session_count';
 const MAX_SESSION_CHANGES = 3;
 
+const FETCH_TIMEOUT_MS = 10_000;
+
 export interface ChangeResult {
   accepted: boolean;
   key: string;
@@ -31,6 +33,31 @@ export interface ChangeResult {
   oldValue?: number;
   newValue?: number;
   reason: string;
+}
+
+export interface ApplyChangeOptions {
+  baseUrl?: string;         // default `http://localhost:${process.env.WEB_PORT ?? '8080'}`
+  token?: string;           // default process.env.DASHBOARD_SECRET || 'apply-change'
+  fetchImpl?: typeof fetch; // default globalThis.fetch
+}
+
+// Full current-row shape read before a per-asset write, so we can echo back
+// every field the PUT /api/assets/:address/config endpoint expects (it persists
+// ALL fields on every call — missing sma_* flags would silently default to true).
+interface DiscoveredAssetRowLite {
+  address: string;
+  strategy: string;
+  drop_pct: number;
+  rise_pct: number;
+  sma_short: number;
+  sma_long: number;
+  sma_use_ema: number;
+  sma_volume_filter: number;
+  sma_rsi_filter: number;
+  grid_levels: number;
+  grid_upper_bound: number | null;
+  grid_lower_bound: number | null;
+  grid_manual_override: number;
 }
 
 function getSessionCount(db: Database.Database): { date: string; count: number } {
@@ -48,13 +75,18 @@ function incrementSessionCount(db: Database.Database, today: string, currentCoun
   upsert.run(SESSION_COUNT_KEY, String(currentCount + 1));
 }
 
-export function applyChange(
+export async function applyChange(
   db: Database.Database,
   key: string,
   rawValue: string,
   symbol?: string,
   network?: string,
-): ChangeResult {
+  options: ApplyChangeOptions = {},
+): Promise<ChangeResult> {
+  const baseUrl = options.baseUrl ?? `http://localhost:${process.env.WEB_PORT ?? '8080'}`;
+  const token = options.token ?? (process.env.DASHBOARD_SECRET || 'apply-change');
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+
   const isPerAsset = symbol !== undefined;
 
   if (key === 'DRY_RUN') {
@@ -79,6 +111,7 @@ export function applyChange(
   }
 
   if (!isPerAsset) {
+    // ±20% cap keeps reading the DB directly — reads are not the bug, direct writes are.
     const row = db.prepare(`SELECT value FROM settings WHERE key = ?`).get(key) as { value: string } | undefined;
     const oldValue = row ? parseFloat(row.value) : undefined;
 
@@ -107,26 +140,60 @@ export function applyChange(
       }
     }
 
-    const applyGlobal = db.transaction(() => {
-      db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, datetime('now'))`).run(key, String(newValue));
-      incrementSessionCount(db, today, sessionCount);
-    });
-    applyGlobal();
-    return { accepted: true, key, oldValue, newValue, reason: 'Applied' };
+    // Route the write through the bot's HTTP API so the live in-memory RuntimeConfig
+    // picks it up immediately — writing straight to SQLite (the old behaviour) left
+    // the running bot unaware of the change until its next restart.
+    try {
+      const res = await fetchImpl(`${baseUrl}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ changes: { [key]: newValue } }),
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        incrementSessionCount(db, today, sessionCount);
+        return { accepted: true, key, oldValue, newValue, reason: 'Applied (live)' };
+      }
+      if (res.status === 400) {
+        return { accepted: false, key, oldValue, reason: `Rejected by bot: ${(body as any).error}` };
+      }
+      if (res.status === 401 || res.status === 403) {
+        return { accepted: false, key, reason: `Bot API auth failed (HTTP ${res.status}): ${(body as any).error ?? ''} — check DASHBOARD_SECRET env` };
+      }
+      return { accepted: false, key, reason: `Bot API returned HTTP ${res.status}` };
+    } catch (err: unknown) {
+      // Bot unreachable (not booted, crashed, DNS/timeout, etc). ABSOLUTELY NO fallback
+      // to a direct DB write here — a silent direct write bypassing the live bot's
+      // RuntimeConfig is the exact bug this rewrite fixes. Fail closed instead.
+      const msg = err instanceof Error ? err.message : String(err);
+      return { accepted: false, key, reason: `Bot unreachable at ${baseUrl} (${msg}) — change NOT applied; do not retry with direct DB writes` };
+    }
   }
 
-  // Per-asset change — use column map (not raw key) to eliminate SQL injection risk
+  // Per-asset change
   const net = network ?? 'base-mainnet';
-  const col = PER_ASSET_COLUMNS[key];
-  const asset = db.prepare(
-    `SELECT ${col} as current_val FROM discovered_assets WHERE LOWER(symbol) = LOWER(?) AND network = ?`
-  ).get(symbol!, net) as { current_val: number } | undefined;
 
-  if (!asset) {
-    return { accepted: false, key, symbol, reason: `Asset '${symbol}' not found on ${net}` };
+  // Pre-flight: sma_short/sma_long must be integers, or the server's validateAssetParams
+  // will 400 — catch it here to give a clearer reason and avoid a wasted HTTP round-trip.
+  if ((key === 'sma_short' || key === 'sma_long') && !Number.isInteger(newValue)) {
+    return { accepted: false, key, symbol, reason: `${key} must be an integer` };
   }
 
-  const oldValue = asset.current_val;
+  // status='active' guard: the PUT below unconditionally starts a live trading loop for
+  // the asset (engine.reloadAssetConfig → startAssetLoop), bypassing the promote-route's
+  // C7 promotable gate. Restrict the review agent to already-active assets so it can never
+  // begin ticking a pending/dismissed (potentially spam) token that was never vetted.
+  const row = db.prepare(
+    `SELECT * FROM discovered_assets WHERE LOWER(symbol) = LOWER(?) AND network = ? AND status = 'active'`
+  ).get(symbol!, net) as DiscoveredAssetRowLite | undefined;
+
+  if (!row) {
+    return { accepted: false, key, symbol, reason: `Asset '${symbol}' not found or not active on ${net}` };
+  }
+
+  const col = PER_ASSET_COLUMNS[key];
+  const oldValue = (row as unknown as Record<string, number>)[col];
   if (oldValue !== 0) {
     const lo = Math.min(oldValue * 0.8, oldValue * 1.2);
     const hi = Math.max(oldValue * 0.8, oldValue * 1.2);
@@ -138,38 +205,82 @@ export function applyChange(
     }
   }
 
-  const applyPerAsset = db.transaction(() => {
-    db.prepare(`UPDATE discovered_assets SET ${col} = ? WHERE LOWER(symbol) = LOWER(?) AND network = ?`)
-      .run(newValue, symbol!, net);
-    incrementSessionCount(db, today, sessionCount);
-  });
-  applyPerAsset();
-  return { accepted: true, key, symbol, oldValue, newValue, reason: 'Applied' };
+  // NOTE: the PUT below resolves the asset against botState.activeNetwork server-side,
+  // ignoring the --network CLI flag entirely — a pre-existing network-flag mismatch,
+  // not something this change fixes.
+  const bodyOut: Record<string, unknown> = {
+    strategyType: row.strategy,
+    dropPct: key === 'drop_pct' ? newValue : row.drop_pct,
+    risePct: key === 'rise_pct' ? newValue : row.rise_pct,
+    smaShort: key === 'sma_short' ? newValue : row.sma_short,
+    smaLong: key === 'sma_long' ? newValue : row.sma_long,
+    smaUseEma: row.sma_use_ema === 1,
+    smaVolumeFilter: row.sma_volume_filter === 1,
+    smaRsiFilter: row.sma_rsi_filter === 1,
+  };
+  if (row.strategy === 'grid') {
+    bodyOut.grid_levels = row.grid_levels;
+    if (row.grid_manual_override === 1) {
+      // Only send bounds when override is active — the endpoint recomputes
+      // grid_manual_override from bound presence, so omitting them here
+      // preserves auto-calculated bounds.
+      bodyOut.grid_upper_bound = row.grid_upper_bound;
+      bodyOut.grid_lower_bound = row.grid_lower_bound;
+    }
+  }
+
+  try {
+    const res = await fetchImpl(`${baseUrl}/api/assets/${encodeURIComponent(row.address)}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(bodyOut),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      incrementSessionCount(db, today, sessionCount);
+      return { accepted: true, key, symbol, oldValue, newValue, reason: 'Applied (live)' };
+    }
+    if (res.status === 400) {
+      return { accepted: false, key, symbol, oldValue, reason: `Rejected by bot: ${(body as any).error}` };
+    }
+    if (res.status === 401 || res.status === 403) {
+      return { accepted: false, key, symbol, reason: `Bot API auth failed (HTTP ${res.status}): ${(body as any).error ?? ''} — check DASHBOARD_SECRET env` };
+    }
+    return { accepted: false, key, symbol, reason: `Bot API returned HTTP ${res.status}` };
+  } catch (err: unknown) {
+    // Same fail-closed rule as the global path — never fall back to a direct DB write.
+    const msg = err instanceof Error ? err.message : String(err);
+    return { accepted: false, key, symbol, reason: `Bot unreachable at ${baseUrl} (${msg}) — change NOT applied; do not retry with direct DB writes` };
+  }
 }
 
 // CLI entry point — only runs when executed directly, not when imported
 const isMain = process.argv[1] && import.meta.url.endsWith(process.argv[1].replace(/\\/g, '/'));
 if (isMain) {
-  const args = process.argv.slice(2);
-  function arg(name: string): string | undefined {
-    const i = args.indexOf(`--${name}`);
-    return i !== -1 ? args[i + 1] : undefined;
-  }
+  (async () => {
+    const args = process.argv.slice(2);
+    function arg(name: string): string | undefined {
+      const i = args.indexOf(`--${name}`);
+      return i !== -1 ? args[i + 1] : undefined;
+    }
 
-  const key = arg('key');
-  const value = arg('value');
-  if (!key || !value) {
-    console.error('Usage: node apply-change.js --key KEY --value VALUE [--symbol SYMBOL] [--network NETWORK]');
-    process.exit(1);
-  }
+    const key = arg('key');
+    const value = arg('value');
+    if (!key || !value) {
+      console.error('Usage: node apply-change.js --key KEY --value VALUE [--symbol SYMBOL] [--network NETWORK]');
+      process.exit(1);
+    }
 
-  const dbPath = (process.env.DATA_DIR ?? '/app/data') + '/trades.db';
-  const db = new Database(dbPath);
-  try {
-    const result = applyChange(db, key, value, arg('symbol'), arg('network'));
-    console.log(JSON.stringify(result));
-    process.exit(result.accepted ? 0 : 1);
-  } finally {
-    db.close();
-  }
+    const dbPath = (process.env.DATA_DIR ?? '/app/data') + '/trades.db';
+    const db = new Database(dbPath);
+    db.pragma('busy_timeout = 5000'); // bot writes the same WAL DB concurrently
+    try {
+      const result = await applyChange(db, key, value, arg('symbol'), arg('network'));
+      console.log(JSON.stringify(result));
+      process.exit(result.accepted ? 0 : 1);
+    } finally {
+      db.close();
+    }
+  })();
 }

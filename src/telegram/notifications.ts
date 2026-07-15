@@ -101,10 +101,20 @@ export function flushDigest(): string | null {
   const _ethUsd = (botState.lastBalance ?? 0) * (botState.lastPrice ?? 0);
   const _usdcUsd = botState.lastUsdcBalance ?? 0;
   const portfolioUsd = (todayPnl as any)?.current_usd ?? (_ethUsd + _usdcUsd);
-  const highWater = (todayPnl as any)?.high_water ?? portfolioUsd;
-  const dayChange = portfolioUsd - highWater;
-  const dayChangePct = highWater > 0 ? (dayChange / highWater) * 100 : 0;
+  // True day change vs the day's opening value (same baseline as the risk-guard
+  // daily-loss metric). Falls back to high_water for legacy rows with no open_usd
+  // (degrades to the old drawdown-from-peak number), then to the current value
+  // when there's no daily_pnl row yet (day change reads 0).
+  const openUsd = (todayPnl as any)?.open_usd > 0
+    ? (todayPnl as any).open_usd
+    : ((todayPnl as any)?.high_water ?? portfolioUsd);
+  const dayChange = portfolioUsd - openUsd;
+  const dayChangePct = openUsd > 0 ? (dayChange / openUsd) * 100 : 0;
   const realizedPnl = (todayPnl as any)?.realized_pnl ?? 0;
+  // Residual: absorbs unrealized moves on held positions, plus fees/slippage and
+  // any cross-day entry-price attribution in realized_pnl. Always reconciles:
+  // dayChange === realizedPnl + unrealizedPnl.
+  const unrealizedPnl = dayChange - realizedPnl;
 
   const timeStr = `${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')} UTC`;
 
@@ -117,14 +127,14 @@ export function flushDigest(): string | null {
     lines.push(`No trades were executed since the last digest.`);
   } else {
     if (assetBuys + assetSells > 0) {
-      lines.push(`${assetBuys + assetSells} strategy trade${assetBuys + assetSells > 1 ? 's' : ''} executed (${assetBuys} buy, ${assetSells} sell).`);
+      lines.push(`${assetBuys + assetSells} strategy trade${assetBuys + assetSells > 1 ? 's' : ''} executed today (${assetBuys} buy, ${assetSells} sell).`);
     }
     if (executed.length > 0) {
       const rotWord = executed.length === 1 ? 'rotation' : 'rotations';
-      lines.push(`${executed.length} ${rotWord} executed, purchasing ${boughtStr} and selling ${soldStr}.`);
+      lines.push(`${executed.length} ${rotWord} executed today, purchasing ${boughtStr} and selling ${soldStr}.`);
     }
     if (failed.length > 0) {
-      lines.push(`${failed.length} rotation${failed.length > 1 ? 's were' : ' was'} vetoed or failed.`);
+      lines.push(`${failed.length} rotation${failed.length > 1 ? 's were' : ' was'} vetoed or failed today.`);
     }
   }
 
@@ -135,7 +145,8 @@ export function flushDigest(): string | null {
   lines.push(`Today's P\\&L: *${sign}$${dayChange.toFixed(2)}* (${sign}${dayChangePct.toFixed(1)}%)`);
   if (realizedPnl !== 0) {
     const rSign = realizedPnl >= 0 ? '+' : '';
-    lines.push(`Realized from trades: *${rSign}$${realizedPnl.toFixed(2)}*`);
+    const uSign = unrealizedPnl >= 0 ? '+' : '';
+    lines.push(`Realized: *${rSign}$${realizedPnl.toFixed(2)}* · Unrealized/fees: *${uSign}$${unrealizedPnl.toFixed(2)}*`);
   }
 
   lines.push('');
