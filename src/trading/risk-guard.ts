@@ -138,15 +138,29 @@ export class RiskGuard {
     // Also skip for defensive USDC exits: cash preservation is always valid regardless of
     // estimated gain. Blocking exits to USDC in a falling market is the opposite of risk management.
     if (!proposal.isRebalance && proposal.buySymbol !== 'USDC') {
+      const minGainPct = this.runtimeConfig.get('MIN_ROTATION_GAIN_PCT') as number;
       const minProfitUsd = (this.runtimeConfig.get('MIN_ROTATION_PROFIT_USD') as number | undefined) ?? 0.01;
-      const estimatedProfitUsd = adjustedAmount * (proposal.estimatedGainPct / 100);
-      if (estimatedProfitUsd < minProfitUsd) {
-        this.logDecision('risk_veto', `Profit $${estimatedProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
-        return { approved: false, vetoReason: `Estimated profit $${estimatedProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
+
+      // Net-of-fees gate. `estimatedFeePct` already covers BOTH rotation legs
+      // (DEFAULT_FEE_ESTIMATE_PCT × 2, set at proposal time), so subtracting it here makes
+      // the decision net of the round-trip cost. A rotation must clear its own fees plus a
+      // margin (MIN_ROTATION_GAIN_PCT) — otherwise it churns the book for a net loss even
+      // when the raw score delta looks favourable, which is the fee bleed the earlier
+      // gross-only gate allowed. Defensive USDC exits are exempted above: cash preservation
+      // is valid regardless of estimated gain.
+      const netGainPct = proposal.estimatedGainPct - proposal.estimatedFeePct;
+      if (netGainPct < minGainPct) {
+        this.logDecision('risk_veto', `Net gain ${netGainPct.toFixed(2)}% < min ${minGainPct}% (gross ${proposal.estimatedGainPct.toFixed(2)}% − fees ${proposal.estimatedFeePct.toFixed(2)}%)`);
+        return { approved: false, vetoReason: `Net gain ${netGainPct.toFixed(2)}% below minimum ${minGainPct}% after fees` };
       }
 
-      // Fee-ratio gate removed: estimatedGainPct is a score-based proxy, not a real gain
-      // prediction. Quality is gated by ROTATION_BUY/SELL_THRESHOLD + MIN_ROTATION_SCORE_DELTA.
+      // Absolute dollar floor, also net of fees — blocks tiny rotations whose net gain is
+      // real in % terms but trivial in dollars on a small book.
+      const netProfitUsd = adjustedAmount * (netGainPct / 100);
+      if (netProfitUsd < minProfitUsd) {
+        this.logDecision('risk_veto', `Net profit $${netProfitUsd.toFixed(2)} < min $${minProfitUsd}`);
+        return { approved: false, vetoReason: `Estimated net profit $${netProfitUsd.toFixed(2)} below minimum $${minProfitUsd}` };
+      }
     }
 
     this.logDecision(proposal.isRebalance ? 'rebalance_approved' : 'risk_approved', detail);

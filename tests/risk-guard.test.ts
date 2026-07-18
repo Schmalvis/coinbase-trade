@@ -44,6 +44,7 @@ function makeMockConfig(overrides: Record<string, number> = {}) {
     MAX_POSITION_PCT: 40,
     MAX_ROTATION_PCT: 25,
     MIN_ROTATION_PROFIT_USD: 0.01,
+    MIN_ROTATION_GAIN_PCT: 2,
     ...overrides,
   };
   return { get: (key: string) => defaults[key] } as any;
@@ -107,6 +108,61 @@ describe('RiskGuard', () => {
 
     expect(result.approved).toBe(false);
     expect(result.vetoReason).toContain('rotation cap');
+  });
+
+  // ── Net-of-fees profit gate ──
+
+  it('vetoes when net gain (gross − fees) is below MIN_ROTATION_GAIN_PCT', () => {
+    const guard = new RiskGuard(makeMockConfig({ MIN_ROTATION_GAIN_PCT: 2 }));
+    // gross 3% − fees 2% = 1% net, below the 2% margin → veto
+    const result = guard.checkRotation(
+      baseProposal({ estimatedGainPct: 3, estimatedFeePct: 2 }),
+      'base-sepolia',
+      1000,
+    );
+
+    expect(result.approved).toBe(false);
+    expect(result.vetoReason).toContain('after fees');
+  });
+
+  it('approves when net gain clears fees plus the margin', () => {
+    const guard = new RiskGuard(makeMockConfig({ MIN_ROTATION_GAIN_PCT: 2 }));
+    // gross 5% − fees 2% = 3% net, above the 2% margin → approve
+    const result = guard.checkRotation(
+      baseProposal({ estimatedGainPct: 5, estimatedFeePct: 2 }),
+      'base-sepolia',
+      1000,
+    );
+
+    expect(result.approved).toBe(true);
+  });
+
+  it('exempts defensive USDC exits from the net-of-fees gate', () => {
+    const guard = new RiskGuard(makeMockConfig({ MIN_ROTATION_GAIN_PCT: 2 }));
+    // A liquidation to cash with zero estimated gain and 2% fees would fail the gate,
+    // but exits to USDC bypass profit checks (cash preservation is always valid).
+    const result = guard.checkRotation(
+      baseProposal({ buySymbol: 'USDC', estimatedGainPct: 0, estimatedFeePct: 2 }),
+      'base-sepolia',
+      1000,
+    );
+
+    expect(result.approved).toBe(true);
+  });
+
+  it('vetoes when net dollar profit is below MIN_ROTATION_PROFIT_USD on a small book', () => {
+    // net gain 2.5% clears the % margin, but on a $4 rotation that is $0.10 — below a $0.50 floor
+    const guard = new RiskGuard(
+      makeMockConfig({ MIN_ROTATION_GAIN_PCT: 2, MIN_ROTATION_PROFIT_USD: 0.5 }),
+    );
+    const result = guard.checkRotation(
+      baseProposal({ sellAmount: 4, estimatedGainPct: 4.5, estimatedFeePct: 2, buyTargetWeightPct: 5 }),
+      'base-sepolia',
+      1000,
+    );
+
+    expect(result.approved).toBe(false);
+    expect(result.vetoReason).toContain('net profit');
   });
 
   // ── Position-limit tests ──
