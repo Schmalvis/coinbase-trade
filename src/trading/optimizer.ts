@@ -39,6 +39,35 @@ const CORRELATED_PAIR_BLACKLIST = new Set([
   'CBETH->CBBTC', 'CBBTC->CBETH',
 ]);
 
+// Assets with their own active strategy loop own their trades — the optimizer must not
+// rotate or deploy into them or it causes fee churn with no net position change.
+const SELF_MANAGED_STRATEGIES = new Set(['grid', 'sma', 'momentum-burst', 'volatility-breakout', 'trend-continuation']);
+
+/**
+ * Target-allocation floor selection: pick which asset to deploy excess cash into when the
+ * portfolio sits above its cash cap. Returns the buy symbol, or null when no deploy should
+ * happen — macro gate active (ETH downtrend), USDC already at/under the cash cap, or no
+ * eligible asset (non-USDC, not self-managed, under its position cap, not negatively scored).
+ * Picks the highest-scoring eligible asset. Deploying only into score >= 0 avoids buying into
+ * a decline; the cap-to-target provides the exposure, not a profit signal. Pure for testability.
+ */
+export function selectCashDeployBuy(
+  scores: { symbol: string; score: number; currentWeight: number }[],
+  opts: { maxCashPct: number; maxPosPct: number; selfManaged: Set<string>; macroGateActive: boolean },
+): string | null {
+  if (opts.macroGateActive) return null;
+  const usdc = scores.find(s => s.symbol === 'USDC');
+  if (!usdc || usdc.currentWeight <= opts.maxCashPct) return null;
+  const eligible = scores.filter(s =>
+    s.symbol !== 'USDC' &&
+    !opts.selfManaged.has(s.symbol) &&
+    s.currentWeight < opts.maxPosPct &&
+    s.score >= 0,
+  );
+  if (eligible.length === 0) return null;
+  return [...eligible].sort((a, b) => b.score - a.score)[0].symbol;
+}
+
 export class PortfolioOptimizer {
   private latestScores: OpportunityScore[] = [];
   private _riskOff = false;
@@ -392,9 +421,8 @@ export class PortfolioOptimizer {
     const minDelta = this.runtimeConfig.get('MIN_ROTATION_SCORE_DELTA') as number;
 
     // Exclude self-managed assets from rotation — assets with their own active strategy loop
-    // (grid, sma, momentum-burst, volatility-breakout, trend-continuation) own their own trades.
-    // Allowing the optimizer to also rotate them causes fee churn with no net position change.
-    const SELF_MANAGED_STRATEGIES = new Set(['grid', 'sma', 'momentum-burst', 'volatility-breakout', 'trend-continuation']);
+    // own their own trades (see SELF_MANAGED_STRATEGIES). Allowing the optimizer to also rotate
+    // them causes fee churn with no net position change.
     const selfManagedAssets = new Set(
       (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
         .filter(a => SELF_MANAGED_STRATEGIES.has(a.strategy))
@@ -488,7 +516,6 @@ export class PortfolioOptimizer {
   ): { sell: OpportunityScore; buy: OpportunityScore } | null {
     const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
 
-    const SELF_MANAGED_STRATEGIES = new Set(['grid', 'sma', 'momentum-burst', 'volatility-breakout', 'trend-continuation']);
     const selfManagedAssets = new Set(
       (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
         .filter(a => SELF_MANAGED_STRATEGIES.has(a.strategy))
@@ -512,6 +539,39 @@ export class PortfolioOptimizer {
       `> ${maxPosPct}% limit — rotating excess to USDC`
     );
     return { sell: worstOverCap, buy: usdcScore };
+  }
+
+  /**
+   * Target-allocation floor: when cash exceeds MAX_CASH_PCT, deploy the excess into the
+   * best-scoring eligible asset. This is the only path that redeploys cash without a profit
+   * signal — it exists to stop the portfolio ratcheting to ~90% cash and gives it a target
+   * crypto exposure. Runs only in the normal (non-risk-off, non-macro-gated) branch of tick().
+   * The resulting proposal is flagged isRebalance so it bypasses the profit/fee gates (a
+   * deploy-to-target is not profit-seeking); sizing below respects the position cap and the
+   * per-tick rotation cap.
+   */
+  findCashDeployCandidate(
+    scores: OpportunityScore[],
+    network: string,
+    macroGateActive: boolean,
+  ): { sell: OpportunityScore; buy: OpportunityScore } | null {
+    const maxCashPct = this.runtimeConfig.get('MAX_CASH_PCT') as number;
+    const maxPosPct = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
+    const selfManaged = new Set(
+      (discoveredAssetQueries.getActiveAssets.all(network) as DiscoveredAssetRow[])
+        .filter(a => SELF_MANAGED_STRATEGIES.has(a.strategy))
+        .map(a => a.symbol),
+    );
+    const buySymbol = selectCashDeployBuy(scores, { maxCashPct, maxPosPct, selfManaged, macroGateActive });
+    if (!buySymbol) return null;
+    const sell = scores.find(s => s.symbol === 'USDC');
+    const buy = scores.find(s => s.symbol === buySymbol);
+    if (!sell || !buy) return null;
+    logger.info(
+      `[optimizer] Cash deploy: USDC at ${sell.currentWeight.toFixed(1)}% > ${maxCashPct}% cap ` +
+      `— deploying excess into ${buy.symbol} (score ${buy.score.toFixed(0)})`,
+    );
+    return { sell, buy };
   }
 
   async tick(network: string): Promise<void> {
@@ -695,11 +755,16 @@ export class PortfolioOptimizer {
       logger.info('[optimizer] global macro gate: ETH downtrend — buy candidates restricted to USDC');
     }
 
-    // 6. Find rotation candidate (fall back to rebalance if over-cap with no normal candidate)
+    // 6. Find rotation candidate. Fall back to: (a) rebalance if an asset is over its position
+    // cap, then (b) cash-deploy if the portfolio is over its cash cap (target-allocation floor).
     const rotationCandidate = this.findRotationCandidate(scores, network, totalPortfolioUsd, macroGateActive);
     const rebalanceCandidate = rotationCandidate ? null : this.findRebalanceCandidate(scores, network);
-    const candidate = rotationCandidate ?? rebalanceCandidate;
+    const cashDeployCandidate = (rotationCandidate || rebalanceCandidate)
+      ? null
+      : this.findCashDeployCandidate(scores, network, macroGateActive);
+    const candidate = rotationCandidate ?? rebalanceCandidate ?? cashDeployCandidate;
     const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
+    const isCashDeploy = !rotationCandidate && !rebalanceCandidate && cashDeployCandidate !== null;
 
     if (!candidate) {
       const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
@@ -740,7 +805,11 @@ export class PortfolioOptimizer {
     );
 
     let estimatedGainPct: number;
-    if (divergence.hasData) {
+    if (isCashDeploy) {
+      // Deploying to the target allocation, not chasing a profit signal — no gain estimate,
+      // and exempt from the mean-reversion z-gate (we deploy regardless of price vs its mean).
+      estimatedGainPct = 0;
+    } else if (divergence.hasData) {
       // Block the rotation unless the buy asset is statistically cheap (z < 0) vs the sell asset.
       // Defensive exits to USDC are exempt — in a falling market the sell asset is below its mean
       // (zScore > 0) which is exactly when we want to exit, not stay in.
@@ -759,13 +828,25 @@ export class PortfolioOptimizer {
 
     const sellUsdValue = (botState.assetBalances.get(candidate.sell.symbol) ?? 0) * currentSellPrice;
     const maxPosPctForSizing = this.runtimeConfig.get('MAX_POSITION_PCT') as number;
-    const sellAmount = isRebalance
-      ? Math.max(0, (candidate.sell.currentWeight - maxPosPctForSizing) / 100 * totalPortfolioUsd)
-      : sellUsdValue * ((this.runtimeConfig.get('ROTATION_SIZE_PCT') as number) / 100);
+    let sellAmount: number;
+    if (isCashDeploy) {
+      // Deploy the cash above the target cap, but no more than one MAX_ROTATION_PCT slice per
+      // tick and never enough to push the buy asset past its position cap.
+      const maxCashPct = this.runtimeConfig.get('MAX_CASH_PCT') as number;
+      const maxRotPct = this.runtimeConfig.get('MAX_ROTATION_PCT') as number;
+      const excessCashUsd = Math.max(0, (candidate.sell.currentWeight - maxCashPct) / 100 * totalPortfolioUsd);
+      const perTickCapUsd = (maxRotPct / 100) * totalPortfolioUsd;
+      const roomToPosCapUsd = Math.max(0, (maxPosPctForSizing - candidate.buy.currentWeight) / 100 * totalPortfolioUsd);
+      sellAmount = Math.min(excessCashUsd, perTickCapUsd, roomToPosCapUsd);
+    } else if (isRebalance) {
+      sellAmount = Math.max(0, (candidate.sell.currentWeight - maxPosPctForSizing) / 100 * totalPortfolioUsd);
+    } else {
+      sellAmount = sellUsdValue * ((this.runtimeConfig.get('ROTATION_SIZE_PCT') as number) / 100);
+    }
 
-    // Rebalance excess too small to clear the executor's $2 min-trade floor — skip silently
-    if (isRebalance && sellAmount < 2) {
-      logger.debug(`[optimizer] Rebalance too small ($${sellAmount.toFixed(2)}) — excess below $2 min, waiting`);
+    // Rebalance / cash-deploy excess too small to clear the executor's $2 min-trade floor — skip silently
+    if ((isRebalance || isCashDeploy) && sellAmount < 2) {
+      logger.debug(`[optimizer] ${isCashDeploy ? 'Cash deploy' : 'Rebalance'} too small ($${sellAmount.toFixed(2)}) — below $2 min, waiting`);
       return;
     }
 
@@ -777,7 +858,10 @@ export class PortfolioOptimizer {
       estimatedGainPct,
       estimatedFeePct,
       buyTargetWeightPct: candidate.buy.currentWeight + (sellAmount / (totalPortfolioUsd || 1)) * 100,
-      isRebalance,
+      // Cash-deploy is a rebalance-to-target: flag it so RiskGuard skips the profit/fee gates
+      // (a deploy-to-target is not profit-seeking, and would otherwise be vetoed by the
+      // net-of-fees gate). Sizing above already respects the position and per-tick caps.
+      isRebalance: isRebalance || isCashDeploy,
     };
 
     const decision = this.riskGuard.checkRotation(proposal, network, totalPortfolioUsd);
