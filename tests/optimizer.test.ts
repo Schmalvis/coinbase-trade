@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ── Mock DB modules ──
-const mockInsertRotation = { run: vi.fn() };
+const mockInsertRotation = { run: vi.fn().mockReturnValue({ lastInsertRowid: 1 }) };
 const mockGetTodayRotationCount = { get: vi.fn().mockReturnValue({ cnt: 0 }) };
 const mockGetRecentRotations = { all: vi.fn().mockReturnValue([]) };
 const mockUpdateRotation = { run: vi.fn() };
@@ -13,9 +13,18 @@ const mockGetStuckRotations = { all: vi.fn().mockReturnValue([]) };
 const mockGetActiveAssets = { all: vi.fn().mockReturnValue([]) };
 const mockGetWatchlist = { all: vi.fn().mockReturnValue([]) };
 const mockInsertEvent = { run: vi.fn() };
+const mockRecentPortfolioSnapshots = { all: vi.fn().mockReturnValue([{ portfolio_usd: 200 }]) };
+const mockRecentAssetSnapshots = { all: vi.fn().mockReturnValue([]) };
+const mockTodayRealizedPnl = { get: vi.fn().mockReturnValue({ total: 0 }) };
 
 vi.mock('../src/data/db.js', () => ({
-  queries: { insertEvent: mockInsertEvent },
+  runTransaction: (fn: () => void) => fn(),
+  queries: {
+    insertEvent: mockInsertEvent,
+    recentPortfolioSnapshots: mockRecentPortfolioSnapshots,
+    recentAssetSnapshots: mockRecentAssetSnapshots,
+    todayRealizedPnl: mockTodayRealizedPnl,
+  },
   rotationQueries: {
     insertRotation: mockInsertRotation,
     getTodayRotationCount: mockGetTodayRotationCount,
@@ -200,15 +209,17 @@ describe('PortfolioOptimizer', () => {
         makeMockExecutor(), makeMockConfig({ MIN_ROTATION_SCORE_DELTA: 30 }),
       );
 
+      // SOL, not CBBTC — ETH<->CBBTC is in CORRELATED_PAIR_BLACKLIST (anti-churn) and would
+      // always be skipped regardless of score delta.
       const scores: any[] = [
         { symbol: 'ETH', score: -30, confidence: 1, signals: {}, currentWeight: 50, isHeld: true },
-        { symbol: 'CBBTC', score: 40, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
+        { symbol: 'SOL', score: 40, confidence: 1, signals: {}, currentWeight: 0, isHeld: false },
       ];
 
-      const result = optimizer.findRotationCandidate(scores);
+      const result = optimizer.findRotationCandidate(scores, 'base-sepolia', 200);
       expect(result).not.toBeNull();
       expect(result!.sell.symbol).toBe('ETH');
-      expect(result!.buy.symbol).toBe('CBBTC');
+      expect(result!.buy.symbol).toBe('SOL');
     });
 
     it('returns null when no candidates meet thresholds', () => {
@@ -424,9 +435,9 @@ describe('PortfolioOptimizer', () => {
       expect(mockEmitAlert).toHaveBeenCalledWith(expect.stringContaining('deactivated'));
     });
 
-    it('skips rotation logic when risk-off is active', async () => {
+    it('routes defensive exits through RiskGuard instead of the normal rotation path when risk-off', async () => {
       const strategy = makeMockStrategy({ signal: 'sell', strength: 80, reason: 'bearish' });
-      const riskGuard = makeMockRiskGuard();
+      const riskGuard = makeMockRiskGuard(true);
       const optimizer = new PortfolioOptimizer(
         makeMockCandleService(), strategy, riskGuard,
         makeMockExecutor(), makeMockConfig({ RISK_OFF_THRESHOLD: -50 }),
@@ -435,8 +446,9 @@ describe('PortfolioOptimizer', () => {
       await optimizer.tick('base-sepolia');
       expect(optimizer.isRiskOff).toBe(true);
 
-      // Risk guard should never be called when risk-off
-      expect(riskGuard.checkRotation).not.toHaveBeenCalled();
+      // Risk-off routes its defensive exit through RiskGuard (7642c5a) — it must be called
+      // exactly once, for the risk-off exit, not for the normal rotation-candidate path below it.
+      expect(riskGuard.checkRotation).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -545,6 +557,43 @@ describe('PortfolioOptimizer', () => {
       // Should have attempted a rotation
       const scores = optimizer.getLatestScores();
       expect(scores.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('falls back to the cash-deploy path when the z-gate blocks a momentum-scored rotation', async () => {
+      // USDC sits far above MAX_CASH_PCT (96%) while ETH scores as a strong momentum buy (60),
+      // but ETH is trading ABOVE its 15m mean (1800) at the current price (2000) — the z-gate
+      // blocks "chase the pump" rotations. Before the fix, this returned early with no trade at
+      // all; the fix falls through to the cash-deploy path (target-allocation rebalance, which
+      // is exempt from the z-gate) instead of abandoning the tick.
+      mockAssetBalances.clear();
+      mockAssetBalances.set('ETH', 0.01);  // ~$20 at the mocked $2000 price → ~3.8% weight
+      mockAssetBalances.set('USDC', 500);  // ~96% of portfolio
+
+      const strategy = makeMockStrategy({ signal: 'buy', strength: 60, reason: 'momentum' });
+      const candleService = {
+        getStoredCandles: vi.fn((symbol: string, _network: string, interval: string) => {
+          if (symbol === 'ETH' && interval === '15m') return makeCandleArray(30, { close: 1800 });
+          return makeCandleArray(30); // 1h/24h regime candles — content irrelevant, strategy mock ignores it
+        }),
+      } as any;
+      mockRecentPortfolioSnapshots.all.mockReturnValueOnce([{ portfolio_usd: 520 }]);
+
+      const riskGuard = makeMockRiskGuard(true);
+      const optimizer = new PortfolioOptimizer(
+        candleService, strategy, riskGuard, makeMockExecutor(),
+        makeMockConfig({ MAX_CASH_PCT: 80, MAX_POSITION_PCT: 40, MAX_ROTATION_PCT: 25 }),
+      );
+
+      await optimizer.tick('base-sepolia');
+
+      expect(riskGuard.checkRotation).toHaveBeenCalledTimes(1);
+      const [proposal] = riskGuard.checkRotation.mock.calls[0];
+      expect(proposal.sellSymbol).toBe('USDC');
+      expect(proposal.buySymbol).toBe('ETH');
+      // isRebalance flags the cash-deploy fallback — proves it didn't just take the blocked
+      // momentum candidate's normal (profit-seeking) path.
+      expect(proposal.isRebalance).toBe(true);
+      expect(proposal.estimatedGainPct).toBe(0);
     });
   });
 

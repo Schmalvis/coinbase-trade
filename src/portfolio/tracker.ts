@@ -225,11 +225,17 @@ export async function startPortfolioTracker(
                 queries.insertAssetSnapshot.run({ symbol: row.symbol, price_usd: price, balance: humanBalance });
                 portfolioUsd += humanBalance * price;
                 candleService?.recordSpotPrice(row.symbol, network, price);
-              } else if (humanBalance > 0) {
-                // Held but unpriceable — the total is understated this cycle. Degrade the
-                // poll so we skip the snapshot rather than persist a phantom low.
+              } else if (humanBalance > 0 && row.status === 'active') {
+                // Held but unpriceable — the total is understated this cycle. Only degrade for
+                // 'active' (promoted, actually-traded) assets, where an accurate total matters
+                // for risk-guard decisions. 'pending' discovered tokens are typically unvetted
+                // spam/airdust the user hasn't dismissed yet — letting an unpriceable spam token
+                // sit in 'pending' forever silently starved every portfolio snapshot (and thus
+                // P&L history) since it can never be priced. Log and move on instead.
                 pollDegraded = true;
                 logger.warn(`${row.symbol}: held balance ${humanBalance} but price unavailable — portfolio poll degraded`);
+              } else if (humanBalance > 0) {
+                logger.debug(`${row.symbol}: held balance ${humanBalance} but price unavailable (pending, not yet vetted) — excluded from total, not degrading poll`);
               }
             } catch (err) {
               logger.error(`Failed to price/balance discovered asset ${row.symbol}`, err);

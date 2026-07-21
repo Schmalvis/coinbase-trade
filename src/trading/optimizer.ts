@@ -762,9 +762,9 @@ export class PortfolioOptimizer {
     const cashDeployCandidate = (rotationCandidate || rebalanceCandidate)
       ? null
       : this.findCashDeployCandidate(scores, network, macroGateActive);
-    const candidate = rotationCandidate ?? rebalanceCandidate ?? cashDeployCandidate;
-    const isRebalance = !rotationCandidate && rebalanceCandidate !== null;
-    const isCashDeploy = !rotationCandidate && !rebalanceCandidate && cashDeployCandidate !== null;
+    let candidate = rotationCandidate ?? rebalanceCandidate ?? cashDeployCandidate;
+    let isRebalance = !rotationCandidate && rebalanceCandidate !== null;
+    let isCashDeploy = !rotationCandidate && !rebalanceCandidate && cashDeployCandidate !== null;
 
     if (!candidate) {
       const sellThreshold = this.runtimeConfig.get('ROTATION_SELL_THRESHOLD') as number;
@@ -779,23 +779,17 @@ export class PortfolioOptimizer {
 
     // 7. Estimate fees — multiply by 2 to cover both rotation legs (sell + buy)
     const estimatedFeePct = (this.runtimeConfig.get('DEFAULT_FEE_ESTIMATE_PCT') as number) * 2;
-    const rawScoreDelta = candidate.buy.score - candidate.sell.score;
+    let rawScoreDelta = candidate.buy.score - candidate.sell.score;
 
-    // Derive current prices for the pair (same lookup pattern as the sell-price block below)
-    let currentBuyPrice = 0;
-    let currentSellPrice = 0;
-    if (candidate.buy.symbol === 'ETH') currentBuyPrice = botState.lastPrice ?? 0;
-    else if (candidate.buy.symbol === 'USDC') currentBuyPrice = 1;
-    else {
-      const snap = (queries.recentAssetSnapshots.all(candidate.buy.symbol, 1) as { price_usd: number }[])[0];
-      currentBuyPrice = snap?.price_usd ?? 0;
-    }
-    if (candidate.sell.symbol === 'ETH') currentSellPrice = botState.lastPrice ?? 0;
-    else if (candidate.sell.symbol === 'USDC') currentSellPrice = 1;
-    else {
-      const snap = (queries.recentAssetSnapshots.all(candidate.sell.symbol, 1) as { price_usd: number }[])[0];
-      currentSellPrice = snap?.price_usd ?? 0;
-    }
+    // Derive current prices for a pair (same lookup pattern reused below for the cash-deploy fallback)
+    const priceFor = (symbol: string): number => {
+      if (symbol === 'ETH') return botState.lastPrice ?? 0;
+      if (symbol === 'USDC') return 1;
+      const snap = (queries.recentAssetSnapshots.all(symbol, 1) as { price_usd: number }[])[0];
+      return snap?.price_usd ?? 0;
+    };
+    let currentBuyPrice = priceFor(candidate.buy.symbol);
+    let currentSellPrice = priceFor(candidate.sell.symbol);
 
     // A1: price-ratio z-score divergence gate. Replaces the fabricated `scoreDelta * 0.1`
     // gain estimate that always cleared the profit gate by construction.
@@ -814,13 +808,34 @@ export class PortfolioOptimizer {
       // Defensive exits to USDC are exempt — in a falling market the sell asset is below its mean
       // (zScore > 0) which is exactly when we want to exit, not stay in.
       if (divergence.zScore >= 0 && candidate.buy.symbol !== 'USDC') {
+        // Momentum-scored buys are z>=0 by construction (that's *why* they scored well), so this
+        // gate almost always fires for the optimizer's normal rotation candidate. Rather than
+        // abandoning the tick, fall back to the cash-deploy path (target-allocation rebalance,
+        // not profit-chasing) if the portfolio is still over its cash cap — that path is already
+        // exempt from this gate and has its own position/rotation-size caps.
+        const fallback = this.findCashDeployCandidate(scores, network, macroGateActive);
+        if (!fallback) {
+          logger.info(
+            `PortfolioOptimizer: rotation ${candidate.sell.symbol}→${candidate.buy.symbol} blocked` +
+            ` — no price divergence (z=${divergence.zScore.toFixed(2)})`,
+          );
+          return;
+        }
         logger.info(
           `PortfolioOptimizer: rotation ${candidate.sell.symbol}→${candidate.buy.symbol} blocked` +
-          ` — no price divergence (z=${divergence.zScore.toFixed(2)})`,
+          ` — no price divergence (z=${divergence.zScore.toFixed(2)}); falling back to cash-deploy` +
+          ` ${fallback.sell.symbol}→${fallback.buy.symbol}`,
         );
-        return;
+        candidate = fallback;
+        isCashDeploy = true;
+        isRebalance = false;
+        currentBuyPrice = priceFor(candidate.buy.symbol);
+        currentSellPrice = priceFor(candidate.sell.symbol);
+        rawScoreDelta = candidate.buy.score - candidate.sell.score;
+        estimatedGainPct = 0;
+      } else {
+        estimatedGainPct = divergence.estimatedGainPct;
       }
-      estimatedGainPct = divergence.estimatedGainPct;
     } else {
       // Insufficient price history — fall back to the score-based proxy (don't block).
       estimatedGainPct = rawScoreDelta * 0.1;
