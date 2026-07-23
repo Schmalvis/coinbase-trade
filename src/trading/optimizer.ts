@@ -222,11 +222,17 @@ export class PortfolioOptimizer {
       // price below mean is a GOOD cheap entry — z is already negative, no negation needed.
       const zScore = usdcAsBuy ? -z : z;
 
-      // Favourable moves get +2.5%. Unfavourable directions have no mean-reversion edge —
-      // report a non-positive estimate. The caller's zScore gate blocks those rotations
-      // anyway, but the sign must be correct for test contracts and future fee-gate logic.
+      // Proportional mean-reversion estimate — how far price would move if it snapped back
+      // to its own 24h mean, mirroring the paired-ratio formula below. The prior flat
+      // +2.5%/-1.5% was a hardcoded ceiling below the net-of-fees minimum by construction
+      // (fees ~2%, MIN_ROTATION_GAIN_PCT default 2% => needs >=4% gross), so every
+      // USDC<->asset entry was vetoed regardless of actual divergence magnitude — a
+      // code-level bug (S70-S72 "cash-deploy fee-gate bug"), not a threshold-tuning issue.
       const favourable = usdcAsBuy ? z > 0 : z < 0;
-      const estimatedGainPct = favourable ? 2.5 : -1.5;
+      const magnitudePct = mean > 0 && currentCryptoPrice > 0
+        ? Math.abs((mean / currentCryptoPrice) - 1) * 100
+        : 0;
+      const estimatedGainPct = favourable ? magnitudePct : -magnitudePct;
 
       return { zScore, estimatedGainPct, hasData: true };
     }

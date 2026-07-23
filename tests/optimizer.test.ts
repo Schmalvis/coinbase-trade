@@ -1005,5 +1005,37 @@ describe('PortfolioOptimizer', () => {
       expect(result.zScore).toBeLessThan(0); // ETH is cheap
       expect(result.estimatedGainPct).toBeGreaterThan(0); // positive mean-reversion
     });
+
+    it('scales the USDC-leg gain estimate with divergence magnitude instead of a flat cap', () => {
+      // Regression: the old hardcoded +2.5%/-1.5% meant every USDC<->asset entry was
+      // mathematically vetoed net-of-fees (fees ~2%, MIN_ROTATION_GAIN_PCT 2% => needs
+      // >=4% gross) no matter how far price had actually dropped. A real 6% dip below
+      // mean must now produce a gain estimate proportional to that dip (~6%), not 2.5%.
+      const historicalEthCandles = makePricedCandles(95, 2000, 'ETH').map((c, i) => ({
+        ...c, close: 2000 + (i % 7 - 3) * 5,
+      }));
+      const currentEthCandle = { ...makePricedCandles(1, 1880, 'ETH')[0] }; // 6% below mean
+      const ethCandles = [currentEthCandle, ...historicalEthCandles];
+      const usdcCandles = makePricedCandles(96, 1, 'USDC');
+
+      const mockCandleService = {
+        getStoredCandles: vi.fn().mockImplementation((sym: string) => {
+          if (sym === 'ETH') return ethCandles;
+          if (sym === 'USDC') return usdcCandles;
+          return [];
+        }),
+      } as any;
+
+      const optimizer = new PortfolioOptimizer(
+        mockCandleService,
+        makeMockStrategy({ signal: 'hold', strength: 0, reason: '' }),
+        makeMockRiskGuard(), makeMockExecutor(), makeMockConfig(),
+      );
+
+      const result = optimizer.computePriceRatioDivergence('ETH', 'USDC', 1880, 1, 'base-sepolia');
+      expect(result.hasData).toBe(true);
+      // Old code capped this at 2.5 regardless of dip size; must now track the ~6% dip.
+      expect(result.estimatedGainPct).toBeGreaterThan(4);
+    });
   });
 });
