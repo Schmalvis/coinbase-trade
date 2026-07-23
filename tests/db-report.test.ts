@@ -72,6 +72,24 @@ function makeDb(): Database.Database {
       price_usd REAL NOT NULL DEFAULT 0,
       balance REAL NOT NULL DEFAULT 0
     );
+    CREATE TABLE portfolio_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL DEFAULT (datetime('now')),
+      portfolio_usd REAL NOT NULL DEFAULT 0
+    );
+    CREATE TABLE candles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      symbol TEXT NOT NULL,
+      network TEXT NOT NULL,
+      interval TEXT NOT NULL,
+      open_time TEXT NOT NULL,
+      open REAL NOT NULL DEFAULT 0,
+      high REAL NOT NULL DEFAULT 0,
+      low REAL NOT NULL DEFAULT 0,
+      close REAL NOT NULL DEFAULT 0,
+      volume REAL NOT NULL DEFAULT 0,
+      source TEXT NOT NULL DEFAULT 'coinbase'
+    );
   `);
   (db as any).__dbPath = dbPath;
   return db;
@@ -96,6 +114,29 @@ describe('generateReport', () => {
     expect(report.settings).toEqual({});
     expect(report.assets).toEqual([]);
     expect(report.dailyPnl).toEqual([]);
+    expect(report.dataFreshness.latestPortfolioSnapshotMinutesAgo).toBeNull();
+    expect(report.dataFreshness.assets).toEqual([]);
+    expect(report.dataFreshness.candleSourceMixLast24h).toEqual({});
+  });
+
+  it('reports data freshness for active assets so a dead feed cannot masquerade as a quiet market', () => {
+    db.prepare(`INSERT INTO discovered_assets (address, network, symbol, status)
+      VALUES ('0xeth', 'base-mainnet', 'ETH', 'active')`).run();
+    db.prepare(`INSERT INTO portfolio_snapshots (timestamp, portfolio_usd) VALUES (datetime('now', '-10 minutes'), 176.4)`).run();
+    db.prepare(`INSERT INTO asset_snapshots (timestamp, symbol, price_usd) VALUES (datetime('now', '-10 minutes'), 'ETH', 2000)`).run();
+    db.prepare(`INSERT INTO candles (symbol, network, interval, open_time, source)
+      VALUES ('ETH', 'base-mainnet', '15m', datetime('now', '-15 minutes'), 'coinbase')`).run();
+    db.prepare(`INSERT INTO candles (symbol, network, interval, open_time, source)
+      VALUES ('ETH', 'base-mainnet', '15m', datetime('now', '-30 minutes'), 'synthetic')`).run();
+
+    const report = generateReport(db);
+    expect(report.dataFreshness.latestPortfolioSnapshotMinutesAgo).toBeCloseTo(10, 0);
+    const eth = report.dataFreshness.assets.find(a => a.symbol === 'ETH');
+    expect(eth).toBeDefined();
+    expect(eth!.latestSnapshotMinutesAgo).toBeCloseTo(10, 0);
+    expect(eth!.latestCandle15mMinutesAgo).toBeCloseTo(15, 0);
+    expect(eth!.candle15mCountLast24h).toBe(2);
+    expect(report.dataFreshness.candleSourceMixLast24h).toEqual({ coinbase: 1, synthetic: 1 });
   });
 
   it('includes only non-dry-run trades from last 24h', () => {

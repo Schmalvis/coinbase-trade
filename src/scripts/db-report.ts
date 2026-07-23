@@ -51,6 +51,22 @@ export interface DailyPnlRow {
   rotations: number;
 }
 
+export interface AssetFreshness {
+  symbol: string;
+  network: string;
+  latestSnapshotMinutesAgo: number | null;
+  latestCandle15mMinutesAgo: number | null;
+  candle15mCountLast24h: number;
+}
+
+export interface DataFreshness {
+  // null means no portfolio_snapshots row exists at all (never polled successfully)
+  latestPortfolioSnapshotMinutesAgo: number | null;
+  assets: AssetFreshness[];
+  // e.g. { coinbase: 90, dex: 4, synthetic: 2 } across all active assets, last 24h of 15m candles
+  candleSourceMixLast24h: Record<string, number>;
+}
+
 export interface ReportData {
   generatedAt: string;
   last24hTrades: TradeRow[];
@@ -59,6 +75,7 @@ export interface ReportData {
   settings: Record<string, string>;
   assets: AssetRow[];
   dailyPnl: DailyPnlRow[];
+  dataFreshness: DataFreshness;
 }
 
 export function generateReport(db: Database.Database): ReportData {
@@ -111,6 +128,60 @@ export function generateReport(db: Database.Database): ReportData {
     LIMIT 7
   `).all() as DailyPnlRow[]).reverse();
 
+  // Data-freshness pre-flight: distinguishes "quiet because no signals" from "quiet because
+  // blind" (dead price feed, stalled candle ingest, degraded portfolio poll). See
+  // wiki/code-fixes-needed.md — three consecutive nights of "0 rotations" were correctly
+  // traced to a code bug, but nothing forced that check first; a dead feed would look
+  // identical in Steps 3-4 without this.
+  const portfolioFreshnessRow = db.prepare(`
+    SELECT (julianday('now') - julianday(MAX(timestamp))) * 24 * 60 AS minutes_ago
+    FROM portfolio_snapshots
+  `).get() as { minutes_ago: number | null };
+
+  const assetFreshness = db.prepare(`
+    SELECT
+      da.symbol,
+      da.network,
+      (SELECT (julianday('now') - julianday(MAX(a.timestamp))) * 24 * 60
+         FROM asset_snapshots a WHERE a.symbol = da.symbol) AS latest_snapshot_minutes_ago,
+      (SELECT (julianday('now') - julianday(MAX(c.open_time))) * 24 * 60
+         FROM candles c WHERE c.symbol = da.symbol AND c.network = da.network AND c.interval = '15m'
+      ) AS latest_candle_15m_minutes_ago,
+      (SELECT COUNT(*) FROM candles c
+         WHERE c.symbol = da.symbol AND c.network = da.network AND c.interval = '15m'
+           AND datetime(c.open_time) >= datetime('now', '-24 hours')
+      ) AS candle_15m_count_last_24h
+    FROM discovered_assets da
+    WHERE da.status = 'active'
+    ORDER BY da.symbol
+  `).all() as Array<{
+    symbol: string; network: string;
+    latest_snapshot_minutes_ago: number | null;
+    latest_candle_15m_minutes_ago: number | null;
+    candle_15m_count_last_24h: number;
+  }>;
+
+  const sourceMixRows = db.prepare(`
+    SELECT source, COUNT(*) AS n
+    FROM candles
+    WHERE interval = '15m' AND datetime(open_time) >= datetime('now', '-24 hours')
+    GROUP BY source
+  `).all() as Array<{ source: string; n: number }>;
+  const candleSourceMixLast24h: Record<string, number> = {};
+  for (const row of sourceMixRows) candleSourceMixLast24h[row.source] = row.n;
+
+  const dataFreshness: DataFreshness = {
+    latestPortfolioSnapshotMinutesAgo: portfolioFreshnessRow?.minutes_ago ?? null,
+    assets: assetFreshness.map(r => ({
+      symbol: r.symbol,
+      network: r.network,
+      latestSnapshotMinutesAgo: r.latest_snapshot_minutes_ago,
+      latestCandle15mMinutesAgo: r.latest_candle_15m_minutes_ago,
+      candle15mCountLast24h: r.candle_15m_count_last_24h,
+    })),
+    candleSourceMixLast24h,
+  };
+
   return {
     generatedAt: new Date().toISOString(),
     last24hTrades,
@@ -119,6 +190,7 @@ export function generateReport(db: Database.Database): ReportData {
     settings,
     assets,
     dailyPnl,
+    dataFreshness,
   };
 }
 
